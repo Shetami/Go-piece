@@ -1,0 +1,116 @@
+---
+import type { CollectionEntry } from 'astro:content'
+import type { MarkdownHeading } from 'astro'
+import { getCollection } from 'astro:content'
+import BaseLayout from './BaseLayout.astro'
+import { COURSES } from '../data/courses.ts'
+import { termIdsIn } from '../lib/terms.ts'
+
+interface Props {
+  entry: CollectionEntry<'lectures'>
+  headings: MarkdownHeading[]
+}
+
+const { entry, headings } = Astro.props
+const { title, description, minutes, tags, updated } = entry.data
+const courseId = entry.id.split('/')[0] ?? ''
+const course = COURSES.find((c) => c.id === courseId)
+
+const siblings = (await getCollection('lectures', (e) => !e.data.draft && e.id.startsWith(`${courseId}/`))).sort(
+  (a, b) => a.data.order - b.data.order,
+)
+const idx = siblings.findIndex((e) => e.id === entry.id)
+const prev = idx > 0 ? siblings[idx - 1] : undefined
+const next = idx >= 0 ? siblings[idx + 1] : undefined
+
+const glossary = await getCollection('glossary')
+const termIds = termIdsIn(entry.body)
+const terms = termIds.map((id) => glossary.find((g) => g.id === id)).filter((g) => g !== undefined)
+
+const toc = headings.filter((h) => h.depth === 2)
+---
+
+<BaseLayout title={title} description={description}>
+  <div class="lg:grid lg:grid-cols-[minmax(0,1fr)_220px] lg:gap-12">
+    <article data-pagefind-body>
+      <nav class="text-sm text-muted mb-4">
+        <a href="/lectures/" class="hover:text-ink">Лекции</a>
+        {course && <span> / {course.title}</span>}
+      </nav>
+      <h1 class="text-3xl md:text-4xl font-bold tracking-tight leading-tight mb-3">{title}</h1>
+      <p class="text-lg text-muted max-w-[65ch] mb-3">{description}</p>
+      <p class="text-sm text-muted flex flex-wrap gap-x-4 gap-y-1 mb-10" data-pagefind-ignore>
+        {minutes && <span>{minutes} мин чтения</span>}
+        {updated && <span>обновлено {updated.toLocaleDateString('ru-RU')}</span>}
+        {tags.map((t) => <span>#{t}</span>)}
+      </p>
+
+      <div class="prose prose-lg dark:prose-invert">
+        <slot />
+      </div>
+
+      {
+        terms.length > 0 && (
+          <section class="mt-16 pt-8 border-t border-line" data-pagefind-ignore>
+            <h2 class="text-xl font-bold mb-4">Термины этой лекции</h2>
+            <dl class="grid sm:grid-cols-2 gap-x-8 gap-y-4">
+              {terms.map((t) => (
+                <div>
+                  <dt>
+                    <a href={`/glossary/${t.id}/`} class="font-semibold text-accent">
+                      {t.data.title}
+                    </a>
+                  </dt>
+                  <dd class="text-sm text-muted mt-0.5">{t.data.short}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        )
+      }
+
+      <nav class="mt-12 grid sm:grid-cols-2 gap-4" data-pagefind-ignore>
+        {
+          prev ? (
+            <a href={`/lectures/${prev.id}/`} class="block rounded-xl border border-line p-4 hover:border-muted">
+              <span class="text-xs text-muted">← предыдущая</span>
+              <span class="block font-semibold text-ink">{prev.data.title}</span>
+            </a>
+          ) : (
+            <span />
+          )
+        }
+        {
+          next && (
+            <a
+              href={`/lectures/${next.id}/`}
+              class="block rounded-xl border border-line p-4 hover:border-muted sm:text-right"
+            >
+              <span class="text-xs text-muted">следующая →</span>
+              <span class="block font-semibold text-ink">{next.data.title}</span>
+            </a>
+          )
+        }
+      </nav>
+    </article>
+
+    {
+      toc.length > 0 && (
+        <aside class="hidden lg:block" data-pagefind-ignore>
+          <nav class="sticky top-24 text-sm">
+            <p class="text-xs uppercase tracking-wider text-muted font-semibold mb-3">Содержание</p>
+            <ol class="space-y-2 border-l border-line">
+              {toc.map((h) => (
+                <li>
+                  <a href={`#${h.slug}`} class="block pl-3 -ml-px border-l border-transparent text-muted hover:text-ink hover:border-ink">
+                    {h.text}
+                  </a>
+                </li>
+              ))}
+            </ol>
+          </nav>
+        </aside>
+      )
+    }
+  </div>
+</BaseLayout>

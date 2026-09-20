@@ -1,0 +1,54 @@
+---
+/**
+ * Вопрос «предскажи поведение». Сначала читатель выбирает ответ, потом видит разбор.
+ * Разбор — это слот: внутри можно писать обычный MDX, ставить <Term> и ссылки.
+ */
+interface Props {
+  question: string
+  options: string[]
+  /** Индекс правильного варианта, с нуля. */
+  answer: number
+}
+
+const { question, options, answer } = Astro.props
+if (answer < 0 || answer >= options.length) {
+  throw new Error(`<Predict>: answer=${answer} вне диапазона вариантов «${question}»`)
+}
+---
+
+<div class="predict not-prose" data-answer={answer}>
+  <div class="predict-kicker">Предскажите</div>
+  <p class="predict-q">{question}</p>
+  <div class="predict-options">
+    {
+      options.map((o, i) => (
+        <button type="button" class="predict-option" data-i={i}>
+          {o}
+        </button>
+      ))
+    }
+  </div>
+  <div class="predict-answer prose" hidden>
+    <slot />
+  </div>
+</div>
+
+<script>
+  for (const box of document.querySelectorAll<HTMLElement>('.predict')) {
+    const right = Number(box.dataset.answer)
+    const buttons = [...box.querySelectorAll<HTMLButtonElement>('.predict-option')]
+    const answer = box.querySelector<HTMLElement>('.predict-answer')
+    for (const btn of buttons) {
+      btn.addEventListener('click', () => {
+        const picked = Number(btn.dataset.i)
+        for (const b of buttons) {
+          b.disabled = true
+          const i = Number(b.dataset.i)
+          if (i === right) b.classList.add('is-right')
+          else if (i === picked) b.classList.add('is-wrong')
+        }
+        if (answer) answer.hidden = false
+      })
+    }
+  }
+</script>

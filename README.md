@@ -1,2 +1,55 @@
 # Go-piece
-This project is an interactive display featuring various technologies, allowing for a detailed visual examination of how each technology operates across different use cases.
+
+Понятные лекции по технологиям с интерактивными стендами. Первый курс — рантайм Go, первая лекция — планировщик (G, M, P).
+
+Сайт статический: Astro + MDX + React-острова + Tailwind, поиск — Pagefind. Бэкенда нет.
+
+## Запуск
+
+```sh
+pnpm install
+pnpm dev        # http://localhost:4321
+pnpm test       # unit-тесты движка и разборов
+pnpm build      # сборка в dist/ + индекс поиска
+pnpm preview    # посмотреть собранный сайт (поиск работает только здесь)
+pnpm demo skew-and-stealing   # текстовый прогон сценария в терминале
+```
+
+Нужен Node 20+ (в `mise.toml` закреплены Node 24 и pnpm 10).
+
+## Устройство
+
+```
+src/
+  content.config.ts            схемы коллекций lectures и glossary
+  content/
+    lectures/<курс>/<тема>.mdx лекции; id = путь, курс = первый сегмент
+    glossary/<id>.mdx          справочник: один термин — один файл
+  components/
+    content/                   Term, Predict, Callout — доступны в лекциях без import
+    stands/gmp/
+      engine/                  модель планировщика: чистый TS, без DOM, с тестами
+      explain/                 разбор событий: текст привязан к ТИПУ события
+      ui/                      React-остров: проекция снимка + лента событий
+      GmpStand.astro           обёртка для MDX: подтягивает термины, проверяет сценарий
+  data/courses.ts              курсы и анонсы будущих тем
+  pages/                       лекции, справочник, лаборатория, поиск
+```
+
+Главное правило — **движок отделён от отрисовки**. `Simulation` прогоняет сценарий по тикам и хранит полный снимок мира на каждом тике. UI только двигает курсор по этой истории. Отсюда пауза, шаг назад, перемотка и ссылка на прогон в адресе. Объяснения привязаны к типам событий, а не к кадрам.
+
+## Как добавить…
+
+**Термин.** Файл `src/content/glossary/<id>.mdx` с полями `title`, `short` (одна строка для подсказки), `category`, `related`. В лекции: `<Term id="<id>" />` или `<Term id="<id>">своя подпись</Term>`. Опечатка в id роняет сборку.
+
+**Лекцию.** Файл `src/content/lectures/<курс>/<тема>.mdx` с `title`, `description`, `order`. В тексте доступны `<Term>`, `<Predict>`, `<Callout>`, `<GmpStand scenario="…" />`. Страница, навигация, оглавление и список терминов появятся сами. Из `planned` в `src/data/courses.ts` уберите анонс этой темы.
+
+**Сценарий стенда.** Объект `Scenario` в `engine/scenarios.ts` и в массиве `SCENARIOS`. Поле `claim` обязательно: одна мысль, которую сценарий доказывает. Утверждение из `claim` стоит закрепить тестом в `engine.test.ts`.
+
+**Новый тип события.** Добавить в `EventType` и `EVENT_IMPORTANCE`, затем разбор в `explain/events.ts`. Без разбора TypeScript сборку не пропустит, а тест проверит, что термины из разбора есть в справочнике.
+
+## Деплой
+
+Vercel: импортировать репозиторий, настройки подхватятся из `vercel.json`. Каждый push в `main` публикует сайт, каждая ветка получает превью-ссылку.
+
+Если адрес будет не `go-piece.vercel.app`, поправьте `site` в `astro.config.mjs`.

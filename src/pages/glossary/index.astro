@@ -1,0 +1,87 @@
+---
+import { getCollection } from 'astro:content'
+import BaseLayout from '../../layouts/BaseLayout.astro'
+
+const terms = (await getCollection('glossary')).sort((a, b) => a.data.title.localeCompare(b.data.title, 'ru'))
+const categories = [...new Set(terms.map((t) => t.data.category))].sort((a, b) => a.localeCompare(b, 'ru'))
+---
+
+<BaseLayout title="Справочник" description="Определения терминов из лекций: коротко, развёрнуто и со связями.">
+  <h1 class="text-3xl font-bold tracking-tight mb-2">Справочник</h1>
+  <p class="text-muted mb-8 max-w-2xl">
+    Каждый термин — одна строка определения, развёрнутое объяснение и ссылки туда, где он встречается. В тексте
+    лекций термины подчёркнуты пунктиром: наведите, чтобы увидеть определение.
+  </p>
+
+  <div class="flex flex-wrap gap-2 items-center mb-8">
+    <input
+      id="gl-filter"
+      type="search"
+      placeholder="Фильтр: runq, вытеснение, sysmon…"
+      class="w-full sm:w-80 rounded-lg border border-line bg-surface px-3 py-2 text-sm"
+      aria-label="Фильтр терминов"
+    />
+    <button type="button" class="btn gl-cat" data-cat="" aria-pressed="true">все</button>
+    {
+      categories.map((c) => (
+        <button type="button" class="btn gl-cat" data-cat={c} aria-pressed="false">
+          {c}
+        </button>
+      ))
+    }
+  </div>
+
+  <ul class="grid md:grid-cols-2 gap-x-10 gap-y-5 max-w-5xl" id="gl-list">
+    {
+      terms.map((t) => (
+        <li
+          data-cat={t.data.category}
+          data-text={[t.data.title, t.id, t.data.short, ...t.data.aliases].join(' ').toLowerCase()}
+        >
+          <a href={`/glossary/${t.id}/`} class="font-semibold text-ink hover:text-accent">
+            {t.data.title}
+          </a>
+          <span class="ml-2 text-xs text-muted">{t.data.category}</span>
+          <p class="text-sm text-muted mt-0.5">{t.data.short}</p>
+        </li>
+      ))
+    }
+  </ul>
+  <p id="gl-empty" class="text-muted" hidden>Ничего не нашлось.</p>
+</BaseLayout>
+
+<style>
+  .gl-cat[aria-pressed='true'] {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+</style>
+
+<script>
+  const input = document.getElementById('gl-filter') as HTMLInputElement | null
+  const items = [...document.querySelectorAll<HTMLElement>('#gl-list > li')]
+  const buttons = [...document.querySelectorAll<HTMLButtonElement>('.gl-cat')]
+  const empty = document.getElementById('gl-empty')
+  let cat = ''
+
+  function apply() {
+    const q = (input?.value ?? '').trim().toLowerCase()
+    let shown = 0
+    for (const li of items) {
+      const ok = (!cat || li.dataset.cat === cat) && (!q || (li.dataset.text ?? '').includes(q))
+      li.hidden = !ok
+      if (ok) shown++
+    }
+    if (empty) empty.hidden = shown > 0
+  }
+
+  input?.addEventListener('input', apply)
+  for (const b of buttons) {
+    b.addEventListener('click', () => {
+      cat = b.dataset.cat ?? ''
+      for (const x of buttons) x.setAttribute('aria-pressed', String(x === b))
+      apply()
+    })
+  }
+</script>

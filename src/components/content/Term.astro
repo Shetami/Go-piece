@@ -1,0 +1,25 @@
+---
+import { getEntry } from 'astro:content'
+
+/**
+ * Термин в тексте лекции: подчёркнут, по наведению — определение, по клику — страница справочника.
+ * Работает без JS. Если id нет в справочнике, сборка падает: битых ссылок на термины быть не может.
+ *
+ *   <Term id="work-stealing" />                 — подпись берётся из title термина
+ *   <Term id="work-stealing">крадёт</Term>      — своя подпись
+ */
+interface Props {
+  id: string
+}
+
+const { id } = Astro.props
+const entry = await getEntry('glossary', id)
+if (!entry) {
+  throw new Error(`<Term id="${id}">: такого термина нет в src/content/glossary`)
+}
+---
+
+<span class="term"><a href={`/glossary/${id}/`}><slot>{entry.data.title}</slot></a><span
+    class="term-tip"
+    role="tooltip"
+    data-pagefind-ignore><b>{entry.data.title}</b>{entry.data.short}</span></span>

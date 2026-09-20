@@ -1,0 +1,61 @@
+---
+import { getCollection } from 'astro:content'
+import BaseLayout from '../layouts/BaseLayout.astro'
+import { COURSES } from '../data/courses.ts'
+import { SITE } from '../data/site.ts'
+
+const lectures = (await getCollection('lectures', (e) => !e.data.draft)).sort((a, b) => a.data.order - b.data.order)
+const termCount = (await getCollection('glossary')).length
+---
+
+<BaseLayout title={SITE.name}>
+  <section class="max-w-3xl mb-16">
+    <h1 class="text-4xl md:text-5xl font-bold tracking-tight leading-[1.1] mb-5">
+      Как устроено то, чем вы пользуетесь каждый день
+    </h1>
+    <p class="text-lg text-muted mb-8">
+      Лекции, где текст объясняет, а стенд показывает. Каждый стенд — настоящая пошаговая модель: её можно
+      остановить, отмотать назад, покрутить настройки и посмотреть, почему система поступила именно так.
+    </p>
+    <div class="flex flex-wrap gap-3">
+      <a href="/lectures/go-runtime/scheduler/" class="btn btn-primary !px-4 !py-2">Начать с планировщика Go</a>
+      <a href="/lab/gmp/" class="btn !px-4 !py-2">Открыть стенд</a>
+      <a href="/glossary/" class="btn !px-4 !py-2">Справочник · {termCount}</a>
+    </div>
+  </section>
+
+  {
+    COURSES.map((course) => {
+      const own = lectures.filter((l) => l.id.startsWith(`${course.id}/`))
+      return (
+        <section class="mb-14">
+          <h2 class="text-2xl font-bold mb-2">{course.title}</h2>
+          <p class="text-muted max-w-3xl mb-6">{course.description}</p>
+          <ol class="grid md:grid-cols-2 gap-4">
+            {own.map((l, i) => (
+              <li>
+                <a
+                  href={`/lectures/${l.id}/`}
+                  class="block h-full rounded-xl border border-line bg-surface p-5 hover:border-muted transition-colors"
+                >
+                  <span class="text-xs font-semibold text-accent">Лекция {i + 1}</span>
+                  <span class="block text-lg font-semibold mt-1 mb-2 text-ink">{l.data.title}</span>
+                  <span class="block text-sm text-muted">{l.data.description}</span>
+                </a>
+              </li>
+            ))}
+            {course.planned.map((p) => (
+              <li>
+                <div class="h-full rounded-xl border border-dashed border-line p-5">
+                  <span class="text-xs font-semibold text-muted">Скоро</span>
+                  <span class="block text-lg font-semibold mt-1 mb-2 text-muted">{p.title}</span>
+                  <span class="block text-sm text-muted">{p.blurb}</span>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )
+    })
+  }
+</BaseLayout>

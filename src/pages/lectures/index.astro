@@ -1,0 +1,44 @@
+---
+import { getCollection } from 'astro:content'
+import BaseLayout from '../../layouts/BaseLayout.astro'
+import { COURSES } from '../../data/courses.ts'
+
+const lectures = (await getCollection('lectures', (e) => !e.data.draft)).sort((a, b) => a.data.order - b.data.order)
+---
+
+<BaseLayout title="Лекции">
+  <h1 class="text-3xl font-bold tracking-tight mb-10">Лекции</h1>
+  {
+    COURSES.map((course) => (
+      <section class="mb-12 max-w-3xl">
+        <h2 class="text-xl font-bold mb-1">{course.title}</h2>
+        <p class="text-muted mb-5">{course.description}</p>
+        <ol class="space-y-3">
+          {lectures
+            .filter((l) => l.id.startsWith(`${course.id}/`))
+            .map((l, i) => (
+              <li class="flex gap-4">
+                <span class="text-muted font-mono text-sm pt-0.5 w-6 shrink-0">{String(i + 1).padStart(2, '0')}</span>
+                <div>
+                  <a href={`/lectures/${l.id}/`} class="font-semibold text-ink hover:text-accent">
+                    {l.data.title}
+                  </a>
+                  <p class="text-sm text-muted">{l.data.description}</p>
+                </div>
+              </li>
+            ))}
+          {course.planned.map((p) => (
+            <li class="flex gap-4 opacity-70">
+              <span class="text-muted text-sm pt-0.5 w-6 shrink-0">—</span>
+              <div>
+                <span class="font-semibold text-muted">{p.title}</span>
+                <span class="ml-2 text-xs rounded-full border border-line px-2 py-0.5 text-muted">скоро</span>
+                <p class="text-sm text-muted">{p.blurb}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      </section>
+    ))
+  }
+</BaseLayout>

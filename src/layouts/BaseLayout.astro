@@ -1,0 +1,108 @@
+---
+import '../styles/global.css'
+import { SITE } from '../data/site.ts'
+
+interface Props {
+  title: string
+  description?: string
+  /** Широкая страница (лаборатория) — без ограничения ширины колонки. */
+  wide?: boolean
+}
+
+const { title, description = SITE.tagline, wide = false } = Astro.props
+const fullTitle = title === SITE.name ? title : `${title} — ${SITE.name}`
+const path = Astro.url.pathname
+
+const nav = [
+  { href: '/lectures/', label: 'Лекции' },
+  { href: '/glossary/', label: 'Справочник' },
+  { href: '/lab/', label: 'Лаборатория' },
+  { href: '/search/', label: 'Поиск' },
+]
+---
+
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{fullTitle}</title>
+    <meta name="description" content={description} />
+    <meta property="og:title" content={fullTitle} />
+    <meta property="og:description" content={description} />
+    <link rel="icon" href="/favicon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <script is:inline>
+      ;(() => {
+        let t = null
+        try {
+          t = localStorage.getItem('theme')
+        } catch {}
+        const dark = t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches
+        document.documentElement.classList.toggle('dark', dark)
+      })()
+    </script>
+  </head>
+  <body class="min-h-screen flex flex-col">
+    <header class="border-b border-line bg-bg/90 backdrop-blur sticky top-0 z-40">
+      <div class="mx-auto max-w-6xl px-4 h-14 flex items-center gap-6">
+        <a href="/" class="font-bold tracking-tight text-ink no-underline flex items-center gap-2">
+          <img src="/logo.png" alt="" width="28" height="28" class="size-7 shrink-0" />
+          {SITE.name}
+        </a>
+        <nav class="flex gap-1 text-sm overflow-x-auto">
+          {
+            nav.map((n) => (
+              <a
+                href={n.href}
+                class:list={[
+                  'px-2.5 py-1.5 rounded-md no-underline whitespace-nowrap',
+                  path.startsWith(n.href) ? 'text-ink bg-surface-2' : 'text-muted hover:text-ink',
+                ]}
+              >
+                {n.label}
+              </a>
+            ))
+          }
+        </nav>
+        <button
+          id="theme-toggle"
+          type="button"
+          class="ml-auto btn-ghost"
+          aria-label="Переключить тему"
+          title="Светлая / тёмная тема"
+        >
+          <span class="dark:hidden">☾</span><span class="hidden dark:inline">☀</span>
+        </button>
+      </div>
+    </header>
+
+    <main class:list={['flex-1 w-full mx-auto px-4 py-10', wide ? 'max-w-7xl' : 'max-w-6xl']}>
+      <slot />
+    </main>
+
+    <footer class="border-t border-line text-sm text-muted">
+      <div class="mx-auto max-w-6xl px-4 py-6 flex flex-wrap gap-x-6 gap-y-2 justify-between">
+        <span>{SITE.name} — стенды это модели, а не эмуляторы: где они упрощают, это сказано явно.</span>
+        <a href="https://github.com/golang/go/tree/master/src/runtime" class="text-muted hover:text-ink">
+          исходники рантайма Go
+        </a>
+      </div>
+    </footer>
+
+    <script>
+      document.getElementById('theme-toggle')?.addEventListener('click', () => {
+        const dark = document.documentElement.classList.toggle('dark')
+        try {
+          localStorage.setItem('theme', dark ? 'dark' : 'light')
+        } catch {}
+      })
+    </script>
+  </body>
+</html>

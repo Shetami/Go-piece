@@ -1,0 +1,41 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro'
+---
+
+<BaseLayout title="Поиск">
+  <h1 class="text-3xl font-bold tracking-tight mb-6">Поиск</h1>
+  <div id="search" class="max-w-3xl"></div>
+  <noscript><p class="text-muted">Поиск работает с включённым JavaScript.</p></noscript>
+  <p id="search-dev" class="text-muted max-w-2xl" hidden>
+    Индекс поиска строится при сборке: запустите <code>pnpm build && pnpm preview</code>.
+  </p>
+</BaseLayout>
+
+<link rel="stylesheet" href="/pagefind/pagefind-ui.css" />
+<style is:global>
+  #search {
+    --pagefind-ui-primary: var(--accent);
+    --pagefind-ui-text: var(--ink);
+    --pagefind-ui-background: var(--surface);
+    --pagefind-ui-border: var(--line);
+    --pagefind-ui-tag: var(--surface-2);
+    --pagefind-ui-font: var(--font-sans);
+  }
+</style>
+
+<script is:inline>
+  const s = document.createElement('script')
+  s.src = '/pagefind/pagefind-ui.js'
+  s.onload = () => {
+    // eslint-disable-next-line no-undef
+    new PagefindUI({
+      element: '#search',
+      showSubResults: true,
+      translations: { placeholder: 'Горутина, work stealing, sysmon…' },
+    })
+  }
+  s.onerror = () => {
+    document.getElementById('search-dev').hidden = false
+  }
+  document.head.appendChild(s)
+</script>

@@ -1,0 +1,19 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro'
+import GmpStand from '../../components/stands/gmp/GmpStand.astro'
+---
+
+<BaseLayout title="Стенд: планировщик Go" description="Пошаговая модель планировщика Go: G, M, P, очереди, sysmon, netpoller." wide>
+  <nav class="text-sm text-muted mb-4">
+    <a href="/lab/" class="hover:text-ink">Лаборатория</a> / Планировщик Go
+  </nav>
+  <div class="flex flex-wrap items-baseline justify-between gap-4 mb-2">
+    <h1 class="text-3xl font-bold tracking-tight">Планировщик Go</h1>
+    <a href="/lectures/go-runtime/scheduler/" class="text-sm text-accent">читать лекцию →</a>
+  </div>
+  <p class="text-muted max-w-3xl">
+    Пробел — пуск и пауза, стрелки — шаг, Shift+стрелки — 10 шагов. Клик по событию открывает разбор. Всё, что вы
+    меняете, сохраняется в адресе: ссылкой можно поделиться.
+  </p>
+  <GmpStand scenario="calm-start" mode="lab" />
+</BaseLayout>
