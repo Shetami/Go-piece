@@ -1,6 +1,6 @@
 # Go-piece
 
-Понятные лекции по технологиям с интерактивными стендами. Первый курс — рантайм Go: планировщик (G, M, P) и сборщик мусора.
+Понятные лекции по технологиям с интерактивными стендами. Первый курс — рантайм Go: планировщик (G, M, P), сборщик мусора и память.
 
 Сайт статический: Astro + MDX + React-острова + Tailwind, поиск — Pagefind. Бэкенда нет.
 
@@ -14,6 +14,7 @@ pnpm build      # сборка в dist/ + индекс поиска
 pnpm preview    # посмотреть собранный сайт (поиск работает только здесь)
 pnpm demo skew-and-stealing   # текстовый прогон сценария планировщика
 pnpm demo:gc write-barrier    # то же для сборщика мусора
+pnpm demo:mem contention      # и для аллокатора
 ```
 
 Нужен Node 20+ (в `mise.toml` закреплены Node 24 и pnpm 10).
@@ -35,6 +36,8 @@ src/
       GmpStand.astro           обёртка для MDX: подтягивает термины, проверяет сценарий
     stands/gc/                 стенд «Сборщик мусора» — то же устройство
       engine/                  трёхцветная разметка, барьер записи, пейсер, подметание
+    stands/mem/                стенд «Память»
+      engine/                  классы размеров, mcache/mcentral/mheap, стеки горутин
   data/courses.ts              курсы и анонсы будущих тем
   pages/                       лекции, справочник, лаборатория, поиск
 ```
@@ -47,7 +50,7 @@ src/
 
 **Термин.** Файл `src/content/glossary/<id>.mdx` с полями `title`, `short` (одна строка для подсказки), `category`, `related`. В лекции: `<Term id="<id>" />` или `<Term id="<id>">своя подпись</Term>`. Опечатка в id роняет сборку.
 
-**Лекцию.** Файл `src/content/lectures/<курс>/<тема>.mdx` с `title`, `description`, `order`. В тексте доступны `<Term>`, `<Predict>`, `<Callout>`, `<GmpStand scenario="…" />` и `<GcStand scenario="…" />`. Страница, навигация, оглавление и список терминов появятся сами. Из `planned` в `src/data/courses.ts` уберите анонс этой темы.
+**Лекцию.** Файл `src/content/lectures/<курс>/<тема>.mdx` с `title`, `description`, `order`. В тексте доступны `<Term>`, `<Predict>`, `<Callout>`, `<GmpStand scenario="…" />`, `<GcStand scenario="…" />` и `<MemStand scenario="…" />`. Страница, навигация, оглавление и список терминов появятся сами. Из `planned` в `src/data/courses.ts` уберите анонс этой темы.
 
 **Сценарий стенда.** Объект сценария в `engine/scenarios.ts` нужного стенда и в массиве `SCENARIOS` / `GC_SCENARIOS`. Поле `claim` обязательно: одна мысль, которую сценарий доказывает. Утверждение из `claim` стоит закрепить тестом в `engine.test.ts`.
 

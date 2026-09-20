@@ -16,7 +16,6 @@ export const COURSES: Course[] = [
     description:
       'Что происходит под программой на Go: как горутины попадают на процессор, кто собирает мусор, где живут переменные и как устроены каналы.',
     planned: [
-      { title: 'Память', blurb: 'Стек против кучи, escape analysis, mcache/mcentral/mheap, классы размеров.' },
       { title: 'Каналы', blurb: 'hchan изнутри: буфер, sendq и recvq, select, закрытие.' },
     ],
   },

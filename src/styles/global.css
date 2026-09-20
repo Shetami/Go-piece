@@ -1311,3 +1311,322 @@ body {
   height: 100%;
   background: var(--gc-grey);
 }
+
+/* ─────────────────────── стенд «Память» ─────────────────────── */
+
+.mem-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  font-size: 0.78rem;
+}
+.mem-stage {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.mem-stage i {
+  font-style: normal;
+  color: var(--line);
+  margin-left: 2px;
+}
+.mem-stage.is-now {
+  color: var(--ink);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+.mem-stage-wait {
+  margin-left: auto;
+  color: var(--sys);
+  font-weight: 600;
+}
+
+.mem-heap {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14px, 1fr));
+  gap: 3px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+.mem-page {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 2px;
+  border: 1px solid var(--gc-cell-line);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.mem-page.is-span {
+  border-color: var(--c);
+  background: color-mix(in oklab, var(--c) 18%, transparent);
+}
+.mem-page.is-span > i {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  background: var(--c);
+}
+.mem-page.is-large {
+  background: var(--sys);
+  border-color: var(--sys);
+}
+.mem-page.is-stack {
+  background: var(--spin);
+  border-color: var(--spin);
+}
+.mem-page.is-free {
+  background: transparent;
+  border-style: dashed;
+}
+.mem-page.is-returned {
+  background: transparent;
+  border-color: color-mix(in oklab, var(--gc-cell-line) 35%, transparent);
+}
+.mem-page.is-hl {
+  outline: 2px solid var(--hl);
+  outline-offset: 1px;
+}
+
+.mem-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.mem-legend .lg::before {
+  content: '';
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 5px;
+  border-radius: 2px;
+  border: 1px solid var(--gc-cell-line);
+  vertical-align: baseline;
+}
+.mem-legend .lg-span::before {
+  background: var(--wl-0);
+  border-color: var(--wl-0);
+}
+.mem-legend .lg-large::before {
+  background: var(--sys);
+  border-color: var(--sys);
+}
+.mem-legend .lg-stack::before {
+  background: var(--spin);
+  border-color: var(--spin);
+}
+.mem-legend .lg-free::before {
+  background: transparent;
+  border-style: dashed;
+}
+.mem-legend .lg-returned::before {
+  background: transparent;
+  border-color: color-mix(in oklab, var(--gc-cell-line) 35%, transparent);
+}
+
+.mem-caches {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+}
+.mem-cache {
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--idle);
+  border-radius: var(--r);
+  background: var(--surface);
+  padding: 8px 10px;
+  display: grid;
+  gap: 6px;
+}
+.mem-cache.path-fast,
+.mem-cache.path-tiny {
+  border-top-color: var(--run);
+}
+.mem-cache.path-refill {
+  border-top-color: var(--spin);
+}
+.mem-cache.path-large,
+.mem-cache.path-blocked {
+  border-top-color: var(--sys);
+}
+.mem-cache.path-stack {
+  border-top-color: var(--accent);
+}
+.mem-cache header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.mem-cache header strong {
+  color: var(--ink);
+}
+.mem-cache-spans {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.mem-span {
+  position: relative;
+  display: inline-block;
+  padding: 2px 7px;
+  border: 1px solid var(--c);
+  border-radius: 5px;
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  color: var(--ink);
+  background: color-mix(in oklab, var(--c) 10%, transparent);
+  overflow: hidden;
+}
+.mem-span > i {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  background: var(--c);
+}
+.mem-span.is-hl {
+  outline: 2px solid var(--hl);
+  outline-offset: 1px;
+}
+.mem-tiny {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.mem-tiny-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.mem-tiny-bar > i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.mem-tiny b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.mem-centrals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.mem-central {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border: 1px solid var(--c);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--c) 10%, transparent);
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+}
+.mem-central b {
+  color: var(--ink);
+}
+.mem-central.is-locked {
+  outline: 2px solid var(--sys);
+  outline-offset: 1px;
+}
+
+.mem-g {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--c);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--c) 10%, transparent);
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  color: var(--ink);
+}
+.mem-g small {
+  color: var(--muted);
+  font-family: var(--font-sans);
+}
+.mem-g b {
+  color: var(--sys);
+  font-family: var(--font-sans);
+  font-weight: 600;
+}
+.mem-g.state-done {
+  opacity: 0.5;
+}
+.mem-g.is-hl {
+  outline: 2px solid var(--hl);
+  outline-offset: 1px;
+}
+.mem-stack-bar {
+  display: inline-block;
+  width: 42px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.mem-stack-bar > i {
+  display: block;
+  height: 100%;
+  background: var(--spin);
+}
+
+.mark-alloc-large,
+.mark-os-map,
+.mark-frag-external {
+  background: var(--sys);
+}
+.mark-central-contended,
+.mark-class-waste {
+  background: var(--spin);
+}
+.mark-stack-grow,
+.mark-scavenge {
+  background: var(--hl);
+}
+
+.dot-alloc {
+  background: var(--wl-0);
+}
+.dot-class,
+.dot-central {
+  background: var(--spin);
+}
+.dot-cache {
+  background: var(--run);
+}
+.dot-os,
+.dot-frag {
+  background: var(--sys);
+}
+.dot-span {
+  background: var(--wl-5);
+}
+.dot-obj {
+  background: var(--idle);
+}
+.dot-stack {
+  background: var(--hl);
+}

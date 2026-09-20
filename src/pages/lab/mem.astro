@@ -1,0 +1,23 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro'
+import MemStand from '../../components/stands/mem/MemStand.astro'
+---
+
+<BaseLayout
+  title="Стенд: память Go"
+  description="Пошаговая модель аллокатора Go: стек против кучи, классы размеров, mcache, mcentral, mheap и рост стека горутины."
+  wide
+>
+  <nav class="text-sm text-muted mb-4">
+    <a href="/lab/" class="hover:text-ink">Лаборатория</a> / Память
+  </nav>
+  <div class="flex flex-wrap items-baseline justify-between gap-4 mb-2">
+    <h1 class="text-3xl font-bold tracking-tight">Память Go</h1>
+    <a href="/lectures/go-runtime/memory/" class="text-sm text-accent">читать лекцию →</a>
+  </div>
+  <p class="text-muted max-w-3xl">
+    Пробел — пуск и пауза, стрелки — шаг, Shift+стрелки — 10 шагов. Клик по событию открывает разбор. В нагрузках
+    можно менять размер объектов и решать за компилятор, убегает ли указатель в кучу.
+  </p>
+  <MemStand scenario="fast-path" mode="lab" />
+</BaseLayout>

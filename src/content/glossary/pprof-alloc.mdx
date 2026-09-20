@@ -1,0 +1,31 @@
+---
+title: Профиль аллокаций
+short: 'pprof по памяти: alloc_space и alloc_objects показывают, кто и сколько выделил за всё время, inuse_space — что занято прямо сейчас.'
+aliases: [pprof, memprofile, alloc_space, inuse_space, MemStats]
+category: инструмент
+related: [gcflags-m, escape-analysis, size-class, gctrace]
+source: runtime/pprof, net/http/pprof, runtime.MemStats
+---
+
+Четыре среза одного профиля, и путать их дорого:
+
+- **`alloc_space`** — сколько байт выделено с начала работы. Отвечает на вопрос «кто нагружает аллокатор и сборщик».
+- **`alloc_objects`** — сколько объектов. Часто важнее байтов: миллион мелких объектов дороже одного большого.
+- **`inuse_space`** — что занято сейчас. Это про утечки и про размер живых данных.
+- **`inuse_objects`** — то же в объектах.
+
+Как снять:
+
+```sh
+go test -bench=. -memprofile=mem.out
+go tool pprof -alloc_objects mem.out
+# в работающем сервисе — через net/http/pprof
+go tool pprof http://localhost:6060/debug/pprof/heap
+```
+
+Что смотреть дальше:
+
+- много `alloc_objects` в одной функции — кандидат на переиспользование буфера или `sync.Pool`;
+- `runtime.gcAssistAlloc` в профиле CPU — аллокаций столько, что горутины сами доплачивают [разметкой](/glossary/mark-assist/);
+- `runtime.morestack` — горячий путь упирается в [рост стека](/glossary/stack-growth/);
+- `runtime.MemStats` и пакет `runtime/metrics` дают те же числа для постоянного мониторинга, без профилирования.
