@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Simulation } from '../engine/simulation.ts'
-import type { EventType, Scenario, SimEvent } from '../engine/types.ts'
+import type { GcEvent, GcEventType, GcScenario } from '../engine/types.ts'
 
 /** Прогоны длиннее этого стенд обрезает: история хранит полный снимок на каждый тик. */
-const HARD_CAP = 1500
+const HARD_CAP = 800
 
 export interface Playback {
   sim: Simulation
-  /** Последний тик в истории. */
   last: number
   cursor: number
   setCursor: (t: number) => void
@@ -16,24 +15,19 @@ export interface Playback {
   speed: number
   setSpeed: (v: number) => void
   /** События, случившиеся на тиках 1..cursor. */
-  eventsUpTo: SimEvent[]
-  /** Сколько раз каждый тип события случился к текущему тику. */
-  counts: Partial<Record<EventType, number>>
+  eventsUpTo: GcEvent[]
+  counts: Partial<Record<GcEventType, number>>
   /** Событие, на котором автопауза остановилась в последний раз. */
-  pausedOn: SimEvent | null
+  pausedOn: GcEvent | null
 }
 
 /**
  * Прогоняет сценарий до конца сразу, а дальше UI просто двигает курсор по истории.
- * Движок детерминирован, так что «шаг назад» и перемотка — это чтение готового снимка.
+ * Движок детерминирован, поэтому «шаг назад» и перемотка — это чтение готового снимка.
  */
-export function useSimulation(
-  scenario: Scenario,
-  seed: number,
-  opts: { autoPause: boolean },
-): Playback {
+export function useSimulation(scenario: GcScenario, seed: number, opts: { autoPause: boolean }): Playback {
   const sim = useMemo(
-    () => new Simulation(scenario, seed).runToEnd(Math.min(scenario.stopAfter ?? 1000, HARD_CAP)),
+    () => new Simulation(scenario, seed).runToEnd(Math.min(scenario.stopAfter ?? 400, HARD_CAP)),
     [scenario, seed],
   )
   const last = sim.history.length - 1
@@ -43,10 +37,10 @@ export function useSimulation(
   // только в эффекте — до него рендер обязан оставаться в пределах истории.
   const cursor = Math.min(rawCursor, last)
   const [playing, setPlaying] = useState(false)
-  const [speed, setSpeed] = useState(8)
-  const [pausedOn, setPausedOn] = useState<SimEvent | null>(null)
+  const [speed, setSpeed] = useState(4)
+  const [pausedOn, setPausedOn] = useState<GcEvent | null>(null)
 
-  const seen = useRef(new Set<EventType>())
+  const seen = useRef(new Set<GcEventType>())
 
   useEffect(() => {
     setCursorRaw(0)
@@ -89,7 +83,7 @@ export function useSimulation(
   )
 
   const counts = useMemo(() => {
-    const c: Partial<Record<EventType, number>> = {}
+    const c: Partial<Record<GcEventType, number>> = {}
     for (const e of eventsUpTo) c[e.type] = (c[e.type] ?? 0) + 1
     return c
   }, [eventsUpTo])

@@ -1,6 +1,7 @@
 ---
 import BaseLayout from '../../layouts/BaseLayout.astro'
 import { SCENARIOS } from '../../components/stands/gmp/engine/scenarios.ts'
+import { GC_SCENARIOS } from '../../components/stands/gc/engine/scenarios.ts'
 ---
 
 <BaseLayout title="Лаборатория" description="Интерактивные стенды без лекции: выберите сценарий и крутите настройки.">
@@ -10,7 +11,8 @@ import { SCENARIOS } from '../../components/stands/gmp/engine/scenarios.ts'
     строке всегда воспроизводит ровно тот прогон, который вы видите.
   </p>
 
-  <a href="/lab/gmp/" class="block max-w-3xl rounded-xl border border-line bg-surface p-6 hover:border-muted">
+  <div class="grid gap-6 max-w-3xl">
+  <a href="/lab/gmp/" class="block rounded-xl border border-line bg-surface p-6 hover:border-muted">
     <span class="text-xs font-semibold text-accent">Рантайм Go</span>
     <span class="block text-xl font-semibold mt-1 mb-2 text-ink">Планировщик: G, M, P</span>
     <span class="block text-muted mb-4">
@@ -20,4 +22,17 @@ import { SCENARIOS } from '../../components/stands/gmp/engine/scenarios.ts'
       {SCENARIOS.map((s) => <li><b class="text-ink font-medium">{s.title}</b> — {s.claim}</li>)}
     </ul>
   </a>
+
+  <a href="/lab/gc/" class="block rounded-xl border border-line bg-surface p-6 hover:border-muted">
+    <span class="text-xs font-semibold text-accent">Рантайм Go</span>
+    <span class="block text-xl font-semibold mt-1 mb-2 text-ink">Сборщик мусора: разметка на ходу</span>
+    <span class="block text-muted mb-4">
+      Трёхцветная разметка, барьер записи (его можно выключить и посмотреть, что будет), помощь в разметке,
+      пейсер, GOGC и GOMEMLIMIT. Готовые сценарии:
+    </span>
+    <ul class="text-sm text-muted list-disc pl-5 space-y-1">
+      {GC_SCENARIOS.map((s) => <li><b class="text-ink font-medium">{s.title}</b> — {s.claim}</li>)}
+    </ul>
+  </a>
+  </div>
 </BaseLayout>

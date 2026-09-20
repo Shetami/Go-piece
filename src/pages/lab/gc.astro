@@ -1,0 +1,24 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro'
+import GcStand from '../../components/stands/gc/GcStand.astro'
+---
+
+<BaseLayout
+  title="Стенд: сборщик мусора Go"
+  description="Пошаговая модель сборщика мусора Go: трёхцветная разметка, барьер записи, пейсер, GOGC и GOMEMLIMIT."
+  wide
+>
+  <nav class="text-sm text-muted mb-4">
+    <a href="/lab/" class="hover:text-ink">Лаборатория</a> / Сборщик мусора
+  </nav>
+  <div class="flex flex-wrap items-baseline justify-between gap-4 mb-2">
+    <h1 class="text-3xl font-bold tracking-tight">Сборщик мусора Go</h1>
+    <a href="/lectures/go-runtime/gc/" class="text-sm text-accent">читать лекцию →</a>
+  </div>
+  <p class="text-muted max-w-3xl">
+    Пробел — пуск и пауза, стрелки — шаг, Shift+стрелки — 10 шагов. Клик по событию открывает разбор. Всё, что вы
+    меняете, сохраняется в адресе: ссылкой можно поделиться. Барьер записи здесь можно выключить — в настоящем Go
+    такой ручки нет.
+  </p>
+  <GcStand scenario="first-cycle" mode="lab" />
+</BaseLayout>
