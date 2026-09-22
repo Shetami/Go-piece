@@ -1,35 +1,61 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { GcEvent } from '../engine/types.ts'
-import { GC_SCENARIOS, gcScenarioById } from '../engine/scenarios.ts'
-import { Board, highlightOf, type HeapView } from './Board.tsx'
-import { ConfigKnobs, WorkloadsEditor } from './Settings.tsx'
+import type { ChanEvent, ChanWorld } from '../engine/types.ts'
+import { CHAN_SCENARIOS, chanScenarioById } from '../engine/scenarios.ts'
+import { Board, highlightOf } from './Board.tsx'
+import { ChansEditor, ConfigKnobs, WorkloadsEditor } from './Settings.tsx'
 import { EventDetail, EventFeed, Scrubber, type TermInfo } from './Timeline.tsx'
 import { decodeState, encodeState, initialState, toScenario, type StandState } from './url.ts'
 import { useSimulation } from './useSimulation.ts'
 
-export interface GcStandProps {
+export interface ChanStandProps {
   /** id пресета из engine/scenarios.ts. */
   scenario?: string
   /** Краткие определения терминов — приходят со страницы, из коллекции glossary. */
   terms?: Record<string, TermInfo>
   /**
    * embed — стенд внутри лекции: сценарий фиксирован, настройки свёрнуты.
-   * lab — отдельная страница: выбор сценария, редактор нагрузок, состояние в адресе.
+   * lab — отдельная страница: выбор сценария, редактор каналов и нагрузок, состояние в адресе.
    */
   mode?: 'embed' | 'lab'
 }
 
 const SPEEDS = [1, 2, 4, 8, 16]
 
-const FINISH_LABEL: Record<string, string> = {
-  'all-done': 'Все горутины завершились.',
-  oom: 'Память кончилась: куча упёрлась в потолок, сборщик не успел ничего освободить.',
-  'stop-after': 'Прогон остановлен по лимиту тиков — нагрузка в сценарии бесконечная.',
+const gs = (n: number) => `${n} ${n % 10 === 1 && n % 100 !== 11 ? 'горутина' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? 'горутины' : 'горутин'}`
+
+/**
+ * Чем кончился прогон.
+ *
+ * У лимита тиков три разных смысла, и путать их нельзя. Спящий отправитель на
+ * полном буфере проснётся, как только получатель возьмёт значение, — это не
+ * утечка, а обратное давление. Утечка — только то, что спит дольше leakAfter:
+ * ровно тот же порог, по которому движок выдаёт событие «утечка горутин».
+ */
+function finishLabel(world: ChanWorld): string {
+  switch (world.finishReason) {
+    case 'all-done':
+      return 'Все горутины завершились.'
+    case 'deadlock':
+      return 'Взаимная блокировка: все горутины спят, и разбудить их некому. Настоящая программа здесь падает.'
+    case 'panic':
+      return 'Паника — программа завершилась аварийно.'
+    default: {
+      const parked = world.gs.filter((g) => g.state === 'waiting' && g.wait !== null)
+      const stuck = parked.filter((g) => world.tick - g.wait!.since >= world.config.leakAfter)
+      if (stuck.length > 0) {
+        return `Прогон остановлен по лимиту тиков. ${gs(stuck.length)} ${stuck.length === 1 ? 'спит' : 'спят'} дольше ${world.config.leakAfter} тиков — в настоящей программе ${stuck.length === 1 ? 'она осталась' : 'они остались'} бы в памяти навсегда.`
+      }
+      if (parked.length > 0) {
+        return `Прогон остановлен по лимиту тиков — нагрузка в сценарии бесконечная. ${gs(parked.length)} сейчас ${parked.length === 1 ? 'спит' : 'спят'} на каналах, но ${parked.length === 1 ? 'её' : 'их'} разбудили бы: это обратное давление, а не утечка.`
+      }
+      return 'Прогон остановлен по лимиту тиков — нагрузка в сценарии бесконечная.'
+    }
+  }
 }
 
-export default function GcStand({ scenario = 'first-cycle', terms = {}, mode = 'embed' }: GcStandProps) {
+export default function ChanStand({ scenario = 'rendezvous', terms = {}, mode = 'embed' }: ChanStandProps) {
   const lab = mode === 'lab'
-  const preset = gcScenarioById(scenario) ?? GC_SCENARIOS[0]!
+  const preset = chanScenarioById(scenario) ?? CHAN_SCENARIOS[0]!
 
   const [st, setSt] = useState<StandState>(() => initialState(preset))
 
@@ -45,11 +71,8 @@ export default function GcStand({ scenario = 'first-cycle', terms = {}, mode = '
   const sc = useMemo(() => toScenario(st), [st])
   const [autoPause, setAutoPause] = useState(true)
   const [showMinor, setShowMinor] = useState(false)
-  const [selected, setSelected] = useState<GcEvent | null>(null)
+  const [selected, setSelected] = useState<ChanEvent | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(lab)
-  // Граф отвечает на главный вопрос сборщика — «до чего можно дойти от корней», —
-  // поэтому он и открывается первым. Сетка остаётся для разговора про объём кучи.
-  const [view, setView] = useState<HeapView>('graph')
 
   const pb = useSimulation(sc, st.seed, { autoPause })
   const snap = pb.sim.history[pb.cursor]!
@@ -64,18 +87,23 @@ export default function GcStand({ scenario = 'first-cycle', terms = {}, mode = '
     if (hlEvent) return highlightOf(hlEvent)
     const h = highlightOf(null)
     for (const e of snap.events) {
-      if (e.type === 'alloc' || e.type === 'mark.scan') continue
-      e.actors.cells?.forEach((x) => h.cells.add(x))
-      e.actors.mut?.forEach((x) => h.mut.add(x))
+      if (e.type === 'g.ready' || e.type === 'g.start') continue
+      e.actors.g?.forEach((x) => h.g.add(x))
+      e.actors.chan?.forEach((x) => h.chans.add(x))
     }
     return h
   }, [hlEvent, snap])
 
-  /** Доля процессорного времени, ушедшая сборщику к текущему тику. */
-  const gcShare = useMemo(() => {
-    const { gcSlotTicks, mutatorSlotTicks } = snap.world.stats
-    const total = gcSlotTicks + mutatorSlotTicks
-    return total === 0 ? 0 : Math.round((gcSlotTicks / total) * 100)
+  const summary = useMemo(() => {
+    const s = snap.world.stats
+    return {
+      transfers: s.transfers,
+      directShare: s.transfers === 0 ? 0 : Math.round((s.direct / s.transfers) * 100),
+      avgWait: s.parks === 0 ? 0 : Math.round((s.waitTicks / s.parks) * 10) / 10,
+      parked: snap.world.gs.filter((g) => g.state === 'waiting').length,
+      idle:
+        s.idleSlots + s.busySlots === 0 ? 0 : Math.round((s.idleSlots / (s.idleSlots + s.busySlots)) * 100),
+    }
   }, [snap])
 
   const rootRef = useRef<HTMLDivElement>(null)
@@ -97,9 +125,8 @@ export default function GcStand({ scenario = 'first-cycle', terms = {}, mode = '
   }
 
   const update = (patch: Partial<StandState>) => setSt((s) => ({ ...s, ...patch }))
-  const labHref = `/lab/gc/#${encodeState(st)}`
-  const modified = JSON.stringify(st) !== JSON.stringify(initialState(gcScenarioById(st.base) ?? preset))
-  const lost = snap.world.stats.lost
+  const labHref = `/lab/chan/#${encodeState(st)}`
+  const modified = JSON.stringify(st) !== JSON.stringify(initialState(chanScenarioById(st.base) ?? preset))
 
   return (
     <div className="stand" ref={rootRef} tabIndex={-1} onKeyDown={onKey}>
@@ -109,10 +136,10 @@ export default function GcStand({ scenario = 'first-cycle', terms = {}, mode = '
             <select
               className="stand-select"
               value={st.base}
-              onChange={(e) => setSt(initialState(gcScenarioById(e.target.value) ?? preset))}
+              onChange={(e) => setSt(initialState(chanScenarioById(e.target.value) ?? preset))}
               aria-label="Сценарий"
             >
-              {GC_SCENARIOS.map((s) => (
+              {CHAN_SCENARIOS.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.title}
                 </option>
@@ -178,28 +205,44 @@ export default function GcStand({ scenario = 'first-cycle', terms = {}, mode = '
         onSeek={(t) => { pb.setPlaying(false); pb.setCursor(t) }}
       />
 
-      <Board world={snap.world} highlight={highlight} view={view} onView={setView} />
+      <Board world={snap.world} events={snap.events} highlight={highlight} />
 
       <div className="metrics">
-        <span>циклов <b>{snap.world.stats.cycles}</b></span>
-        <span title="Суммарно тиков, когда мир был остановлен">пауз <b>{snap.world.stats.stwTicks}</b></span>
-        <span title="Доля процессорного времени, ушедшая на разметку, помощь, паузы и подметание">
-          CPU сборщику <b>{gcShare}%</b>
+        <span title="Все значения, дошедшие до получателя или до буфера">
+          передач <b>{summary.transfers}</b>
         </span>
-        <span title="Тики, которые горутины отдали разметке вместо своей работы">
-          помощь <b>{snap.world.stats.assistTicks}</b>
+        <span title="Доля передач мимо буфера — прямо из стека отправителя в стек получателя">
+          из рук в руки <b>{summary.directShare}%</b>
         </span>
-        <span title="Тики, в которые горутины делали свою работу">
-          полезной работы <b>{snap.world.muts.reduce((s, m) => s + m.cpuTicks, 0)}</b>
+        <span title="Сколько раз горутина засыпала на канале">
+          парковок <b>{snap.world.stats.parks}</b>
         </span>
-        <span title="Самая большая куча за прогон">пик кучи <b>{snap.world.stats.peakHeap}</b></span>
-        <span className={lost > 0 ? 'metric-bad' : undefined} title="Достижимые объекты, которые сборщик освободил. При исправном барьере записи — всегда 0">
-          потеряно <b>{lost}</b>
+        <span title="Сколько тиков в среднем длится одна парковка">
+          ожидание <b>{summary.avgWait}</b> т.
         </span>
+        <span className={summary.parked > 0 ? 'metric-bad' : undefined} title="Горутины, которые спят на каналах прямо сейчас">
+          спят <b>{summary.parked}</b>
+        </span>
+        <span title="Доля процессорных слотов, простоявших без работы: все готовые горутины кончились">
+          простой <b>{summary.idle}%</b>
+        </span>
+        {snap.world.stats.selectBlocks > 0 && (
+          <span title="Сколько раз select уснул, встав в очередь сразу ко всем своим каналам">
+            select уснул <b>{snap.world.stats.selectBlocks}</b>
+          </span>
+        )}
+        {snap.world.stats.selectDefaults > 0 && (
+          <span title="Сколько раз сработала ветка default — никто не был готов">
+            default <b>{snap.world.stats.selectDefaults}</b>
+          </span>
+        )}
       </div>
 
       {pb.cursor === pb.last && pb.sim.world.finishReason && (
-        <p className={`finish finish-${pb.sim.world.finishReason}`}>{FINISH_LABEL[pb.sim.world.finishReason]}</p>
+        <p className={`finish finish-${pb.sim.world.finishReason}`}>
+          {finishLabel(pb.sim.world)}
+          {pb.sim.world.panic && <code> panic: {pb.sim.world.panic}</code>}
+        </p>
       )}
 
       <div className="stand-log">
@@ -227,7 +270,7 @@ export default function GcStand({ scenario = 'first-cycle', terms = {}, mode = '
             <EventDetail event={selected} terms={terms} onClose={() => setSelected(null)} />
           ) : (
             <p className="detail-hint">
-              Кликните событие в ленте — здесь появится разбор: что произошло, почему сборщик так устроен
+              Кликните событие в ленте — здесь появится разбор: что произошло, почему канал устроен именно так
               и какие функции рантайма за этим стоят.
             </p>
           )}
@@ -251,16 +294,18 @@ export default function GcStand({ scenario = 'first-cycle', terms = {}, mode = '
               другой seed
             </button>
             {modified && (
-              <button type="button" className="btn-ghost" onClick={() => setSt(initialState(gcScenarioById(st.base) ?? preset))}>
+              <button type="button" className="btn-ghost" onClick={() => setSt(initialState(chanScenarioById(st.base) ?? preset))}>
                 сбросить к пресету
               </button>
             )}
           </div>
           <ConfigKnobs config={st.config} onChange={(config) => update({ config })} />
+          <h4 className="settings-sub">Каналы</h4>
+          <ChansEditor chans={sc.chans} onChange={(chans) => update({ chans })} />
           {lab && (
             <>
               <h4 className="settings-sub">Нагрузки</h4>
-              <WorkloadsEditor workloads={sc.workloads} onChange={(workloads) => update({ workloads })} />
+              <WorkloadsEditor workloads={sc.workloads} chans={sc.chans} onChange={(workloads) => update({ workloads })} />
             </>
           )}
         </div>

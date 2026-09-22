@@ -3,6 +3,7 @@ import BaseLayout from '../../layouts/BaseLayout.astro'
 import { SCENARIOS } from '../../components/stands/gmp/engine/scenarios.ts'
 import { GC_SCENARIOS } from '../../components/stands/gc/engine/scenarios.ts'
 import { MEM_SCENARIOS } from '../../components/stands/mem/engine/scenarios.ts'
+import { CHAN_SCENARIOS } from '../../components/stands/chan/engine/scenarios.ts'
 ---
 
 <BaseLayout title="Лаборатория" description="Интерактивные стенды без лекции: выберите сценарий и крутите настройки.">
@@ -45,6 +46,18 @@ import { MEM_SCENARIOS } from '../../components/stands/mem/engine/scenarios.ts'
     </span>
     <ul class="text-sm text-muted list-disc pl-5 space-y-1">
       {MEM_SCENARIOS.map((s) => <li><b class="text-ink font-medium">{s.title}</b> — {s.claim}</li>)}
+    </ul>
+  </a>
+
+  <a href="/lab/chan/" class="block rounded-xl border border-line bg-surface p-6 hover:border-muted">
+    <span class="text-xs font-semibold text-accent">Рантайм Go</span>
+    <span class="block text-xl font-semibold mt-1 mb-2 text-ink">Каналы: hchan изнутри</span>
+    <span class="block text-muted mb-4">
+      Кольцевой буфер, очереди sendq и recvq, передача из рук в руки, select сразу на нескольких каналах,
+      закрытие, взаимная блокировка и утечка горутин. Готовые сценарии:
+    </span>
+    <ul class="text-sm text-muted list-disc pl-5 space-y-1">
+      {CHAN_SCENARIOS.map((s) => <li><b class="text-ink font-medium">{s.title}</b> — {s.claim}</li>)}
     </ul>
   </a>
   </div>

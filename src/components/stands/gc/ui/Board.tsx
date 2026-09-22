@@ -1,12 +1,21 @@
 import type { Cell, GcEvent, GcPhase, GcWorld, Mutator, SlotKind, SlotView } from '../engine/types.ts'
+import { HeapGraph } from './HeapGraph.tsx'
 
 /**
  * Схема мира на одном тике. Чистая проекция: получает снимок, ничего не хранит.
  *
- * Главный элемент — сетка кучи: каждый квадрат это блок памяти, а его цвет —
- * ответ разметки на вопрос «этот объект живой?». Пока цикл не идёт, цвет
- * означает просто «занято», и красит его нагрузка-хозяйка.
+ * У кучи два вида, и они отвечают на разные вопросы.
+ *
+ * «Сетка» — сколько занято: каждый квадрат это блок памяти, видно рост кучи,
+ * работу подметальщика и дыры от освобождённых блоков.
+ *
+ * «Граф» — до чего можно дойти от корней. Это и есть определение живого объекта,
+ * поэтому здесь видно то, чего в сетке не увидеть: фронт разметки, уходящий от
+ * корней вглубь, недостижимые объекты отдельной группой и нарушение
+ * трёхцветного инварианта — ссылку из чёрного в белое.
  */
+
+export type HeapView = 'grid' | 'graph'
 
 const WL_COLORS = 8
 
@@ -139,7 +148,12 @@ function MutChip({ m, w, hl }: { m: Mutator; w: GcWorld; hl: Highlight }) {
   )
 }
 
-export function Board({ world: w, highlight: hl }: { world: GcWorld; highlight: Highlight }) {
+export function Board({ world: w, highlight: hl, view, onView }: {
+  world: GcWorld
+  highlight: Highlight
+  view: HeapView
+  onView: (v: HeapView) => void
+}) {
   // На нулевом тике процессоры ещё ничего не делали — показываем их пустыми,
   // чтобы ряд карточек не появлялся из ниоткуда после первого шага.
   const slots: SlotView[] =
@@ -155,18 +169,51 @@ export function Board({ world: w, highlight: hl }: { world: GcWorld; highlight: 
     <div className="board gc-board">
       <PhaseStrip w={w} />
 
-      <div className="gc-heap" role="img" aria-label={`Куча: ${used} блоков занято из ${w.config.heapCapacity}`}>
-        {w.cells.map((c) => (
-          <CellSquare key={c.id} c={c} w={w} hl={hl} />
-        ))}
+      <div className="gc-view">
+        <span className="board-label">куча · {used} из {w.config.heapCapacity}</span>
+        <span className="gc-view-tabs" role="group" aria-label="Вид кучи">
+          <button
+            type="button"
+            className={view === 'graph' ? 'is-now' : ''}
+            onClick={() => onView('graph')}
+            title="Граф достижимости: кто на кого ссылается и до чего можно дойти от корней"
+          >
+            граф
+          </button>
+          <button
+            type="button"
+            className={view === 'grid' ? 'is-now' : ''}
+            onClick={() => onView('grid')}
+            title="Сетка блоков: сколько памяти занято и как работает подметальщик"
+          >
+            сетка
+          </button>
+        </span>
       </div>
+
+      {view === 'graph' ? (
+        <HeapGraph world={w} highlight={hl} />
+      ) : (
+        <div className="gc-heap" role="img" aria-label={`Куча: ${used} блоков занято из ${w.config.heapCapacity}`}>
+          {w.cells.map((c) => (
+            <CellSquare key={c.id} c={c} w={w} hl={hl} />
+          ))}
+        </div>
+      )}
 
       <div className="gc-legend">
         <span className="lg lg-white">белый — разметка не нашла</span>
         <span className="lg lg-grey">серый — нашла, но не просмотрела</span>
         <span className="lg lg-black">чёрный — просмотрен, живой</span>
         <span className="lg lg-used">вне цикла — просто занятый блок</span>
-        <span className="lg lg-free">пусто — свободен</span>
+        {view === 'graph' ? (
+          <>
+            <span className="lg lg-root">корень — стек горутины или глобальные</span>
+            <span className="lg lg-violation">ссылка из чёрного в белое — инвариант нарушен</span>
+          </>
+        ) : (
+          <span className="lg lg-free">пусто — свободен</span>
+        )}
         <span className="lg lg-lost">красный — освобождён живым</span>
       </div>
 

@@ -3,7 +3,7 @@ title: Взаимная блокировка
 short: Состояние, когда все горутины ждут друг друга и никто не может продолжить. Если это все горутины программы, рантайм падает с «all goroutines are asleep».
 aliases: [deadlock, checkdead]
 category: состояние
-related: [channel, gopark]
+related: [channel, gopark, goroutine-leak, select]
 source: runtime/proc.go — checkdead
 ---
 
@@ -13,6 +13,6 @@ source: runtime/proc.go — checkdead
 fatal error: all goroutines are asleep - deadlock!
 ```
 
-Частичную блокировку, когда две горутины ждут друг друга, а остальные работают, рантайм не видит. Такие горутины просто висят вечно — это утечка горутин.
+Частичную блокировку, когда две горутины ждут друг друга, а остальные работают, рантайм не видит. Такие горутины просто висят вечно — это [утечка горутин](/glossary/goroutine-leak/).
 
 Ожидание таймера или сети checkdead не считает блокировкой: они ещё могут разбудить остальных.

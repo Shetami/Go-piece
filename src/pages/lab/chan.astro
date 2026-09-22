@@ -1,0 +1,23 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro'
+import ChanStand from '../../components/stands/chan/ChanStand.astro'
+---
+
+<BaseLayout
+  title="Стенд: каналы Go"
+  description="Пошаговая модель каналов Go: кольцевой буфер, очереди sendq и recvq, передача из рук в руки, select, закрытие, взаимная блокировка и утечка горутин."
+  wide
+>
+  <nav class="text-sm text-muted mb-4">
+    <a href="/lab/" class="hover:text-ink">Лаборатория</a> / Каналы
+  </nav>
+  <div class="flex flex-wrap items-baseline justify-between gap-4 mb-2">
+    <h1 class="text-3xl font-bold tracking-tight">Каналы Go</h1>
+    <a href="/lectures/go-runtime/channels/" class="text-sm text-accent">читать лекцию →</a>
+  </div>
+  <p class="text-muted max-w-3xl">
+    Пробел — пуск и пауза, стрелки — шаг, Shift+стрелки — 10 шагов. Клик по событию открывает разбор. В настройках
+    можно менять вместимость буферов, делать канал nil и собирать свою нагрузку из отправок, приёмов и select.
+  </p>
+  <ChanStand scenario="rendezvous" mode="lab" />
+</BaseLayout>

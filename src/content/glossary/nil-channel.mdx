@@ -1,0 +1,36 @@
+---
+title: nil-канал
+short: Канал, не созданный через make. Любая операция на нём блокируется навсегда, а close паникует. В select такой case не срабатывает никогда — этим его и выключают.
+aliases: [nil channel, nil-канал]
+category: состояние
+related: [channel, select, chan-close, goroutine-leak]
+source: runtime/chan.go — if c == nil { gopark(nil, nil, waitReasonChanSendNilChan, ...) }
+---
+
+Переменная типа `chan T` по умолчанию `nil`. Отправка и приём на ней паркуют горутину **навсегда**: очереди у nil-канала нет, вставать некуда, разбудить некому.
+
+```go
+var ch chan int
+ch <- 1   // блокируется навсегда
+<-ch      // блокируется навсегда
+close(ch) // паника: close of nil channel
+```
+
+Выглядит как ловушка, и чаще всего это и есть ловушка — забытый `make(chan T)` или структура, созданная через `new` вместо конструктора. Если такая горутина оказалась единственной, программа упадёт с [deadlock](/glossary/deadlock/); если нет — просто [утечёт](/glossary/goroutine-leak/).
+
+Но у этого поведения есть законное применение. В [select](/glossary/select/) case с nil-каналом не срабатывает никогда, поэтому присваивание `nil` **выключает ветку**:
+
+```go
+for in != nil || out != nil {
+    select {
+    case v, ok := <-in:
+        if !ok { in = nil; continue }  // источник кончился — глушим case
+        buf = append(buf, v)
+    case out <- buf[0]:
+        buf = buf[1:]
+        if len(buf) == 0 { out = nil } // отдавать нечего — глушим case
+    }
+}
+```
+
+Без этого приёма пришлось бы либо дублировать select под каждое сочетание живых каналов, либо крутить `default` вхолостую.

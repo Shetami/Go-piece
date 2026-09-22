@@ -15,8 +15,6 @@ export const COURSES: Course[] = [
     title: 'Рантайм Go',
     description:
       'Что происходит под программой на Go: как горутины попадают на процессор, кто собирает мусор, где живут переменные и как устроены каналы.',
-    planned: [
-      { title: 'Каналы', blurb: 'hchan изнутри: буфер, sendq и recvq, select, закрытие.' },
-    ],
+    planned: [],
   },
 ]

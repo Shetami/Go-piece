@@ -654,8 +654,14 @@ body {
   background: var(--surface-2);
 }
 .finish-deadlock,
+.finish-panic,
 .finish-oom {
   background: color-mix(in oklab, var(--wl-6) 14%, transparent);
+}
+.finish code {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--gc-lost);
 }
 .metric-bad b {
   color: var(--gc-lost);
@@ -1629,4 +1635,558 @@ body {
 }
 .dot-stack {
   background: var(--hl);
+}
+
+/* ─────────────────────── стенд «Каналы» ─────────────────────── */
+
+.chan-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.chan-stage {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.chan-stage i {
+  font-style: normal;
+  color: var(--idle);
+  margin: 0 -4px 0 2px;
+}
+.chan-stage.is-now {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-weight: 600;
+}
+.chan-stage-note {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  background: color-mix(in oklab, var(--hl) 16%, transparent);
+  color: var(--ink);
+}
+.chan-stage-panic {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  background: color-mix(in oklab, var(--gc-lost) 18%, transparent);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.chan-cards {
+  display: grid;
+  gap: 8px;
+}
+.chan-card {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg);
+  padding: 8px 10px;
+  display: grid;
+  gap: 6px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.chan-card.is-locked {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.chan-card.is-hl {
+  border-color: var(--hl);
+}
+.chan-card.is-closed {
+  border-style: dashed;
+}
+.chan-card.is-nil {
+  opacity: 0.8;
+  border-color: var(--gc-lost);
+}
+.chan-card header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.chan-card header strong {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+}
+.chan-kind {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.chan-badge {
+  font-size: 0.68rem;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--hl) 18%, transparent);
+  color: var(--ink);
+}
+.chan-badge-nil {
+  background: color-mix(in oklab, var(--gc-lost) 18%, transparent);
+}
+
+.chan-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 10px;
+}
+@media (max-width: 680px) {
+  .chan-row {
+    grid-template-columns: 1fr;
+  }
+}
+.chan-q {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  min-height: 24px;
+}
+.chan-q-send {
+  justify-content: flex-end;
+}
+.chan-q em {
+  font-style: normal;
+  color: var(--idle);
+}
+.chan-q-empty {
+  font-style: normal;
+  color: var(--idle);
+}
+
+.chan-waiter {
+  --c: var(--wl-0);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border: 1px solid var(--c);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--c) 12%, transparent);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--ink);
+}
+.chan-waiter b {
+  font-family: var(--font-sans);
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--hl);
+}
+.chan-waiter.is-select {
+  border-style: dashed;
+}
+.chan-waiter.is-hl {
+  outline: 2px solid var(--hl);
+  outline-offset: 1px;
+}
+
+.chan-buf {
+  display: inline-flex;
+  gap: 2px;
+  padding: 10px 4px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+.chan-cell {
+  --c: var(--wl-0);
+  position: relative;
+  width: 20px;
+  height: 22px;
+  border-radius: 3px;
+  border: 1px solid var(--gc-cell-line);
+}
+.chan-cell.is-empty {
+  background: transparent;
+}
+.chan-cell.is-full {
+  background: color-mix(in oklab, var(--c) 60%, transparent);
+  border-color: var(--c);
+}
+/* Куда пишет отправитель и откуда читает получатель — sendx и recvx. */
+.chan-cell.is-sendx::after,
+.chan-cell.is-recvx::before {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.6rem;
+  line-height: 1;
+  color: var(--muted);
+}
+.chan-cell.is-sendx::after {
+  content: '▲';
+  bottom: -8px;
+}
+.chan-cell.is-recvx::before {
+  content: '▼';
+  top: -8px;
+}
+
+.chan-meet,
+.chan-void {
+  padding: 3px 12px;
+  border: 1px dashed var(--line);
+  border-radius: 7px;
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.chan-void {
+  border-color: var(--gc-lost);
+  color: var(--gc-lost);
+  font-size: 0.9rem;
+}
+
+.chan-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.chan-stats b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.chan-slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 6px;
+}
+.chan-slot {
+  --c: var(--idle);
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: baseline;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--c);
+  border-radius: var(--r);
+  background: var(--bg);
+  font-size: 0.75rem;
+}
+.chan-slot b {
+  font-family: var(--font-mono);
+  color: var(--muted);
+}
+.chan-slot-g {
+  font-family: var(--font-mono);
+  color: var(--ink);
+  font-weight: 600;
+}
+.chan-slot i {
+  font-style: normal;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chan-slot.is-idle {
+  border-top-color: var(--line);
+  opacity: 0.7;
+}
+.chan-slot.op-cpu {
+  border-top-color: var(--run);
+}
+.chan-slot.op-send {
+  border-top-color: var(--wl-0);
+}
+.chan-slot.op-recv {
+  border-top-color: var(--wl-5);
+}
+.chan-slot.op-select {
+  border-top-color: var(--hl);
+}
+.chan-slot.op-close {
+  border-top-color: var(--spin);
+}
+.chan-slot.op-nil,
+.chan-slot.op-panic {
+  border-top-color: var(--gc-lost);
+}
+.chan-slot.is-hl {
+  outline: 1px solid var(--hl);
+  outline-offset: 0;
+}
+
+.chan-g {
+  --c: var(--wl-0);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border: 1px solid var(--c);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--c) 10%, transparent);
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  color: var(--ink);
+}
+.chan-g b {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  color: var(--sys);
+}
+.chan-g small {
+  color: var(--muted);
+  font-family: var(--font-sans);
+}
+.chan-g.state-waiting {
+  border-style: dashed;
+  opacity: 0.9;
+}
+.chan-g.is-hl {
+  outline: 2px solid var(--hl);
+  outline-offset: 1px;
+}
+
+.chan-editor {
+  display: grid;
+  gap: 6px;
+}
+.chan-edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.chan-edit label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.phase-select {
+  flex-wrap: wrap;
+}
+.phase-select label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.mark-send-block,
+.mark-recv-block,
+.mark-select-block {
+  background: var(--spin);
+}
+.mark-send-direct,
+.mark-recv-direct,
+.mark-recv-wake {
+  background: var(--run);
+}
+.mark-chan-close,
+.mark-buf-full {
+  background: var(--hl);
+}
+.mark-send-closed,
+.mark-chan-nil,
+.mark-leak {
+  background: var(--gc-lost);
+  width: 5px;
+}
+
+.dot-send {
+  background: var(--wl-0);
+}
+.dot-recv {
+  background: var(--wl-5);
+}
+.dot-buf {
+  background: var(--spin);
+}
+.dot-chan {
+  background: var(--hl);
+}
+.dot-select {
+  background: var(--wl-3);
+}
+.dot-leak {
+  background: var(--gc-lost);
+}
+
+/* ──────────────── стенд «Сборщик мусора»: граф достижимости ──────────────── */
+
+.gc-view {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.gc-view-tabs {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.gc-view-tabs button {
+  padding: 2px 12px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.gc-view-tabs button:hover {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+.gc-view-tabs button.is-now {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.gc-graph {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg);
+  padding: 4px 6px 6px;
+  display: grid;
+  gap: 4px;
+}
+.gc-graph-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* Рёбра: тонкие и приглушённые, чтобы не спорить с узлами за внимание. */
+.gc-edge {
+  fill: none;
+  stroke: var(--gc-cell-line);
+  stroke-width: 1.1;
+}
+.gc-edge.is-root {
+  stroke: var(--muted);
+  stroke-dasharray: 3 2;
+}
+.gc-edge.is-hl {
+  stroke: var(--hl);
+  stroke-width: 2;
+}
+/* А вот эта ссылка — вся суть барьера записи, и она обязана бросаться в глаза. */
+.gc-edge.is-violation {
+  stroke: var(--gc-lost);
+  stroke-width: 2.4;
+}
+
+.gc-graph-divider line {
+  stroke: var(--line);
+  stroke-dasharray: 5 4;
+}
+.gc-graph-divider text {
+  fill: var(--muted);
+  font-size: 11px;
+  font-family: var(--font-sans);
+}
+
+.gc-root rect {
+  fill: var(--surface-2);
+  stroke: var(--muted);
+  stroke-width: 1.2;
+}
+.gc-root text {
+  fill: var(--ink);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+/* Просмотренный стек — чёрный: барьер Дейкстры для него больше не нужен. */
+.gc-root.is-scanned rect {
+  fill: var(--gc-black);
+  stroke: var(--muted);
+}
+.gc-root.is-scanned text {
+  fill: var(--gc-white);
+}
+.gc-root.is-hl rect {
+  stroke: var(--hl);
+  stroke-width: 2.4;
+}
+
+.gc-node circle {
+  stroke: var(--gc-cell-line);
+  stroke-width: 1.2;
+}
+.gc-node.is-used circle {
+  fill: var(--c, var(--wl-0));
+  stroke: var(--c, var(--wl-0));
+}
+.gc-node.is-white circle {
+  fill: var(--gc-white);
+}
+.gc-node.is-grey circle {
+  fill: var(--gc-grey);
+  stroke: var(--gc-grey);
+}
+/* Чёрный кружок на тёмном фоне без обводки не виден вовсе — кольцо обязательно. */
+.gc-node.is-black circle {
+  fill: var(--gc-black);
+  stroke: var(--muted);
+}
+.gc-node.is-lost circle {
+  fill: var(--gc-lost);
+  stroke: var(--gc-lost);
+}
+/* Недостижимое: тот же цвет разметки, но пунктиром — видно, что держать его некому. */
+.gc-node.is-garbage circle {
+  stroke-dasharray: 3 2;
+  opacity: 0.78;
+}
+.gc-node.is-hl circle {
+  stroke: var(--hl);
+  stroke-width: 2.6;
+}
+.gc-node-mark {
+  fill: var(--spin);
+  stroke: none;
+}
+
+.gc-graph-empty {
+  fill: var(--muted);
+  font-size: 12px;
+  font-family: var(--font-sans);
+}
+
+.gc-graph-note {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 0.72rem;
+  color: var(--muted);
+  padding: 0 4px;
+}
+.gc-graph-alarm {
+  color: var(--gc-lost);
+  font-weight: 600;
+}
+.gc-graph-hidden {
+  font-style: italic;
+}
+
+.gc-legend .lg-root::before {
+  background: var(--surface-2);
+  border: 1px solid var(--muted);
+  border-radius: 3px;
+}
+.gc-legend .lg-violation::before {
+  background: var(--gc-lost);
+  border-radius: 1px;
+  height: 3px;
+  align-self: center;
 }
