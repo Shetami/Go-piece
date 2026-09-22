@@ -1,0 +1,92 @@
+---
+/**
+ * Стоимость Seq Scan и Index Scan в зависимости от доли строк — по формулам
+ * планировщика PostgreSQL с настройками по умолчанию, упрощённо: таблица
+ * 1 млн строк на 10 000 страницах, порядок строк не связан с порядком в индексе.
+ * Число прочитанных страниц индексного доступа — формула Макерта — Лохмана,
+ * как в index_pages_fetched.
+ */
+const ROWS = 1_000_000
+const PAGES = 10_000
+const seq = PAGES * 1 + ROWS * (0.01 + 0.0025)
+const fetched = (n: number) => Math.min((2 * PAGES * n) / (2 * PAGES + n), PAGES)
+const index = (n: number, rpc: number) => rpc * fetched(n) + n * (0.005 + 0.0025 + 0.01)
+
+const MAXSEL = 0.04
+const MAXCOST = 45_000
+const X0 = 80
+const X1 = 600
+const Y0 = 240
+const Y1 = 30
+const px = (sel: number) => X0 + (sel / MAXSEL) * (X1 - X0)
+const py = (cost: number) => Y0 - (cost / MAXCOST) * (Y0 - Y1)
+
+const steps = Array.from({ length: 81 }, (_, i) => (i / 80) * MAXSEL)
+const line = (rpc: number) => steps.map((s, i) => `${i === 0 ? 'M' : 'L'}${px(s).toFixed(1)} ${py(index(s * ROWS, rpc)).toFixed(1)}`).join(' ')
+
+/** Где индекс перестаёт быть выгоднее: первая доля, при которой он дороже полного чтения. */
+function crossover(rpc: number): number {
+  let lo = 0
+  let hi = 1
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2
+    if (index(mid * ROWS, rpc) < seq) lo = mid
+    else hi = mid
+  }
+  return lo
+}
+const hdd = crossover(4)
+const ssd = crossover(1.1)
+const pct = (v: number) => `${(v * 100).toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%`
+const share = (v: number) => (v > 0.5 ? `${Math.round(v * 3) === 2 ? 'двух третях' : 'половине'} таблицы` : pct(v))
+const xticks = [0, 0.01, 0.02, 0.03, 0.04]
+const yticks = [0, 10_000, 20_000, 30_000, 40_000]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 290" role="img" aria-labelledby="dbscan-t">
+      <title id="dbscan-t">Стоимость полного чтения постоянна, стоимость чтения по индексу растёт с долей строк; при random_page_cost 4 они пересекаются около {pct(hdd)}, при 1,1 — только около {share(ssd)}</title>
+      {
+        yticks.map((c) => (
+          <g>
+            <path d={`M${X0} ${py(c)} H${X1}`} class="ln-life"></path>
+            <text x={X0 - 8} y={py(c) + 4} text-anchor="end" class="t-muted t-small t-mono">
+              {c === 0 ? '0' : `${c / 1000} тыс.`}
+            </text>
+          </g>
+        ))
+      }
+      {
+        xticks.map((s) => (
+          <text x={px(s)} y={Y0 + 18} text-anchor="middle" class="t-muted t-small t-mono">
+            {pct(s)}
+          </text>
+        ))
+      }
+      <text x={(X0 + X1) / 2} y={Y0 + 40} text-anchor="middle" class="t-muted">доля строк, подходящих под условие</text>
+      <text x="20" y="20" class="t-muted">стоимость в единицах планировщика</text>
+
+      <path d={`M${X0} ${py(seq)} H${X1}`} class="ln-accent"></path>
+      <path d={line(4)} class="ln"></path>
+      <path d={line(1.1)} class="ln ln-dash"></path>
+
+      <circle cx={px(hdd)} cy={py(seq)} r="4" class="dot-bad"></circle>
+      <path d={`M${px(hdd)} ${py(seq)} V${Y0}`} class="ln-thin"></path>
+
+      <text x={X1 + 12} y={py(seq) + 4} class="t-accent">Seq Scan</text>
+      <text x={X1 + 12} y={py(index(MAXSEL * ROWS, 4)) + 4} class="t-bold">Index Scan</text>
+      <text x={X1 + 12} y={py(index(MAXSEL * ROWS, 4)) + 20} class="t-muted t-small">random_page_cost 4</text>
+      <text x={X1 + 12} y={py(index(MAXSEL * ROWS, 1.1)) + 4} class="t-bold">Index Scan</text>
+      <text x={X1 + 12} y={py(index(MAXSEL * ROWS, 1.1)) + 20} class="t-muted t-small">1,1 — для SSD</text>
+      <text x={px(hdd) + 6} y={Y0 - 8} class="t-small">{pct(hdd)}</text>
+    </svg>
+  </div>
+  <figcaption>
+    Оценки по формулам планировщика PostgreSQL для таблицы в миллион строк на 10 000 страницах, если порядок строк не
+    связан с порядком в индексе. Полное чтение стоит одинаково при любой доле строк. Чтение по индексу дешевле, пока
+    строк мало, — но каждая строка может стоить случайного чтения страницы, и уже на {pct(hdd)} таблицы индекс
+    проигрывает. С random_page_cost = 1,1, как обычно ставят для SSD, на графике пересечения нет вовсе: по оценке
+    планировщика индекс уступит полному чтению лишь примерно на {share(ssd)}.
+  </figcaption>
+</figure>

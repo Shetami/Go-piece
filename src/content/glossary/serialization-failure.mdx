@@ -1,0 +1,29 @@
+---
+title: Ошибка сериализации
+short: 'Отказ базы выполнить транзакцию, потому что результат нельзя было бы получить ни при каком последовательном порядке. SQLSTATE 40001. Правильный ответ — повторить транзакцию.'
+aliases: [serialization failure, '40001', could not serialize access, SQLSTATE 40001, повтор транзакции]
+category: состояние
+related: [isolation-level, ssi, lost-update, write-skew, db-deadlock]
+---
+
+На REPEATABLE READ и SERIALIZABLE PostgreSQL не ждёт и не перепроверяет, как READ COMMITTED, а отказывается. Два текста ошибки:
+
+- `could not serialize access due to concurrent update` — транзакция пытается изменить строку, которую после её снимка изменила другая.
+- `could not serialize access due to read/write dependencies among transactions` — [SSI](/glossary/ssi/) нашёл опасный цикл зависимостей.
+
+Это не авария, а нормальная работа строгих уровней. Транзакцию нужно повторить **целиком**, с самого начала: прочитанное в прошлой попытке могло устареть, и решения, принятые по нему, нужно принять заново.
+
+В Go повтор выглядит как цикл вокруг функции транзакции:
+
+```go
+for attempt := 0; attempt < 5; attempt++ {
+    err := pgx.BeginTxFunc(ctx, pool, pgx.TxOptions{IsoLevel: pgx.Serializable}, work)
+    var pgErr *pgconn.PgError
+    if errors.As(err, &pgErr) && (pgErr.Code == "40001" || pgErr.Code == "40P01") {
+        continue
+    }
+    return err
+}
+```
+
+Отсюда требование к коду транзакции: внутри не должно быть действий, которые нельзя повторить, — отправки писем, вызовов внешних API. Их делают после коммита.

@@ -1,0 +1,60 @@
+---
+/**
+ * Три версии одной строки после двух UPDATE и то, какую из них видит какой снимок.
+ * Числа — из стенда «Версии строки».
+ */
+const vers = [
+  { x: 60, ctid: '(0,0)', v: 100, xmin: '99', xmax: '100 (T1)', dead: true },
+  { x: 290, ctid: '(0,1)', v: 110, xmin: '100 (T1)', xmax: '101 (T2)', dead: true },
+  { x: 520, ctid: '(0,2)', v: 120, xmin: '101 (T2)', xmax: '—', dead: false },
+]
+const W = 180
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 290" role="img" aria-labelledby="dbtup-t">
+      <title id="dbtup-t">Три версии строки acc со значениями 100, 110 и 120; транзакция R со старым снимком видит первую, новый запрос — третью</title>
+      <defs>
+        <marker id="dbtup-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+      <text x="20" y="28" class="t-bold">Строка acc в таблице — три версии</text>
+      {
+        vers.map((t, i) => (
+          <g>
+            <rect x={t.x} y="44" width={W} height="92" rx="8" class={t.dead ? 'foll' : 'lead'}></rect>
+            <text x={t.x + 12} y="64" class="t-mono t-muted t-small">ctid {t.ctid}</text>
+            <text x={t.x + W - 12} y="66" text-anchor="end" class="t-mono t-bold" style="font-size: 16px">v = {t.v}</text>
+            <text x={t.x + 12} y="92" class="t-small">xmin <tspan class="t-mono">{t.xmin}</tspan></text>
+            <text x={t.x + 12} y="112" class="t-small">xmax <tspan class="t-mono">{t.xmax}</tspan></text>
+            <text x={t.x + 12} y="128" class={t.dead ? 't-muted t-small' : 't-accent t-small'}>{t.dead ? 'мёртвая для новых снимков' : 'последняя версия'}</text>
+            {i < 2 && <path d={`M${t.x + W} 90 H${vers[i + 1]!.x - 4}`} class="ln" marker-end="url(#dbtup-a)"></path>}
+            {i < 2 && <text x={t.x + W + 25} y="82" text-anchor="middle" class="t-muted t-small">t_ctid</text>}
+          </g>
+        ))
+      }
+
+      <text x="20" y="172" class="t-small t-bold">R · REPEATABLE READ</text>
+      <text x="20" y="188" class="t-muted t-small">снимок взят до T1</text>
+      <circle cx={vers[0]!.x + W / 2} cy="178" r="7" class="dot-ok"></circle>
+      <text x={vers[0]!.x + W / 2 + 14} y="182" class="t-small">видит 100</text>
+      <path d={`M${vers[0]!.x + W / 2} 171 V140`} class="ln-thin"></path>
+
+      <text x="20" y="222" class="t-small t-bold">новый запрос</text>
+      <text x="20" y="238" class="t-muted t-small">снимок после T2</text>
+      <circle cx={vers[2]!.x + W / 2} cy="228" r="7" class="dot-ok"></circle>
+      <text x={vers[2]!.x + W / 2 + 14} y="232" class="t-small">видит 120</text>
+      <path d={`M${vers[2]!.x + W / 2} 221 V140`} class="ln-thin"></path>
+
+      <rect x={vers[0]!.x} y="252" width={vers[1]!.x + W - vers[0]!.x} height="26" rx="5" class="risk"></rect>
+      <text x={vers[0]!.x + 10} y="269" class="t-small">VACUUM не уберёт обе, пока R открыта: горизонт очистки — её снимок</text>
+    </svg>
+  </div>
+  <figcaption>
+    UPDATE не перезаписывает строку: он ставит xmax на старую версию и создаёт новую. Какую версию увидит транзакция,
+    решает её снимок — R продолжает читать 100, хотя в таблице уже 120. Обратите внимание: версию 110 не видит вообще
+    никто, но и её VACUUM оставит — горизонт очистки один на всю базу, и он стоит на снимке R.
+  </figcaption>
+</figure>

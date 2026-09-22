@@ -1,0 +1,25 @@
+---
+title: Уровень изоляции
+short: 'Насколько транзакция защищена от параллельных: READ UNCOMMITTED, READ COMMITTED, REPEATABLE READ, SERIALIZABLE. Чем строже, тем меньше аномалий и тем больше ожиданий или ошибок.'
+aliases: [isolation level, READ COMMITTED, REPEATABLE READ, SERIALIZABLE, READ UNCOMMITTED, default_transaction_isolation, SET TRANSACTION ISOLATION LEVEL]
+category: настройка
+related: [dirty-read, nonrepeatable-read, phantom-read, lost-update, write-skew, ssi, db-snapshot]
+---
+
+Стандарт SQL определяет уровни через аномалии, которые на них запрещены. PostgreSQL на каждом уровне строже стандарта:
+
+| Уровень | Грязное чтение | Неповторяемое | Фантом | Потерянное обновление | Перекос записи |
+| --- | --- | --- | --- | --- | --- |
+| READ UNCOMMITTED | в PG нет | есть | есть | есть | есть |
+| READ COMMITTED (по умолчанию) | нет | есть | есть | есть | есть |
+| REPEATABLE READ | нет | нет | в PG нет | ошибка вместо потери | есть |
+| SERIALIZABLE | нет | нет | нет | нет | нет |
+
+Как это устроено в PostgreSQL:
+
+- **READ UNCOMMITTED** не существует отдельно — работает как READ COMMITTED.
+- **READ COMMITTED** — новый [снимок](/glossary/db-snapshot/) на каждый оператор. Заблокированное UPDATE ждёт и [перепроверяет](/glossary/eval-plan-qual/) свежую версию строки.
+- **REPEATABLE READ** — один снимок на транзакцию (snapshot isolation). Изменить строку, которую после снимка изменил кто-то ещё, нельзя — [ошибка сериализации](/glossary/serialization-failure/).
+- **SERIALIZABLE** — REPEATABLE READ плюс [SSI](/glossary/ssi/): слежение за зависимостями, которые могут дать несериализуемый результат.
+
+Уровень выбирают на транзакцию: `BEGIN ISOLATION LEVEL REPEATABLE READ`, в pgx — `pgx.TxOptions{IsoLevel: pgx.RepeatableRead}`. На REPEATABLE READ и SERIALIZABLE приложение обязано уметь повторять транзакцию при ошибке 40001.

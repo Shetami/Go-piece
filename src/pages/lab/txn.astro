@@ -1,0 +1,27 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro'
+import TxnStand from '../../components/stands/txn/TxnStand.astro'
+---
+
+<BaseLayout
+  title="Стенд: транзакции"
+  description="Пошаговая модель транзакций в духе PostgreSQL: версии строк с xmin и xmax, снимки, уровни изоляции и аномалии, блокировки строк и дедлоки, SSI, VACUUM, WAL, синхронный коммит и падение сервера."
+  wide
+>
+  <nav class="text-sm text-muted mb-4">
+    <a href="/lab/" class="hover:text-ink">Лаборатория</a> / Транзакции
+  </nav>
+  <div class="flex flex-wrap items-baseline justify-between gap-4 mb-2">
+    <h1 class="text-3xl font-bold tracking-tight">Транзакции: MVCC изнутри</h1>
+    <span class="flex gap-4 text-sm">
+      <a href="/lectures/databases/transactions/" class="text-accent">теория →</a>
+      <a href="/lectures/databases/postgres/" class="text-accent">PostgreSQL →</a>
+    </span>
+  </div>
+  <p class="text-muted max-w-3xl">
+    Пробел — пуск и пауза, стрелки — шаг, Shift+стрелки — 10 шагов. Клик по клетке расписания переносит на этот тик,
+    клик по событию — открывает разбор. В настройках — уровень изоляции, способ «прочитать — изменить — записать»,
+    автовакуум, synchronous_commit и падение сервера, а ниже — своя таблица и свои сессии.
+  </p>
+  <TxnStand scenario="lost-update" mode="lab" />
+</BaseLayout>

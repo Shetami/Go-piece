@@ -1,0 +1,29 @@
+---
+title: Горизонт очистки
+short: 'Номер самой старой транзакции, чей снимок или изменения ещё могут понадобиться. Мёртвые версии моложе горизонта VACUUM убрать не может. Горизонт один на всю базу.'
+aliases: [xmin horizon, backend_xmin, oldest xmin, OldestXmin, горизонт]
+category: состояние
+related: [vacuum, table-bloat, idle-in-transaction, db-snapshot]
+source: src/backend/storage/ipc/procarray.c — ComputeXidHorizons
+---
+
+Версию строки, которую заменили, можно удалить, только когда её гарантированно никто не увидит. Кто мог бы? Любая транзакция, чей [снимок](/glossary/db-snapshot/) взят до замены. Поэтому PostgreSQL берёт минимум xmin по всем снимкам всех сессий — это и есть горизонт — и VACUUM убирает только то, что умерло раньше.
+
+Кто держит горизонт:
+
+- транзакция на REPEATABLE READ или SERIALIZABLE — весь срок жизни её снимка;
+- любая транзакция с xid, то есть что-то изменившая, — до своего конца;
+- долгий запрос на READ COMMITTED — пока идёт этот запрос;
+- слот репликации и `hot_standby_feedback` с реплики — долгий запрос на реплике держит горизонт на мастере;
+- подготовленная, но не завершённая двухфазная транзакция.
+
+Найти виновника:
+
+```sql
+SELECT pid, state, xact_start, age(backend_xmin), query
+FROM pg_stat_activity
+WHERE backend_xmin IS NOT NULL
+ORDER BY age(backend_xmin) DESC;
+```
+
+Горизонт общий для всей базы: забытая транзакция в сервисе отчётов останавливает очистку таблиц, которых она даже не касалась.

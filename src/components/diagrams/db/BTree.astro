@@ -1,0 +1,81 @@
+---
+/**
+ * B-дерево из двух уровней и путь поиска ключа 42: корень → лист → строка в таблице.
+ */
+const leaves = [
+  { x: 40, keys: [3, 8, 15, 22] },
+  { x: 280, keys: [30, 35, 42, 51] },
+  { x: 520, keys: [60, 67, 74, 88] },
+]
+const LW = 200
+const cell = (lx: number, i: number) => lx + 8 + i * 47
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 300" role="img" aria-labelledby="dbbt-t">
+      <title id="dbbt-t">Поиск ключа 42 в B-дереве: корень направляет во второй лист, в листе ключ и адрес строки (0,3), по нему читается страница таблицы</title>
+      <defs>
+        <marker id="dbbt-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+        <marker id="dbbt-b" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head-accent"></path>
+        </marker>
+      </defs>
+
+      <!-- корень -->
+      <text x="20" y="44" class="t-muted t-small">корень</text>
+      <rect x="290" y="22" width="180" height="40" rx="6" class="lead"></rect>
+      <text x="330" y="47" text-anchor="middle" class="t-mono">&lt; 30</text>
+      <text x="380" y="47" text-anchor="middle" class="t-mono t-accent">30–59</text>
+      <text x="436" y="47" text-anchor="middle" class="t-mono">≥ 60</text>
+
+      <path d="M320 62 L140 124" class="ln"></path>
+      <path d="M380 62 L380 122" class="ln-accent" marker-end="url(#dbbt-b)"></path>
+      <path d="M440 62 L620 124" class="ln"></path>
+
+      <!-- листья -->
+      <text x="20" y="118" class="t-muted t-small">листья</text>
+      {
+        leaves.map((l, li) => (
+          <g>
+            <rect x={l.x} y="124" width={LW} height="44" rx="6" class={li === 1 ? 'lead' : 'box'}></rect>
+            {l.keys.map((k, i) => (
+              <g>
+                <rect x={cell(l.x, i)} y="132" width="42" height="28" rx="4" class={k === 42 ? 'cell-on' : 'cell'}></rect>
+                <text x={cell(l.x, i) + 21} y="151" text-anchor="middle" class={k === 42 ? 't-mono t-accent' : 't-mono'}>
+                  {k}
+                </text>
+              </g>
+            ))}
+          </g>
+        ))
+      }
+      <path d={`M${40 + LW} 146 H276`} class="ln" marker-end="url(#dbbt-a)"></path>
+      <path d={`M${280 + LW} 146 H516`} class="ln" marker-end="url(#dbbt-a)"></path>
+      <text x="258" y="186" text-anchor="middle" class="t-muted t-small">листья связаны —</text>
+      <text x="258" y="200" text-anchor="middle" class="t-muted t-small">диапазон читается подряд</text>
+
+      <!-- переход в таблицу -->
+      <path d={`M${cell(280, 2) + 21} 160 L${cell(280, 2) + 21} 232`} class="ln-accent" marker-end="url(#dbbt-b)"></path>
+      <text x={cell(280, 2) + 30} y="204" class="t-accent t-small">ctid (0,3)</text>
+      <rect x="300" y="236" width="300" height="44" rx="6" class="box-2"></rect>
+      <text x="316" y="262" class="t-small">страница 0 таблицы:</text>
+      <rect x="440" y="244" width="36" height="28" rx="4" class="cell"></rect>
+      <rect x="480" y="244" width="36" height="28" rx="4" class="cell"></rect>
+      <rect x="520" y="244" width="36" height="28" rx="4" class="cell-on"></rect>
+      <text x="538" y="263" text-anchor="middle" class="t-mono t-small">42</text>
+
+      <text x="620" y="232" class="t-muted t-small">3 чтения страниц:</text>
+      <text x="620" y="248" class="t-muted t-small">корень, лист, таблица.</text>
+      <text x="620" y="264" class="t-muted t-small">Корень почти всегда</text>
+      <text x="620" y="280" class="t-muted t-small">уже в кэше.</text>
+    </svg>
+  </div>
+  <figcaption>
+    Каждый узел B-дерева — страница с сотнями ключей, поэтому дерево низкое: три уровня покрывают десятки миллионов
+    строк. Поиск по ключу — спуск от корня к листу; лист хранит ключ и адрес строки в таблице. Листья упорядочены и
+    связаны, поэтому диапазон и ORDER BY по индексу читаются подряд, без сортировки.
+  </figcaption>
+</figure>

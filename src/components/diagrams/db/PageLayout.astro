@@ -1,0 +1,90 @@
+---
+/**
+ * Страница PostgreSQL изнутри: заголовок, массив указателей, растущий вправо,
+ * строки, растущие влево, и свободное место посередине. Адрес строки — ctid.
+ */
+const Y = 96
+const H = 56
+const ptr = (i: number) => 150 + i * 36
+const tuples = [
+  { x: 500, w: 60, label: 'строка 1' },
+  { x: 440, w: 58, label: 'строка 2' },
+  { x: 392, w: 46, label: 'строка 3' },
+  { x: 330, w: 60, label: 'строка 4' },
+]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 250" role="img" aria-labelledby="dbpage-t">
+      <title id="dbpage-t">Страница в 8 КБ: заголовок, четыре указателя в начале, четыре строки в конце, свободное место посередине</title>
+      <defs>
+        <marker id="dbpage-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+
+      <text x="40" y="30" class="t-bold">Страница 0 таблицы · 8 КБ</text>
+      <rect x="40" y={Y} width="522" height={H} rx="6" class="box"></rect>
+
+      <!-- заголовок -->
+      <rect x="44" y={Y + 4} width="100" height={H - 8} rx="4" class="box-2"></rect>
+      <text x="94" y={Y + 24} text-anchor="middle" class="t-small t-bold">заголовок</text>
+      <text x="94" y={Y + 40} text-anchor="middle" class="t-muted t-small t-mono">LSN 0/1A2B</text>
+
+      <!-- указатели -->
+      <text x={ptr(0)} y={Y - 12} class="t-muted t-small">указатели растут →</text>
+      {
+        [0, 1, 2, 3].map((i) => (
+          <g>
+            <rect x={ptr(i)} y={Y + 10} width="32" height={H - 20} rx="4" class={i === 1 ? 'cell-on' : 'cell'}></rect>
+            <text x={ptr(i) + 16} y={Y + 33} text-anchor="middle" class="t-mono t-small">{i + 1}</text>
+          </g>
+        ))
+      }
+
+      <!-- свободное место -->
+      <rect x="296" y={Y + 10} width="30" height={H - 20} rx="4" class="idle"></rect>
+      <text x="311" y={Y + H + 18} text-anchor="middle" class="t-muted t-small">свободно</text>
+
+      <!-- строки -->
+      <text x="560" y={Y - 12} text-anchor="end" class="t-muted t-small">← строки растут</text>
+      {
+        tuples.map((t, i) => (
+          <g>
+            <rect x={t.x} y={Y + 6} width={t.w} height={H - 12} rx="4" class={i === 1 ? 'lead' : 'foll'}></rect>
+            <text x={t.x + t.w / 2} y={Y + 33} text-anchor="middle" class="t-small">{t.label}</text>
+          </g>
+        ))
+      }
+
+      <!-- указатель → строка -->
+      {
+        tuples.map((t, i) => {
+          const from = ptr(i) + 16
+          const to = t.x + t.w / 2
+          const depth = Y + H + 30 + i * 9
+          return (
+            <path
+              d={`M${from} ${Y + H - 10} C${from} ${depth}, ${to} ${depth}, ${to} ${Y + H - 6}`}
+              class={i === 1 ? 'ln-accent' : 'ln'}
+              marker-end="url(#dbpage-a)"
+            ></path>
+          )
+        })
+      }
+
+      <text x="590" y="92" class="t-accent">ctid (0,2)</text>
+      <text x="590" y="110" class="t-muted">страница 0, указатель 2.</text>
+      <text x="590" y="130" class="t-muted">Индексы хранят именно</text>
+      <text x="590" y="146" class="t-muted">такой адрес. Строку можно</text>
+      <text x="590" y="162" class="t-muted">сдвинуть внутри страницы —</text>
+      <text x="590" y="178" class="t-muted">указатель останется тем же.</text>
+    </svg>
+  </div>
+  <figcaption>
+    База читает и пишет диск страницами, а не строками. Указатели растут от начала страницы, строки — от конца, и
+    страница полна, когда они встречаются. LSN в заголовке — номер последней записи WAL, которая меняла страницу: раньше
+    неё страницу на диск не запишут.
+  </figcaption>
+</figure>

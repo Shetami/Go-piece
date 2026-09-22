@@ -2811,6 +2811,584 @@ body {
   background: var(--wl-3);
 }
 
+/* ─────────────────────── стенд «Транзакции» ─────────────────────── */
+
+.db-board {
+  gap: 14px;
+}
+
+/* Расписание: строки — сессии, столбцы — тики. Как таблицы расписаний в учебниках. */
+.db-sched {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.db-sched-grid {
+  display: grid;
+  gap: 2px;
+  align-items: center;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.db-sched-corner,
+.db-sched-name {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface);
+  font-size: 0.72rem;
+  color: var(--muted);
+  padding-right: 6px;
+}
+.db-sched-name {
+  --c: var(--wl-0);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--c);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.db-sched-name.is-hl {
+  text-decoration: underline 2px var(--hl);
+}
+.db-sched-tick {
+  height: 14px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.6rem;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.db-sched-tick.is-now {
+  color: var(--ink);
+  font-weight: 700;
+}
+.db-cell {
+  --c: var(--wl-0);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+.db-cell.is-empty {
+  background: transparent;
+  border-color: var(--line);
+  border-style: dotted;
+}
+.db-cell.op-read {
+  background: color-mix(in oklab, var(--c) 18%, transparent);
+  border-color: color-mix(in oklab, var(--c) 45%, transparent);
+}
+.db-cell.op-write {
+  background: color-mix(in oklab, var(--c) 55%, transparent);
+  border-color: var(--c);
+}
+.db-cell.op-commit {
+  background: var(--run);
+  color: var(--surface);
+}
+.db-cell.op-abort {
+  background: var(--gc-lost);
+  color: var(--surface);
+}
+.db-cell.is-wait {
+  background: repeating-linear-gradient(135deg, color-mix(in oklab, var(--spin) 45%, transparent) 0 3px, transparent 3px 6px);
+  border-color: var(--spin);
+}
+.db-cell.is-fsync {
+  background: repeating-linear-gradient(90deg, color-mix(in oklab, var(--accent) 40%, transparent) 0 2px, transparent 2px 4px);
+  border-color: var(--accent);
+}
+.db-cell.is-down {
+  background: var(--idle);
+  opacity: 0.5;
+}
+.db-cell.is-bad {
+  outline: 2px solid var(--gc-lost);
+  outline-offset: -1px;
+}
+.db-cell.is-fresh {
+  box-shadow: -2px 0 0 var(--muted);
+}
+.db-cell.is-future {
+  opacity: 0.22;
+}
+.db-cell.is-now {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+.db-sched-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.db-sched-legend .db-cell {
+  cursor: default;
+  margin-left: 6px;
+}
+
+/* Сессии с их SQL. */
+.db-sessions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 8px;
+}
+.db-sess {
+  --c: var(--wl-0);
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--c);
+  border-radius: var(--r);
+  background: var(--bg);
+  padding: 8px 10px;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  min-width: 0;
+}
+.db-sess.is-hl {
+  border-color: var(--hl);
+  border-top-color: var(--c);
+}
+.db-sess.state-waiting,
+.db-sess.state-committing {
+  border-style: dashed;
+  border-top-style: solid;
+}
+.db-sess.state-aborted {
+  border-top-color: var(--gc-lost);
+}
+.db-sess header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+.db-sess header strong {
+  font-family: var(--font-mono);
+  color: var(--c);
+}
+.db-sess-state {
+  font-size: 0.72rem;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+.state-waiting .db-sess-state,
+.state-committing .db-sess-state {
+  background: color-mix(in oklab, var(--spin) 22%, transparent);
+}
+.state-committed .db-sess-state {
+  background: color-mix(in oklab, var(--run) 22%, transparent);
+}
+.state-aborted .db-sess-state {
+  background: color-mix(in oklab, var(--gc-lost) 22%, transparent);
+}
+.db-sess-level {
+  margin-left: auto;
+  font-size: 0.68rem;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+.db-sql {
+  list-style: none;
+  padding: 0 !important;
+  display: grid;
+  gap: 1px;
+}
+.db-sql li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 6px;
+  align-items: baseline;
+  padding: 1px 6px;
+  border-left: 2px solid transparent;
+  border-radius: 3px;
+}
+.db-sql code {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+.db-sql small {
+  grid-column: 1 / -1;
+  font-size: 0.66rem;
+  color: var(--muted);
+}
+.db-sql-tag {
+  font-size: 0.64rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.db-sql .is-done code::before {
+  content: '✓ ';
+  color: var(--run);
+}
+.db-sql .is-next {
+  color: var(--muted);
+}
+.db-sql .is-now {
+  border-left-color: var(--c);
+  background: color-mix(in oklab, var(--c) 10%, transparent);
+}
+.db-sql .is-wait {
+  border-left-color: var(--spin);
+  background: color-mix(in oklab, var(--spin) 14%, transparent);
+}
+.db-sql .is-wait .db-sql-tag {
+  color: var(--spin);
+}
+.db-sql .is-err {
+  border-left-color: var(--gc-lost);
+  background: color-mix(in oklab, var(--gc-lost) 12%, transparent);
+}
+.db-sql .is-err .db-sql-tag {
+  color: var(--gc-lost);
+}
+.db-sql .is-skip {
+  color: var(--idle);
+  text-decoration: line-through;
+}
+.db-sess-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.db-sess-foot b {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--ink);
+}
+.db-sess-foot i {
+  font-style: normal;
+}
+.db-sess-err {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--gc-lost);
+}
+.db-sess-err i {
+  font-family: var(--font-sans);
+  color: var(--muted);
+  font-style: normal;
+}
+.db-sess-prev {
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+/* Таблица с версиями строк и боковая панель. */
+.db-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+@media (max-width: 820px) {
+  .db-main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.db-heap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+.db-heap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+}
+.db-heap th,
+.db-heap td {
+  padding: 3px 6px;
+  text-align: left;
+  white-space: nowrap;
+}
+.db-heap th {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+.db-page-row td {
+  padding-top: 6px;
+  font-size: 0.64rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px dashed var(--line);
+}
+.db-free td {
+  color: var(--idle);
+  font-size: 0.68rem;
+}
+.db-ctid,
+.db-k {
+  font-family: var(--font-mono);
+}
+.db-v {
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+.db-tuple.is-dead td {
+  color: var(--idle);
+}
+.db-tuple.is-dead .db-v {
+  text-decoration: line-through;
+}
+.db-tuple.is-kept .db-status {
+  color: var(--spin);
+}
+.db-tuple.is-new td {
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+}
+.db-tuple.is-new .db-v {
+  font-style: italic;
+}
+.db-tuple.is-locked .db-status {
+  color: var(--spin);
+}
+.db-tuple.is-hl td {
+  background: color-mix(in oklab, var(--hl) 16%, transparent);
+}
+.db-tuple.is-soft td {
+  background: color-mix(in oklab, var(--hl) 6%, transparent);
+}
+.db-status {
+  font-size: 0.68rem;
+}
+.db-xid {
+  --c: var(--muted);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in oklab, var(--c) 45%, transparent);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+}
+.db-xid small {
+  font-family: var(--font-sans);
+  font-size: 0.6rem;
+  color: var(--c);
+  font-weight: 600;
+}
+.db-xid em {
+  font-style: normal;
+  font-size: 0.58rem;
+  color: var(--spin);
+}
+.db-xid.is-none {
+  border: 0;
+  color: var(--idle);
+}
+.db-xid.st-in-progress {
+  border-style: dashed;
+  background: color-mix(in oklab, var(--c) 10%, transparent);
+}
+.db-xid.st-committed {
+  background: color-mix(in oklab, var(--c) 22%, transparent);
+}
+.db-xid.st-aborted {
+  text-decoration: line-through;
+  opacity: 0.65;
+}
+.db-xid.is-hl {
+  outline: 2px solid var(--hl);
+}
+.db-vis-h {
+  --c: var(--muted);
+  text-align: center !important;
+  font-family: var(--font-mono);
+  color: var(--c) !important;
+}
+.db-vis-h.is-hl {
+  text-decoration: underline 2px var(--hl);
+}
+.db-vis {
+  --c: var(--muted);
+  text-align: center !important;
+  color: var(--idle);
+}
+.db-vis.is-yes {
+  color: var(--c);
+  font-weight: 700;
+}
+.db-vis-now.is-yes {
+  color: var(--ink);
+}
+
+.db-side {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.db-box {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 8px 10px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.db-box b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.db-inv.is-ok {
+  border-color: color-mix(in oklab, var(--run) 50%, var(--line));
+}
+.db-inv.is-bad {
+  border-color: var(--gc-lost);
+  background: color-mix(in oklab, var(--gc-lost) 8%, transparent);
+}
+.db-warn {
+  color: var(--spin) !important;
+}
+.db-hl-text {
+  text-decoration: underline 2px var(--hl);
+}
+.db-down {
+  padding: 8px 10px;
+  border-radius: var(--r);
+  background: color-mix(in oklab, var(--gc-lost) 16%, transparent);
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+.db-xact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.db-wal {
+  list-style: none;
+  padding: 0 !important;
+  display: grid;
+  gap: 1px;
+  font-size: 0.7rem;
+}
+.db-wal li {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 0 4px;
+  border-left: 2px dashed var(--line);
+}
+.db-wal li.is-flushed {
+  border-left: 2px solid var(--run);
+}
+.db-wal li.is-commit {
+  font-weight: 600;
+  color: var(--ink);
+}
+.db-wal li.is-ckpt {
+  color: var(--accent);
+}
+.db-wal small {
+  --c: var(--muted);
+  color: var(--c);
+  font-weight: 600;
+}
+.db-lsn {
+  font-family: var(--font-mono);
+  color: var(--muted);
+  min-width: 2ch;
+  text-align: right;
+}
+.db-choice {
+  flex-wrap: wrap;
+  border-radius: 12px;
+}
+.settings-note {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin: 6px 0 0 !important;
+}
+
+.mark-db-lock-wait,
+.mark-db-row-recheck,
+.mark-db-vacuum-blocked {
+  background: var(--spin);
+}
+.mark-db-txn-commit,
+.mark-db-db-recovered {
+  background: var(--run);
+}
+.mark-db-row-update,
+.mark-db-ssi-conflict,
+.mark-db-wal-flush {
+  background: var(--accent);
+}
+.mark-db-txn-abort,
+.mark-db-deadlock-found,
+.mark-db-db-crash {
+  background: var(--hl);
+}
+.mark-db-anomaly-dirty,
+.mark-db-anomaly-nonrepeatable,
+.mark-db-anomaly-phantom,
+.mark-db-anomaly-lost,
+.mark-db-invariant-broken,
+.mark-db-commit-lost {
+  background: var(--gc-lost);
+  width: 5px;
+}
+
+.dot-db-txn {
+  background: var(--run);
+}
+.dot-db-row,
+.dot-db-stmt {
+  background: var(--wl-0);
+}
+.dot-db-snap {
+  background: var(--wl-5);
+}
+.dot-db-lock,
+.dot-db-deadlock {
+  background: var(--spin);
+}
+.dot-db-commit,
+.dot-db-wal,
+.dot-db-checkpoint {
+  background: var(--accent);
+}
+.dot-db-ssi {
+  background: var(--wl-3);
+}
+.dot-db-vacuum {
+  background: var(--hl);
+}
+.dot-db-anomaly,
+.dot-db-invariant,
+.dot-db-db {
+  background: var(--gc-lost);
+}
+
 /* ─────────────────────── схемы в лекциях ─────────────────────── */
 
 .dg {

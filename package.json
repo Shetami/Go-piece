@@ -16,7 +16,8 @@
     "demo:gc": "node src/components/stands/gc/engine/demo.ts",
     "demo:mem": "node src/components/stands/mem/engine/demo.ts",
     "demo:chan": "node src/components/stands/chan/engine/demo.ts",
-    "demo:kafka": "node src/components/stands/kafka/engine/demo.ts"
+    "demo:kafka": "node src/components/stands/kafka/engine/demo.ts",
+    "demo:txn": "node src/components/stands/txn/engine/demo.ts"
   },
   "dependencies": {
     "@astrojs/mdx": "^8.0.1",

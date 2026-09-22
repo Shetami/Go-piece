@@ -1,0 +1,83 @@
+---
+/**
+ * Процессы PostgreSQL: по процессу на соединение, общая память и фоновые процессы.
+ */
+const conns = [70, 118, 166]
+const bg = [
+  { x: 180, label: 'walwriter' },
+  { x: 290, label: 'checkpointer' },
+  { x: 400, label: 'bgwriter' },
+  { x: 510, label: 'autovacuum' },
+]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 310" role="img" aria-labelledby="dbproc-t">
+      <title id="dbproc-t">Каждое соединение из пула обслуживает отдельный процесс PostgreSQL; процессы общаются через общую память; фоновые процессы пишут WAL и страницы и чистят таблицы</title>
+      <defs>
+        <marker id="dbproc-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+
+      <text x="20" y="30" class="t-muted">сервис на Go</text>
+      <rect x="20" y="44" width="120" height="152" rx="8" class="box"></rect>
+      <text x="80" y="64" text-anchor="middle" class="t-bold t-small">pgxpool</text>
+      {conns.map((y, i) => (
+        <g>
+          <rect x="34" y={y} width="92" height="30" rx="5" class="box-2"></rect>
+          <text x="80" y={y + 19} text-anchor="middle" class="t-small">соединение {i + 1}</text>
+        </g>
+      ))}
+
+      <text x="180" y="30" class="t-muted">процессы PostgreSQL</text>
+      {conns.map((y, i) => (
+        <g>
+          <path d={`M126 ${y + 15} H176`} class="ln" marker-end="url(#dbproc-a)"></path>
+          <rect x="180" y={y} width="120" height="30" rx="5" class="lead"></rect>
+          <text x="240" y={y + 19} text-anchor="middle" class="t-small">backend {i + 1}</text>
+        </g>
+      ))}
+      <text x="240" y="216" text-anchor="middle" class="t-muted t-small">по процессу на соединение</text>
+
+      <rect x="360" y="44" width="220" height="152" rx="10" class="box-2"></rect>
+      <text x="470" y="64" text-anchor="middle" class="t-bold t-small">общая память</text>
+      <rect x="374" y="74" width="192" height="26" rx="4" class="cell"></rect>
+      <text x="470" y="91" text-anchor="middle" class="t-small">shared_buffers — страницы</text>
+      <rect x="374" y="104" width="94" height="26" rx="4" class="cell"></rect>
+      <text x="421" y="121" text-anchor="middle" class="t-small">WAL-буферы</text>
+      <rect x="472" y="104" width="94" height="26" rx="4" class="cell"></rect>
+      <text x="519" y="121" text-anchor="middle" class="t-small">pg_xact</text>
+      <rect x="374" y="134" width="94" height="26" rx="4" class="cell"></rect>
+      <text x="421" y="151" text-anchor="middle" class="t-small">ProcArray</text>
+      <rect x="472" y="134" width="94" height="26" rx="4" class="cell"></rect>
+      <text x="519" y="151" text-anchor="middle" class="t-small">блокировки</text>
+      <text x="470" y="182" text-anchor="middle" class="t-muted t-small">ProcArray — кто идёт: из него снимки</text>
+      {conns.map((y) => <path d={`M300 ${y + 15} H356`} class="ln ln-dash"></path>)}
+
+      <text x="620" y="30" class="t-muted">диск</text>
+      <rect x="620" y="56" width="120" height="50" rx="8" class="box"></rect>
+      <text x="680" y="86" text-anchor="middle" class="t-small t-bold">base/ — таблицы</text>
+      <rect x="620" y="130" width="120" height="50" rx="8" class="box"></rect>
+      <text x="680" y="160" text-anchor="middle" class="t-small t-bold">pg_wal/</text>
+
+      <text x="180" y="248" class="t-muted">фоновые процессы</text>
+      {bg.map((b) => (
+        <g>
+          <rect x={b.x} y="258" width="100" height="30" rx="5" class="foll"></rect>
+          <text x={b.x + 50} y="277" text-anchor="middle" class="t-small t-mono">{b.label}</text>
+        </g>
+      ))}
+      <path d="M230 258 C230 230, 560 214, 616 164" class="ln ln-dash" marker-end="url(#dbproc-a)"></path>
+      <path d="M340 258 C340 232, 580 230, 616 96" class="ln ln-dash" marker-end="url(#dbproc-a)"></path>
+      <text x="620" y="214" class="t-muted t-small">WAL и страницы</text>
+      <text x="620" y="228" class="t-muted t-small">пишут фоном</text>
+    </svg>
+  </div>
+  <figcaption>
+    На каждое соединение PostgreSQL держит отдельный процесс. Процессы делят общую память: кэш страниц, WAL-буферы,
+    статусы транзакций, список идущих транзакций, из которого строятся снимки. Фоновые процессы сбрасывают WAL и
+    грязные страницы и чистят таблицы. Поэтому соединения дороги, и между сервисом и базой всегда стоит пул.
+  </figcaption>
+</figure>

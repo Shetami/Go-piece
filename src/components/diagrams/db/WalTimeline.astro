@@ -1,0 +1,64 @@
+---
+/**
+ * Одно изменение от UPDATE до восстановления после падения: что лежит в памяти,
+ * что на диске и почему подтверждённый коммит переживает падение.
+ */
+const X = { upd: 190, commit: 320, ok: 400, crash: 540, redo: 640, end: 740 }
+const lanes = [
+  { y: 70, label: 'кэш: страница' },
+  { y: 118, label: 'память: WAL' },
+  { y: 166, label: 'диск: WAL' },
+  { y: 214, label: 'диск: страница' },
+]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 270" role="img" aria-labelledby="dbwal-t">
+      <title id="dbwal-t">UPDATE меняет страницу в памяти и пишет WAL; COMMIT ждёт сброса WAL на диск; после падения страница восстанавливается из WAL</title>
+      <defs>
+        <marker id="dbwal-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head-accent"></path>
+        </marker>
+      </defs>
+      <text x={X.upd} y="26" text-anchor="middle" class="t-mono t-small">UPDATE v = 150</text>
+      <text x={X.commit} y="26" text-anchor="middle" class="t-mono t-small">COMMIT</text>
+      <text x={X.ok} y="42" text-anchor="middle" class="t-ok">«ок» клиенту</text>
+      <text x={X.crash} y="26" text-anchor="middle" class="t-bad">падение</text>
+      <text x={X.redo} y="26" text-anchor="middle" class="t-small">восстановление</text>
+      {[X.upd, X.commit, X.redo].map((x) => <path d={`M${x} 34 V236`} class="ln-life"></path>)}
+      <path d={`M${X.crash} 34 V236`} class="ln" style="stroke: var(--gc-lost); stroke-dasharray: 5 4"></path>
+
+      {lanes.map((l) => <text x="20" y={l.y + 4} class="t-muted t-small">{l.label}</text>)}
+
+      <!-- страница в кэше -->
+      <rect x={X.upd} y="58" width={X.crash - X.upd} height="24" rx="4" class="cell-on"></rect>
+      <text x={X.upd + 8} y="74" class="t-small">v = 150, грязная</text>
+      <rect x={X.redo} y="58" width={X.end - X.redo} height="24" rx="4" class="cell-on"></rect>
+      <text x={X.redo + 8} y="74" class="t-small">v = 150 снова</text>
+
+      <!-- WAL в памяти -->
+      <rect x={X.upd} y="106" width="60" height="24" rx="4" class="box-2"></rect>
+      <text x={X.upd + 30} y="122" text-anchor="middle" class="t-small t-mono">v=150</text>
+      <rect x={X.commit} y="106" width="60" height="24" rx="4" class="box-2"></rect>
+      <text x={X.commit + 30} y="122" text-anchor="middle" class="t-small t-mono">COMMIT</text>
+
+      <!-- WAL на диске -->
+      <path d={`M${X.commit + 30} 130 V150`} class="ln-accent" marker-end="url(#dbwal-a)"></path>
+      <text x={X.commit + 38} y="146" class="t-accent t-small">fsync</text>
+      <rect x={X.commit + 30} y="154" width={X.end - X.commit - 30} height="24" rx="4" class="lead"></rect>
+      <text x={X.commit + 38} y="170" class="t-small">обе записи на диске — переживут падение</text>
+
+      <!-- страница на диске -->
+      <rect x="150" y="202" width={X.redo - 150} height="24" rx="4" class="cell-old"></rect>
+      <text x="158" y="218" class="t-small">v = 100 — старая, записать ещё не успели</text>
+      <path d={`M${X.redo} 178 C${X.redo} 150, ${X.redo} 110, ${X.redo + 20} 86`} class="ln-accent" marker-end="url(#dbwal-a)"></path>
+      <text x={X.redo + 8} y="138" class="t-accent t-small">redo</text>
+    </svg>
+  </div>
+  <figcaption>
+    На момент «ок» новое значение есть на диске только в WAL: страница данных там ещё старая, и это нормально. Падение
+    уносит всё, что было в памяти, но восстановление проигрывает WAL и получает страницу с v = 150 обратно. Коммит
+    долговечен, когда долговечна его запись в журнале, — страницы могут подождать.
+  </figcaption>
+</figure>

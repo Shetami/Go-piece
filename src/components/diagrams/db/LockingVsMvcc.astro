@@ -1,0 +1,50 @@
+---
+/**
+ * Одна и та же пара «писатель и читатель» при блокировках и при MVCC.
+ */
+const T = (t: number) => 150 + t * 50
+const lanes = [
+  { title: 'Блокировки (2PL)', y: 50 },
+  { title: 'MVCC', y: 170 },
+]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 290" role="img" aria-labelledby="dblm-t">
+      <title id="dblm-t">При блокировках читатель ждёт коммита писателя; при MVCC читатель сразу читает старую версию строки</title>
+      {lanes.map((l) => <text x="20" y={l.y - 16} class="t-bold">{l.title}</text>)}
+      {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((t) => <path d={`M${T(t)} 30 V270`} class="ln-life"></path>)}
+
+      <!-- 2PL -->
+      <text x="20" y="54" class="t-small">писатель</text>
+      <rect x={T(0)} y="40" width={T(6) - T(0)} height="22" rx="4" class="lead"></rect>
+      <text x={T(0) + 8} y="55" class="t-small">UPDATE x — держит X-блокировку до COMMIT</text>
+      <text x="20" y="92" class="t-small">читатель</text>
+      <rect x={T(1)} y="78" width={T(6) - T(1)} height="22" rx="4" class="risk"></rect>
+      <text x={T(1) + 8} y="93" class="t-small">SELECT x — ждёт</text>
+      <rect x={T(6)} y="78" width={T(8) - T(6)} height="22" rx="4" class="box"></rect>
+      <text x={T(6) + 8} y="93" class="t-small">читает новое</text>
+      <text x={T(8) + 10} y="93" class="t-bad">ждал 5 тиков</text>
+
+      <!-- MVCC -->
+      <text x="20" y="174" class="t-small">писатель</text>
+      <rect x={T(0)} y="160" width={T(6) - T(0)} height="22" rx="4" class="lead"></rect>
+      <text x={T(0) + 8} y="175" class="t-small">UPDATE x — создаёт версию x₂</text>
+      <text x="20" y="212" class="t-small">читатель</text>
+      <rect x={T(1)} y="198" width={T(3) - T(1)} height="22" rx="4" class="box"></rect>
+      <text x={T(1) + 8} y="213" class="t-small">читает x₁</text>
+      <text x={T(3) + 10} y="213" class="t-ok">не ждал</text>
+      <text x="20" y="250" class="t-small">второй писатель</text>
+      <rect x={T(2)} y="236" width={T(6) - T(2)} height="22" rx="4" class="risk"></rect>
+      <text x={T(2) + 8} y="251" class="t-small">UPDATE x — ждёт</text>
+      <rect x={T(6)} y="236" width={T(7) - T(6)} height="22" rx="4" class="box"></rect>
+      <text x={T(7) + 10} y="251" class="t-muted t-small">писатели ждут друг друга и здесь</text>
+    </svg>
+  </div>
+  <figcaption>
+    При блокировках читатель встаёт в очередь за писателем: пока строку меняют, её нельзя прочитать. При MVCC изменение —
+    это новая версия, а читатель продолжает читать старую, ни секунды не ожидая. Конфликт двух писателей одной строки
+    никуда не девается: второй UPDATE ждёт первого в обеих схемах.
+  </figcaption>
+</figure>

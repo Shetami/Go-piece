@@ -1,0 +1,78 @@
+---
+/**
+ * Путь чтения и записи: всё идёт через буферный кэш, коммит ждёт только WAL,
+ * а грязные страницы уходят на диск потом.
+ */
+const pages = [
+  { x: 250, y: 74, dirty: false },
+  { x: 296, y: 74, dirty: true },
+  { x: 342, y: 74, dirty: false },
+  { x: 388, y: 74, dirty: true },
+  { x: 250, y: 118, dirty: false },
+  { x: 296, y: 118, dirty: false },
+  { x: 342, y: 118, dirty: true },
+  { x: 388, y: 118, dirty: false },
+]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 300" role="img" aria-labelledby="dbbuf-t">
+      <title id="dbbuf-t">Запрос читает и меняет страницы в буферном кэше; при коммите на диск сбрасывается только WAL, страницы данных пишутся позже</title>
+      <defs>
+        <marker id="dbbuf-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+        <marker id="dbbuf-b" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head-accent"></path>
+        </marker>
+      </defs>
+
+      <text x="20" y="26" class="t-muted">процесс запроса</text>
+      <text x="230" y="26" class="t-muted">общая память</text>
+      <text x="590" y="26" class="t-muted">диск</text>
+
+      <rect x="20" y="80" width="140" height="60" rx="8" class="box"></rect>
+      <text x="90" y="106" text-anchor="middle" class="t-bold">UPDATE …</text>
+      <text x="90" y="124" text-anchor="middle" class="t-muted t-small">затем COMMIT</text>
+
+      <rect x="230" y="40" width="220" height="140" rx="10" class="box-2"></rect>
+      <text x="340" y="60" text-anchor="middle" class="t-small t-bold">буферный кэш</text>
+      {pages.map((p) => <rect x={p.x} y={p.y} width="38" height="34" rx="4" class={p.dirty ? 'cell-on' : 'cell'}></rect>)}
+      <text x="340" y="172" text-anchor="middle" class="t-muted t-small">подсвечены грязные страницы</text>
+
+      <rect x="230" y="206" width="220" height="44" rx="8" class="box-2"></rect>
+      <text x="340" y="233" text-anchor="middle" class="t-small t-bold">WAL-буфер</text>
+
+      <rect x="590" y="56" width="150" height="80" rx="8" class="box"></rect>
+      <text x="665" y="92" text-anchor="middle" class="t-bold">файлы таблиц</text>
+      <text x="665" y="110" text-anchor="middle" class="t-muted t-small">и индексов</text>
+
+      <rect x="590" y="200" width="150" height="56" rx="8" class="lead"></rect>
+      <text x="665" y="226" text-anchor="middle" class="t-bold">pg_wal</text>
+      <text x="665" y="243" text-anchor="middle" class="t-muted t-small">пишется только в конец</text>
+
+      <!-- 1: запрос меняет страницу в кэше -->
+      <path d="M160 100 H244" class="ln" marker-end="url(#dbbuf-a)"></path>
+      <text x="202" y="92" text-anchor="middle" class="t-small">1</text>
+      <!-- промах: чтение с диска -->
+      <path d="M588 80 C530 80, 500 84, 452 84" class="ln ln-dash" marker-end="url(#dbbuf-a)"></path>
+      <text x="520" y="72" text-anchor="middle" class="t-muted t-small">промах: прочитать</text>
+      <!-- 2: запись в WAL-буфер -->
+      <path d="M130 140 C130 220, 180 228, 228 228" class="ln" marker-end="url(#dbbuf-a)"></path>
+      <text x="150" y="200" class="t-small">2 · описание изменения</text>
+      <!-- 3: коммит ждёт fsync -->
+      <path d="M452 228 H586" class="ln-accent" marker-end="url(#dbbuf-b)"></path>
+      <text x="519" y="216" text-anchor="middle" class="t-accent t-small">3 · COMMIT ждёт fsync</text>
+      <!-- 4: позже страницы на диск -->
+      <path d="M452 120 C520 120, 540 116, 588 116" class="ln ln-dash" marker-end="url(#dbbuf-a)"></path>
+      <text x="520" y="140" text-anchor="middle" class="t-muted t-small">4 · потом: bgwriter,</text>
+      <text x="520" y="154" text-anchor="middle" class="t-muted t-small">контрольная точка</text>
+    </svg>
+  </div>
+  <figcaption>
+    Запрос никогда не работает с диском напрямую: страница читается в буферный кэш и меняется там (1). Изменение
+    описывается в WAL (2). На коммите на диск уходит только хвост WAL — одна последовательная запись (3). Изменённые
+    страницы пишутся когда-нибудь потом и пачками (4): если сервер упадёт раньше, их восстановят по WAL.
+  </figcaption>
+</figure>
