@@ -1,0 +1,55 @@
+---
+/**
+ * Цикл метастабильного отказа: очередь → таймауты → повторы → очередь.
+ * Снаружи — три места, где цикл можно разорвать.
+ */
+const nodes = [
+  { x: 300, y: 30, t: 'очередь растёт', s: 'ожидание > таймаута' },
+  { x: 540, y: 130, t: 'клиенты уходят', s: 'таймаут' },
+  { x: 300, y: 230, t: 'повторы', s: 'брошенная копия остаётся' },
+  { x: 60, y: 130, t: 'работа впустую', s: 'воркеры заняты копиями' },
+]
+const W = 170
+const Hn = 54
+const fixes = [
+  { x: 560, y: 36, t: 'отмена по context', s: 'не работать на ушедших' },
+  { x: 560, y: 250, t: 'бюджет повторов', s: 'backoff один не спасёт' },
+  { x: 20, y: 36, t: 'предел очереди', s: 'быстрый отказ лишним' },
+]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 300" role="img" aria-labelledby="sdrl-t">
+      <title id="sdrl-t">Цикл метастабильного отказа: очередь растёт, клиенты уходят по таймауту, повторяют запросы, сервис работает впустую, очередь растёт снова</title>
+      <defs>
+        <marker id="sdrl-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+      <path d="M470 70 Q560 80 600 124" class="ln" marker-end="url(#sdrl-a)"></path>
+      <path d="M620 188 Q600 250 474 256" class="ln" marker-end="url(#sdrl-a)"></path>
+      <path d="M300 268 Q150 262 140 188" class="ln" marker-end="url(#sdrl-a)"></path>
+      <path d="M150 128 Q170 60 296 58" class="ln" marker-end="url(#sdrl-a)"></path>
+      <path d="M386 228 V90" class="ln ln-dash" marker-end="url(#sdrl-a)"></path>
+      <text x="394" y="160" class="t-muted t-small">+ нагрузка</text>
+      {nodes.map((n, i) => (
+        <g>
+          <rect x={n.x} y={n.y} width={W} height={Hn} rx="8" class={i === 3 ? 'risk' : 'box'}></rect>
+          <text x={n.x + W / 2} y={n.y + 23} text-anchor="middle" class="t-bold">{n.t}</text>
+          <text x={n.x + W / 2} y={n.y + 41} text-anchor="middle" class="t-muted t-small">{n.s}</text>
+        </g>
+      ))}
+      {fixes.map((f) => (
+        <g>
+          <text x={f.x} y={f.y} class="t-ok t-small">✂ {f.t}</text>
+          <text x={f.x} y={f.y + 14} class="t-muted t-small">{f.s}</text>
+        </g>
+      ))}
+    </svg>
+  </div>
+  <figcaption>
+    Всплеск, который запустил цикл, может давно пройти — цикл держится сам. Выход — разорвать его хотя бы в одном
+    месте: перестать работать на ушедших клиентов, ограничить очередь или число повторов.
+  </figcaption>
+</figure>

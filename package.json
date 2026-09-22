@@ -18,7 +18,8 @@
     "demo:chan": "node src/components/stands/chan/engine/demo.ts",
     "demo:kafka": "node src/components/stands/kafka/engine/demo.ts",
     "demo:txn": "node src/components/stands/txn/engine/demo.ts",
-    "demo:repl": "node src/components/stands/repl/engine/demo.ts"
+    "demo:repl": "node src/components/stands/repl/engine/demo.ts",
+    "demo:load": "node src/components/stands/load/engine/demo.ts"
   },
   "dependencies": {
     "@astrojs/mdx": "^8.0.1",

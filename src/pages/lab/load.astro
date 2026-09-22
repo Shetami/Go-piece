@@ -1,0 +1,24 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro'
+import LoadStand from '../../components/stands/load/LoadStand.astro'
+---
+
+<BaseLayout
+  title="Стенд: нагрузка и задержка"
+  description="Пошаговая модель сервиса под нагрузкой: пул воркеров и очередь, закон Литтла, задержка у высокой загрузки, медленный хвост, всплески, таймауты, повторы и метастабильный отказ, сброс нагрузки."
+  wide
+>
+  <nav class="text-sm text-muted mb-4">
+    <a href="/lab/" class="hover:text-ink">Лаборатория</a> / Нагрузка
+  </nav>
+  <div class="flex flex-wrap items-baseline justify-between gap-4 mb-2">
+    <h1 class="text-3xl font-bold tracking-tight">Нагрузка: очередь, задержка, перегрузка</h1>
+    <a href="/lectures/system-design/load/" class="text-sm text-accent">читать лекцию →</a>
+  </div>
+  <p class="text-muted max-w-3xl">
+    Пробел — пуск и пауза, стрелки — шаг, Shift+стрелки — 10 шагов. Клик по графику переносит на этот тик, клик по
+    событию открывает разбор. В настройках — поток запросов, воркеры, медленные запросы, таймауты и повторы, отмена по
+    context, предел очереди и фазы нагрузки.
+  </p>
+  <LoadStand scenario="retry-storm" mode="lab" />
+</BaseLayout>

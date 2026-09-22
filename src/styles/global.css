@@ -3653,6 +3653,314 @@ body {
   background: var(--gc-lost);
 }
 
+/* ─────────────────────── стенд «Нагрузка» ─────────────────────── */
+
+/* Цвета графиков проверены на различимость при дальтонизме и контраст к фону в обеих темах.
+   Синий — работа и обычная задержка, оранжевый — ожидание и хвост, бирюзовый — входящий поток. */
+:root {
+  --ld-work: #2a78d6;
+  --ld-wait: #eb6834;
+  --ld-in: #1baf7a;
+  --ld-waste: #e34948;
+}
+.dark {
+  --ld-work: #3987e5;
+  --ld-wait: #d95926;
+  --ld-in: #199e70;
+  --ld-waste: #e66767;
+}
+.ld-c-work {
+  --c: var(--ld-work);
+}
+.ld-c-wait {
+  --c: var(--ld-wait);
+}
+.ld-c-in {
+  --c: var(--ld-in);
+}
+.ld-c-waste {
+  --c: var(--ld-waste);
+}
+
+.ld-charts {
+  display: grid;
+  gap: 10px;
+}
+.ld-chart {
+  position: relative;
+  min-width: 0;
+}
+.ld-chart svg {
+  display: block;
+  cursor: crosshair;
+  touch-action: pan-y;
+}
+.ld-chart-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  font-size: 0.78rem;
+}
+.ld-chart-title {
+  font-weight: 700;
+}
+.ld-chart-note {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.ld-legend {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.ld-key {
+  display: inline-block;
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--c);
+  vertical-align: middle;
+  margin-right: 5px;
+}
+.ld-key.is-area {
+  height: 8px;
+  border-radius: 2px;
+}
+.ld-grid {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.ld-axis {
+  fill: var(--muted);
+  font-size: 10px;
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+.ld-ref {
+  stroke: var(--muted);
+  stroke-width: 1;
+  opacity: 0.6;
+}
+.ld-area {
+  fill: color-mix(in oklab, var(--c) 28%, transparent);
+  stroke: none;
+}
+.ld-line {
+  fill: none;
+  stroke: var(--c);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.ld-now {
+  stroke: var(--hl);
+  stroke-width: 1;
+}
+.ld-cross {
+  stroke: var(--ink);
+  stroke-width: 1;
+  opacity: 0.35;
+}
+.ld-end {
+  fill: var(--ink);
+  font-size: 10.5px;
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+.ld-tip {
+  position: absolute;
+  top: 26px;
+  z-index: 2;
+  display: grid;
+  gap: 2px;
+  min-width: 120px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.12);
+  font-size: 0.72rem;
+  pointer-events: none;
+}
+.ld-tip-tick {
+  color: var(--muted);
+}
+.ld-tip-row {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.ld-tip-row b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.ld-service {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 8px;
+}
+@media (max-width: 720px) {
+  .ld-service {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.ld-queue,
+.ld-workers {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg);
+  padding: 8px 10px;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  min-width: 0;
+}
+.ld-queue header,
+.ld-workers header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+.ld-bad {
+  color: var(--gc-lost);
+  font-weight: 600;
+}
+.ld-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  align-items: center;
+  font-size: 0.72rem;
+}
+.ld-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 18px;
+  border-radius: 3px;
+  border: 1px solid var(--ld-wait);
+  background: color-mix(in oklab, var(--ld-wait) 30%, transparent);
+  color: var(--ink);
+  font-size: 0.6rem;
+  font-weight: 700;
+}
+.ld-chip.is-slow {
+  width: 26px;
+}
+.ld-chip.is-zombie {
+  border-style: dashed;
+  border-color: var(--gc-lost);
+  background: repeating-linear-gradient(135deg, color-mix(in oklab, var(--gc-lost) 30%, transparent) 0 2px, transparent 2px 5px);
+}
+.ld-chip.is-free {
+  border: 1px dotted var(--line);
+  background: transparent;
+}
+.ld-chip.is-hl {
+  outline: 2px solid var(--hl);
+  outline-offset: 1px;
+}
+.ld-more {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.ld-worker-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 4px;
+}
+.ld-worker {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 2px 6px;
+  padding: 4px 6px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  font-size: 0.72rem;
+  min-width: 0;
+}
+.ld-worker.is-busy {
+  border: 1px solid var(--ld-work);
+  background: color-mix(in oklab, var(--ld-work) 10%, transparent);
+}
+.ld-worker.is-slow {
+  border-width: 2px;
+}
+.ld-worker.is-zombie {
+  border-color: var(--gc-lost);
+  border-style: dashed;
+  background: repeating-linear-gradient(135deg, color-mix(in oklab, var(--gc-lost) 14%, transparent) 0 3px, transparent 3px 7px);
+}
+.ld-worker.is-hl {
+  box-shadow: 0 0 0 2px var(--hl);
+}
+.ld-worker-name {
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+.ld-worker-req {
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+.ld-worker-req small {
+  color: var(--gc-lost);
+  font-family: var(--font-sans);
+}
+.ld-bar {
+  grid-column: 1 / -1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.ld-bar span {
+  display: block;
+  height: 100%;
+  background: var(--ld-work);
+}
+.is-zombie .ld-bar span {
+  background: var(--gc-lost);
+}
+.ld-retry-wait {
+  grid-column: 1 / -1;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.ld-retry-wait b {
+  color: var(--ink);
+}
+
+.mark-ld-load-change,
+.mark-ld-queue-grow {
+  background: var(--spin);
+}
+.mark-ld-queue-drained,
+.mark-ld-overload-recover {
+  background: var(--run);
+}
+.mark-ld-overload-collapse {
+  background: var(--gc-lost);
+  width: 5px;
+}
+
+.dot-ld-req {
+  background: var(--ld-work);
+}
+.dot-ld-load,
+.dot-ld-queue {
+  background: var(--spin);
+}
+.dot-ld-overload {
+  background: var(--gc-lost);
+}
+
 /* ─────────────────────── схемы в лекциях ─────────────────────── */
 
 .dg {
@@ -3812,4 +4120,31 @@ body {
 }
 .dg .dot-bad {
   fill: var(--gc-lost);
+}
+
+/* Схемы курса System design: те же цвета, что у графиков стенда «Нагрузка». */
+.dg .sd-curve {
+  fill: none;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.dg .sd-work {
+  stroke: var(--ld-work);
+}
+.dg .sd-wait {
+  stroke: var(--ld-wait);
+}
+.dg .sd-dot {
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+.dg .sd-work-fill {
+  fill: var(--ld-work);
+}
+.dg .sd-wait-fill {
+  fill: var(--ld-wait);
+}
+.dg .sd-bar {
+  fill: var(--ld-wait);
 }

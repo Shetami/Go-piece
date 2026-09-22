@@ -1,0 +1,28 @@
+---
+import { getCollection } from 'astro:content'
+import LoadStandIsland from './ui/LoadStand.tsx'
+import { loadScenarioById } from './engine/scenarios.ts'
+
+/**
+ * Стенд в MDX: <LoadStand scenario="retry-storm" />.
+ * Обёртка нужна, чтобы при сборке подтянуть определения терминов в остров
+ * и проверить, что такой сценарий существует.
+ */
+interface Props {
+  scenario: string
+  mode?: 'embed' | 'lab'
+}
+
+const { scenario, mode = 'embed' } = Astro.props
+if (!loadScenarioById(scenario)) {
+  throw new Error(`<LoadStand scenario="${scenario}">: нет такого сценария в engine/scenarios.ts`)
+}
+
+const terms = Object.fromEntries(
+  (await getCollection('glossary')).map((e) => [e.id, { title: e.data.title, short: e.data.short }]),
+)
+---
+
+<div class:list={['not-prose', mode === 'embed' && 'wide']} data-pagefind-ignore>
+  <LoadStandIsland client:visible scenario={scenario} mode={mode} terms={terms} />
+</div>

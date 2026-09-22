@@ -1,0 +1,32 @@
+---
+title: Таймаут и дедлайн запроса
+short: 'Сколько клиент готов ждать. Сервису мало знать свой таймаут: дедлайн клиента нужно передавать дальше, чтобы бросить работу, чей результат уже никому не нужен.'
+aliases: [timeout, deadline, таймаут, дедлайн, context.WithTimeout, context deadline, deadline propagation, отмена запроса]
+category: настройка
+related: [retry-backoff, metastable-failure, throughput, goroutine-leak]
+---
+
+Таймаут защищает клиента: он не ждёт вечно. Но если сервис не знает, что клиент ушёл, он доделает запрос впустую. При перегрузке таких запросов становится большинство, и сервис тратит почти всю ёмкость на ответы, которые никто не прочитает.
+
+В Go для этого есть `context`. HTTP-сервер отменяет `r.Context()`, когда клиент закрыл соединение. Остаётся не терять этот контекст:
+
+```go
+func handler(w http.ResponseWriter, r *http.Request) {
+    ctx, cancel := context.WithTimeout(r.Context(), 800*time.Millisecond)
+    defer cancel()
+
+    rows, err := db.QueryContext(ctx, q, args...) // запрос в базу отменится вместе с ctx
+    if errors.Is(err, context.DeadlineExceeded) {
+        http.Error(w, "timeout", http.StatusGatewayTimeout)
+        return
+    }
+    …
+}
+```
+
+Правила, которые обычно выводят из этого:
+
+- **Таймаут есть у каждого сетевого вызова.** `http.Client` без `Timeout` ждёт вечно.
+- **Дедлайн передаётся по цепочке.** gRPC делает это сам. В HTTP передают заголовком и вычитают уже потраченное время.
+- **Таймауты вложенных вызовов короче внешнего.** Иначе внешний клиент уйдёт, а внутренние вызовы продолжат работу.
+- **Работа проверяет `ctx.Done()`** перед дорогими шагами.

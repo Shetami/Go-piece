@@ -1,0 +1,79 @@
+---
+/**
+ * «Колено»: ожидание в очереди как функция загрузки для одного обработчика
+ * (M/M/1) и для четырёх (M/M/4, формула Эрланга C). Единица по вертикали —
+ * среднее время обработки одного запроса.
+ */
+function erlangC(c: number, rho: number): number {
+  const a = c * rho
+  let sum = 0
+  let term = 1
+  for (let k = 0; k < c; k++) {
+    if (k > 0) term *= a / k
+    sum += term
+  }
+  const top = (term * a) / c / (1 - rho)
+  return top / (sum + top)
+}
+/** Среднее ожидание в очереди в единицах времени обработки. */
+const waitOf = (c: number, rho: number) => erlangC(c, rho) / (c * (1 - rho))
+
+const W = 760
+const H = 300
+const M = { l: 56, r: 150, t: 20, b: 44 }
+const YMAX = 10
+const x = (rho: number) => M.l + rho * (W - M.l - M.r)
+const y = (v: number) => M.t + (H - M.t - M.b) * (1 - Math.min(v, YMAX) / YMAX)
+
+const path = (c: number) => {
+  let d = ''
+  for (let i = 0; i <= 400; i++) {
+    const rho = (i / 400) * 0.995
+    const v = waitOf(c, rho)
+    d += `${i === 0 ? 'M' : 'L'}${x(rho).toFixed(1)} ${y(v).toFixed(1)}`
+    if (v >= YMAX) break
+  }
+  return d
+}
+const marks = [0.5, 0.8, 0.9, 0.95]
+const fmt = (v: number) => (v < 10 ? v.toFixed(v < 1 ? 2 : 1) : v.toFixed(0)).replace('.', ',')
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-labelledby="sduc-t">
+      <title id="sduc-t">Среднее ожидание в очереди растёт с загрузкой медленно до 70–80%, а потом резко: при 90% у одного обработчика оно в 9 раз больше времени обработки, у четырёх — в 2 раза</title>
+      {[0, 2, 4, 6, 8, 10].map((v) => (
+        <g>
+          <path d={`M${M.l} ${y(v)} H${W - M.r}`} class="ln-thin"></path>
+          <text x={M.l - 8} y={y(v) + 4} text-anchor="end" class="t-muted t-small">{v}×</text>
+        </g>
+      ))}
+      {[0, 0.2, 0.4, 0.6, 0.8, 1].map((r) => (
+        <text x={x(r)} y={H - M.b + 18} text-anchor="middle" class="t-muted t-small">{Math.round(r * 100)}%</text>
+      ))}
+      <text x={(M.l + W - M.r) / 2} y={H - 6} text-anchor="middle" class="t-muted">загрузка ρ — доля времени, когда сервис занят</text>
+      <text x="14" y={M.t + 4} class="t-muted t-small">ожидание</text>
+      {marks.map((r) => <path d={`M${x(r)} ${M.t} V${H - M.b}`} class="ln-life"></path>)}
+      <path d={path(1)} class="sd-curve sd-wait"></path>
+      <path d={path(4)} class="sd-curve sd-work"></path>
+      {marks.map((r) => (
+        <g>
+          <circle cx={x(r)} cy={y(waitOf(1, r))} r="4" class="sd-dot sd-wait-fill"></circle>
+          <text x={x(r) - 6} y={y(waitOf(1, r)) - 8} text-anchor="end" class="t-small">{fmt(waitOf(1, r))}×</text>
+          <circle cx={x(r)} cy={y(waitOf(4, r))} r="4" class="sd-dot sd-work-fill"></circle>
+          <text x={x(r) + 6} y={y(waitOf(4, r)) + 14} class="t-small">{fmt(waitOf(4, r))}×</text>
+        </g>
+      ))}
+      <path d={`M${W - M.r + 14} 70 h16`} class="sd-curve sd-wait"></path>
+      <text x={W - M.r + 36} y="74" class="t-small">1 обработчик</text>
+      <path d={`M${W - M.r + 14} 94 h16`} class="sd-curve sd-work"></path>
+      <text x={W - M.r + 36} y="98" class="t-small">4 обработчика</text>
+    </svg>
+  </div>
+  <figcaption>
+    Среднее ожидание в очереди в единицах времени обработки при случайном потоке запросов. Точки — загрузка 50, 80, 90
+    и 95%. До 70% очередь почти бесплатна, дальше каждый процент стоит всё дороже. Четыре обработчика сдвигают колено
+    вправо, но не убирают его.
+  </figcaption>
+</figure>

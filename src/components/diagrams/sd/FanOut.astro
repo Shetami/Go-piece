@@ -1,0 +1,34 @@
+---
+/**
+ * Веерный запрос: страница ждёт ответа от N бэкендов, каждый медленный в 1%
+ * случаев. Доля медленных страниц — 1 − 0,99^N.
+ */
+const rows = [1, 10, 50, 100, 200].map((n) => ({ n, p: 1 - 0.99 ** n }))
+const L = 150
+const BW = 470
+const y = (i: number) => 34 + i * 40
+const pct = (p: number) => `${(p * 100).toFixed(p < 0.1 ? 1 : 0).replace('.', ',')}%`
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 244" role="img" aria-labelledby="sdfo-t">
+      <title id="sdfo-t">Если каждый бэкенд медленный в 1% случаев, страница, ждущая 100 бэкендов, медленная в 63% случаев</title>
+      <text x="20" y="18" class="t-muted t-small">бэкендов в одном запросе</text>
+      <text x={L} y="18" class="t-muted t-small">доля медленных ответов пользователю</text>
+      {rows.map((r, i) => (
+        <g>
+          <text x={L - 16} y={y(i) + 15} text-anchor="end" class="t-bold">{r.n}</text>
+          <rect x={L} y={y(i)} width={BW} height="22" rx="4" class="cell-old"></rect>
+          <rect x={L} y={y(i)} width={Math.max(4, r.p * BW)} height="22" rx="4" class="sd-bar"></rect>
+          <text x={L + Math.max(4, r.p * BW) + 8} y={y(i) + 15} class="t-small">{pct(r.p)}</text>
+        </g>
+      ))}
+    </svg>
+  </div>
+  <figcaption>
+    Каждый бэкенд отвечает медленно в одном случае из ста — это его p99. Страница ждёт самого медленного из
+    всех. При ста бэкендах медленной оказывается почти каждая вторая страница: p99 бэкенда становится медианой
+    для пользователя.
+  </figcaption>
+</figure>
