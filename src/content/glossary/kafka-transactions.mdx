@@ -1,0 +1,29 @@
+---
+title: Транзакции Kafka
+short: Атомарная запись в несколько партиций вместе с коммитом оффсетов. Основа exactly-once для цепочки «прочитал из Kafka — записал в Kafka».
+aliases: [transactional.id, exactly-once, EOS, read_committed, LSO]
+category: механизм
+related: [idempotent-producer, delivery-semantics, offset-commit]
+source: clients/src/main/java/org/apache/kafka/clients/producer/internals/TransactionManager.java
+---
+
+Транзакция позволяет сделать атомарно три вещи: записать сообщения в несколько партиций и закоммитить оффсеты группы, из которой эти сообщения были получены. Либо всё, либо ничего.
+
+```go
+// franz-go: GroupTransactSession берёт на себя begin/commit и коммит оффсетов
+if err := sess.Begin(); err != nil {
+    return err
+}
+for _, r := range fetches.Records() {
+    sess.Produce(ctx, transform(r), nil)
+}
+committed, err := sess.End(ctx, kgo.TryCommit) // false — транзакцию отменили, пачку перечитаем
+```
+
+Как это работает:
+
+- `transactional.id` — постоянное имя продюсера. При перезапуске новый экземпляр с тем же именем получает эпоху выше и «ограждает» старый: зомби-продюсер больше ничего не запишет.
+- Сообщения пишутся в лог сразу, а в конце в каждую партицию ставится маркер commit или abort.
+- Потребитель с `isolation.level=read_committed` читает только до LSO (last stable offset) и пропускает отменённое.
+
+Важная граница: **exactly-once действует внутри Kafka.** Если обработка пишет в базу данных или отправляет письмо, транзакция Kafka эти действия не откатит. Там по-прежнему нужна идемпотентная обработка — или хранение оффсетов в той же базе в той же транзакции.

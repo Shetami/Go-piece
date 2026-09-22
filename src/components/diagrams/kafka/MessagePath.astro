@@ -1,0 +1,92 @@
+---
+/**
+ * Путь сообщения m1 из стенда «Путь одного сообщения» — как диаграмма
+ * последовательности. Тики взяты из прогона стенда с seed 1.
+ */
+const cols = [
+  { x: 65, label: 'Приложение' },
+  { x: 190, label: 'Продюсер' },
+  { x: 320, label: 'Лидер B2' },
+  { x: 450, label: 'Фолловеры B0, B1' },
+  { x: 580, label: 'Потребитель c2' },
+  { x: 702, label: 'Координатор' },
+]
+const [APP, PROD, LEAD, FOLL, CONS, COORD] = cols.map((c) => c.x) as [number, number, number, number, number, number]
+
+type Step =
+  | { kind: 'arrow'; y: number; from: number; to: number; label: string; tick?: string; dash?: boolean }
+  | { kind: 'note'; y: number; at: number; label: string; tick?: string; w: number; accent?: boolean }
+
+const steps: Step[] = [
+  { kind: 'arrow', y: 96, from: APP, to: PROD, label: '1 · send(m1)', tick: 't1' },
+  { kind: 'note', y: 132, at: PROD, label: '2 · p2 по ключу «carol», в пакет', tick: 't1', w: 230 },
+  { kind: 'note', y: 172, at: PROD, label: '3 · пакет ждёт linger.ms', tick: 't1→t6', w: 200 },
+  { kind: 'arrow', y: 214, from: PROD, to: LEAD, label: '4 · ProduceRequest', tick: 't6' },
+  { kind: 'note', y: 252, at: LEAD, label: '5 · запись в лог, оффсет 0', tick: 't7', w: 200 },
+  { kind: 'arrow', y: 292, from: FOLL, to: LEAD, label: 'Fetch', dash: true },
+  { kind: 'arrow', y: 316, from: LEAD, to: FOLL, label: '6 · копии на фолловерах', tick: 't9' },
+  { kind: 'note', y: 356, at: LEAD, label: '7 · HW перешёл m1: закоммичено', tick: 't10', w: 240, accent: true },
+  { kind: 'arrow', y: 398, from: LEAD, to: PROD, label: '8 · ответ: ok, оффсет 0', tick: 't11' },
+  { kind: 'arrow', y: 420, from: PROD, to: APP, label: 'колбэк', dash: true },
+  { kind: 'arrow', y: 462, from: CONS, to: LEAD, label: 'Fetch (только до HW)', dash: true },
+  { kind: 'arrow', y: 486, from: LEAD, to: CONS, label: '9 · m1', tick: 't12' },
+  { kind: 'note', y: 526, at: CONS, label: '10 · обработка', tick: 't14', w: 140 },
+  { kind: 'arrow', y: 568, from: CONS, to: COORD, label: '11 · OffsetCommit p2 → 2', tick: 't17' },
+]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 600" role="img" aria-labelledby="kpath-t">
+      <title id="kpath-t">Диаграмма последовательности: путь сообщения m1 от send() до коммита оффсета за 17 тиков</title>
+      <defs>
+        <marker id="kpath-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+
+      {
+        cols.map((c) => (
+          <g>
+            <path d={`M${c.x} 58 V590`} class="ln-life"></path>
+            <rect x={c.x - 56} y="18" width="112" height="40" rx="8" class="box"></rect>
+            <text x={c.x} y="42" text-anchor="middle" class="t-bold t-small">
+              {c.label}
+            </text>
+          </g>
+        ))
+      }
+
+      {
+        steps.map((s) => {
+          if (s.kind === 'note') {
+            return (
+              <g>
+                <rect x={s.at - 10} y={s.y - 15} width={s.w} height="24" rx="6" class={s.accent ? 'lead' : 'note'}></rect>
+                <text x={s.at} y={s.y + 1} class={s.accent ? 't-accent' : ''}>
+                  {s.label}
+                  {s.tick && <tspan class="t-muted t-mono t-small"> {s.tick}</tspan>}
+                </text>
+              </g>
+            )
+          }
+          const mid = (s.from + s.to) / 2
+          return (
+            <g>
+              <path d={`M${s.from} ${s.y} H${s.to + (s.to > s.from ? -2 : 2)}`} class={s.dash ? 'ln ln-dash' : 'ln'} marker-end="url(#kpath-a)"></path>
+              <text x={mid} y={s.y - 7} text-anchor="middle" class={s.dash ? 't-muted' : ''}>
+                {s.label}
+                {s.tick && <tspan class="t-muted t-mono t-small"> {s.tick}</tspan>}
+              </text>
+            </g>
+          )
+        })
+      }
+    </svg>
+  </div>
+  <figcaption>
+    Путь сообщения m1 из первого стенда ниже, с тиками его прогона. Обратите внимание на порядок шагов 5–8: при
+    acks=all ответ продюсеру приходит только после того, как запись закоммичена на репликах. И на шаг 9: потребитель
+    получает сообщение не раньше коммита, как бы рано оно ни попало в лог лидера.
+  </figcaption>
+</figure>

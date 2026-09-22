@@ -1,0 +1,24 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro'
+import KafkaStand from '../../components/stands/kafka/KafkaStand.astro'
+---
+
+<BaseLayout
+  title="Стенд: Kafka"
+  description="Пошаговая модель Kafka: путь сообщения от send() до коммита оффсета — пакеты продюсера, лидер и фолловеры, ISR, high watermark, acks, группы потребителей, сбои брокеров и потребителей."
+  wide
+>
+  <nav class="text-sm text-muted mb-4">
+    <a href="/lab/" class="hover:text-ink">Лаборатория</a> / Kafka
+  </nav>
+  <div class="flex flex-wrap items-baseline justify-between gap-4 mb-2">
+    <h1 class="text-3xl font-bold tracking-tight">Kafka: путь сообщения</h1>
+    <a href="/lectures/brokers/kafka/" class="text-sm text-accent">читать лекцию →</a>
+  </div>
+  <p class="text-muted max-w-3xl">
+    Пробел — пуск и пауза, стрелки — шаг, Shift+стрелки — 10 шагов. Клик по любому сообщению на схеме показывает
+    его путь по шагам, клик по событию — разбор. В настройках — acks, linger, идемпотентность, размер кластера,
+    свои продюсеры и потребители и расписание сбоев.
+  </p>
+  <KafkaStand scenario="journey" mode="lab" />
+</BaseLayout>

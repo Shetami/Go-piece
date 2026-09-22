@@ -1,0 +1,57 @@
+---
+/**
+ * Три реплики одной партиции и откуда берётся high watermark:
+ * минимум LEO по ISR, который лидер узнаёт из Fetch-запросов фолловеров.
+ */
+const rows = [
+  { name: 'B0 · лидер', leo: 10, note: 'LEO 10', lead: true },
+  { name: 'B1 · в ISR', leo: 8, note: 'LEO 8 · шлёт Fetch(8)', lead: false },
+  { name: 'B2 · в ISR', leo: 7, note: 'LEO 7 · шлёт Fetch(7)', lead: false },
+]
+const HW = 7
+const x = (i: number) => 130 + i * 40
+const y = (r: number) => 40 + r * 58
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 250" role="img" aria-labelledby="krep-t">
+      <title id="krep-t">Лидер с десятью записями и два фолловера с восемью и семью: high watermark равен семи</title>
+      {
+        rows.map((r, ri) => (
+          <g>
+            <text x="20" y={y(ri) + 22} class={r.lead ? 't-bold' : ''}>
+              {r.name}
+            </text>
+            {Array.from({ length: r.leo }, (_, i) => (
+              <g>
+                <rect x={x(i)} y={y(ri)} width="36" height="34" rx="5" class={i >= HW ? 'cell-pending' : r.lead ? 'cell-on' : 'cell'}></rect>
+                <text x={x(i) + 18} y={y(ri) + 22} text-anchor="middle" class={i >= HW ? 't-mono t-muted t-small' : 't-mono t-small'}>
+                  {i}
+                </text>
+              </g>
+            ))}
+            <text x={x(r.leo) + 6} y={y(ri) + 22} class="t-muted">
+              {r.note}
+            </text>
+          </g>
+        ))
+      }
+
+      <path d={`M${x(HW) - 2} 30 V${y(2) + 44}`} class="ln-accent"></path>
+      <text x={x(HW) - 2} y={y(2) + 62} text-anchor="middle" class="t-accent">HW = min(10, 8, 7) = 7</text>
+
+      <text x="612" y="46" class="t-muted">Фолловер сообщает</text>
+      <text x="612" y="62" class="t-muted">лидеру, докуда у него</text>
+      <text x="612" y="78" class="t-muted">всё есть, — оффсетом</text>
+      <text x="612" y="94" class="t-muted">в своём Fetch.</text>
+      <text x="612" y="182" class="t-muted">Оффсеты 7–9 — не везде:</text>
+      <text x="612" y="198" class="t-muted">не закоммичены,</text>
+      <text x="612" y="214" class="t-muted">потребители не видят.</text>
+    </svg>
+  </div>
+  <figcaption>
+    High watermark — минимальный конец лога среди реплик ISR. Всё левее него есть на каждой синхронной реплике и
+    переживёт падение любой из них. Всё правее может исчезнуть, если лидер упадёт прямо сейчас.
+  </figcaption>
+</figure>

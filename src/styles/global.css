@@ -2190,3 +2190,784 @@ body {
   height: 3px;
   align-self: center;
 }
+
+/* ─────────────────────── стенд «Kafka» ─────────────────────── */
+
+.kf-board {
+  gap: 14px;
+}
+.kf-path {
+  row-gap: 6px;
+}
+.kf-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 12px;
+}
+@media (max-width: 760px) {
+  .kf-top {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.kf-zone {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  min-width: 0;
+}
+.kf-muted {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.kf-empty {
+  font-style: normal;
+  font-size: 0.75rem;
+  color: var(--idle);
+}
+
+.kf-card {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg);
+  padding: 8px 10px;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  transition: border-color 0.15s;
+}
+.kf-card.is-hl {
+  border-color: var(--hl);
+}
+.kf-card header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+.kf-card header strong {
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+}
+.kf-producers,
+.kf-groups {
+  display: grid;
+  gap: 8px;
+}
+.kf-groups {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+}
+
+/* Сообщение. Цвет — ключ (или продюсер, если ключа нет). */
+.kf-rec {
+  --c: var(--wl-0);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  padding: 1px 5px;
+  border: 1px solid var(--c);
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--c) 20%, transparent);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  line-height: 1.35;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.kf-rec small {
+  font-size: 0.6rem;
+  color: var(--muted);
+}
+.kf-rec:hover {
+  background: color-mix(in oklab, var(--c) 35%, transparent);
+}
+/* Выше HW: записано на лидере, но не закоммичено — потребители этого не видят. */
+.kf-rec.is-pending {
+  border-style: dashed;
+  background: transparent;
+}
+.kf-rec.is-dup {
+  border-color: var(--gc-lost);
+  background: repeating-linear-gradient(
+    135deg,
+    color-mix(in oklab, var(--gc-lost) 22%, transparent) 0 3px,
+    transparent 3px 6px
+  );
+}
+.kf-rec.is-bad {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+.kf-rec.is-hl {
+  box-shadow: 0 0 0 2px var(--hl);
+}
+.kf-rec.is-focus {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+  font-weight: 700;
+}
+
+.kf-batches,
+.kf-inflight,
+.kf-net {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  min-height: 22px;
+}
+.kf-net {
+  max-height: 150px;
+  overflow-y: auto;
+}
+.kf-batch {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 5px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.kf-batch.is-open {
+  border-style: dashed;
+}
+.kf-batch.is-ready {
+  border-color: var(--accent);
+}
+.kf-batch.is-retry {
+  border-color: var(--spin);
+}
+.kf-batch b {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin-right: 2px;
+}
+.kf-batch small,
+.kf-req small,
+.kf-msg small {
+  font-size: 0.62rem;
+  color: var(--muted);
+  margin-left: 2px;
+}
+.kf-req {
+  padding: 1px 7px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+}
+.kf-msg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--idle);
+  border-radius: 6px;
+  background: var(--bg);
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.kf-msg b {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--ink);
+}
+.kf-msg-produce {
+  border-left-color: var(--accent);
+}
+.kf-msg-ack {
+  border-left-color: var(--run);
+}
+.kf-msg-error {
+  border-left-color: var(--gc-lost);
+}
+.kf-msg-repl {
+  border-left-color: var(--wl-5);
+}
+.kf-msg-fetch {
+  border-left-color: var(--wl-3);
+}
+.kf-msg-commit {
+  border-left-color: var(--spin);
+}
+
+/* Кластер: строки — партиции, столбцы — брокеры. */
+.kf-grid {
+  display: grid;
+  grid-template-columns: 4.6rem repeat(var(--brokers), minmax(170px, 1fr));
+  gap: 4px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.kf-broker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border-top: 3px solid var(--run);
+  background: var(--surface-2);
+}
+.kf-broker b {
+  font-family: var(--font-mono);
+}
+.kf-broker em {
+  font-style: normal;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.kf-broker.is-dead {
+  border-top-color: var(--gc-lost);
+}
+.kf-broker.is-dead em {
+  color: var(--gc-lost);
+}
+.kf-broker.is-slow {
+  border-top-color: var(--spin);
+}
+.kf-broker.is-hl {
+  outline: 1px solid var(--hl);
+}
+.kf-pname {
+  display: grid;
+  align-content: center;
+  padding: 0 4px;
+}
+.kf-pname b {
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+}
+.kf-pname small {
+  font-size: 0.64rem;
+  color: var(--muted);
+  line-height: 1.25;
+}
+.kf-pname.is-hl b {
+  color: var(--hl);
+}
+.kf-replica {
+  display: grid;
+  gap: 3px;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg);
+  min-width: 0;
+}
+.kf-replica.is-none {
+  border: 1px dashed transparent;
+  background: transparent;
+}
+.kf-replica.is-leader {
+  border-color: var(--accent);
+}
+.kf-replica.is-out {
+  border-style: dashed;
+}
+.kf-replica.is-dead {
+  opacity: 0.55;
+  background: repeating-linear-gradient(135deg, var(--surface-2) 0 6px, transparent 6px 12px);
+}
+.kf-replica.is-hl {
+  box-shadow: 0 0 0 1px var(--hl);
+}
+.kf-role {
+  justify-self: start;
+  font-size: 0.62rem;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.kf-role.is-leader {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.kf-role.is-out {
+  background: color-mix(in oklab, var(--spin) 18%, transparent);
+  color: var(--ink);
+}
+.kf-log {
+  display: flex;
+  gap: 2px;
+  overflow: hidden;
+  min-height: 20px;
+  align-items: center;
+}
+.kf-log-more {
+  font-style: normal;
+  font-size: 0.64rem;
+  color: var(--idle);
+  margin-right: 2px;
+}
+.kf-entry {
+  position: relative;
+  display: inline-flex;
+}
+/* Граница high watermark: всё правее ещё не закоммичено. */
+.kf-hw {
+  position: absolute;
+  left: -2px;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+.kf-leo {
+  font-size: 0.62rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Группы. */
+.kf-members {
+  display: grid;
+  gap: 4px;
+}
+.kf-member {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.kf-member.is-hl {
+  border-color: var(--hl);
+}
+.kf-member.state-waiting {
+  border-style: dashed;
+}
+.kf-member.state-dead {
+  border-color: var(--gc-lost);
+  border-style: dashed;
+  opacity: 0.7;
+}
+.kf-member-name {
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 6.5rem;
+}
+.kf-member-name b {
+  font-family: var(--font-mono);
+}
+.kf-member-name small {
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+.kf-member.state-dead .kf-member-name small {
+  color: var(--gc-lost);
+}
+.kf-proc,
+.kf-buf {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  align-items: center;
+  font-size: 0.72rem;
+}
+.kf-offsets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.kf-off {
+  position: relative;
+  padding: 1px 7px 3px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--muted);
+  overflow: hidden;
+}
+.kf-off b {
+  color: var(--ink);
+}
+.kf-off i {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--spin);
+}
+.kf-off.is-high i {
+  background: var(--gc-lost);
+}
+.kf-lag {
+  margin-left: auto;
+  font-size: 0.7rem;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-variant-numeric: tabular-nums;
+}
+.kf-lag.is-high {
+  background: color-mix(in oklab, var(--gc-lost) 18%, transparent);
+}
+
+/* Путь сообщения. */
+.kf-journey {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+.kf-journey header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.kf-journey h4 {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+.kf-journey-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.kf-journey-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.kf-journey-state {
+  font-size: 0.7rem;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+.kf-journey-state.is-ok {
+  background: color-mix(in oklab, var(--run) 18%, transparent);
+}
+.kf-journey-state.is-bad {
+  background: color-mix(in oklab, var(--gc-lost) 20%, transparent);
+  font-weight: 600;
+}
+.kf-journey-nav {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 2px;
+}
+.kf-steps {
+  list-style: none;
+  padding: 0 !important;
+  display: grid;
+  gap: 2px;
+  max-height: 380px;
+  overflow-y: auto;
+}
+.kf-step {
+  display: grid;
+  grid-template-columns: 2.2rem 5.8rem minmax(0, 1fr);
+  gap: 8px;
+  padding: 4px 8px;
+  border-left: 3px solid var(--run);
+  border-radius: 0 6px 6px 0;
+}
+@media (max-width: 560px) {
+  .kf-step {
+    grid-template-columns: 2.2rem minmax(0, 1fr);
+  }
+  .kf-step-where {
+    display: none;
+  }
+}
+.kf-step b {
+  font-weight: 600;
+  font-size: 0.82rem;
+}
+.kf-step p {
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+.kf-step-tick {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-align: right;
+  padding-top: 1px;
+}
+.kf-step-where {
+  font-size: 0.68rem;
+  color: var(--muted);
+  padding-top: 2px;
+}
+.kf-step.is-now {
+  background: var(--accent-soft);
+}
+.kf-step.is-bad {
+  border-left-color: var(--gc-lost);
+  background: color-mix(in oklab, var(--gc-lost) 8%, transparent);
+}
+.kf-step.is-bad.is-now {
+  background: color-mix(in oklab, var(--gc-lost) 16%, transparent);
+}
+.kf-step.is-ahead {
+  border-left: 3px dashed var(--line);
+  opacity: 0.6;
+}
+
+/* Переключатель вариантов в настройках. */
+.kf-choice {
+  display: inline-flex;
+  justify-self: start;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.kf-choice button {
+  padding: 2px 12px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.kf-choice button:hover {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+.kf-choice button.is-now {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.kf-keys {
+  width: 11rem;
+}
+
+.mark-kf-produce-error,
+.mark-kf-isr-shrink,
+.mark-kf-group-rebalance {
+  background: var(--spin);
+}
+.mark-kf-isr-expand,
+.mark-kf-broker-up {
+  background: var(--run);
+}
+.mark-kf-leader-elect,
+.mark-kf-consumer-crash,
+.mark-kf-broker-down {
+  background: var(--hl);
+}
+.mark-kf-rec-lost,
+.mark-kf-produce-failed,
+.mark-kf-produce-duplicate,
+.mark-kf-log-truncate,
+.mark-kf-rec-reprocess,
+.mark-kf-rec-skipped,
+.mark-kf-resp-lost {
+  background: var(--gc-lost);
+  width: 5px;
+}
+.mark-kf-produce-dedup {
+  background: var(--accent);
+}
+
+.dot-kf-rec,
+.dot-kf-batch {
+  background: var(--wl-0);
+}
+.dot-kf-produce {
+  background: var(--accent);
+}
+.dot-kf-resp,
+.dot-kf-log {
+  background: var(--gc-lost);
+}
+.dot-kf-repl {
+  background: var(--wl-5);
+}
+.dot-kf-hw,
+.dot-kf-offset {
+  background: var(--run);
+}
+.dot-kf-isr,
+.dot-kf-leader {
+  background: var(--hl);
+}
+.dot-kf-broker {
+  background: var(--sys);
+}
+.dot-kf-consumer,
+.dot-kf-group {
+  background: var(--wl-3);
+}
+
+/* ─────────────────────── схемы в лекциях ─────────────────────── */
+
+.dg {
+  margin: 2rem 0;
+}
+.dg-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 8px;
+}
+.dg svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+/* На телефоне схема не сжимается до нечитаемого — её можно прокрутить вбок внутри рамки. */
+@media (max-width: 640px) {
+  .dg svg {
+    width: 640px;
+    max-width: none;
+  }
+}
+.dg figcaption {
+  margin-top: 8px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.dg text {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  fill: var(--ink);
+}
+.dg .t-muted {
+  fill: var(--muted);
+  font-size: 11px;
+}
+.dg .t-small {
+  font-size: 10.5px;
+}
+.dg .t-bold {
+  font-weight: 700;
+}
+.dg .t-mono {
+  font-family: var(--font-mono);
+}
+.dg .t-accent {
+  fill: var(--accent);
+  font-weight: 600;
+}
+.dg .t-bad {
+  fill: var(--gc-lost);
+  font-weight: 600;
+}
+.dg .t-ok {
+  fill: var(--run);
+  font-weight: 600;
+}
+
+.dg .box {
+  fill: var(--surface);
+  stroke: var(--line);
+  stroke-width: 1.2;
+}
+.dg .box-2 {
+  fill: var(--surface-2);
+  stroke: var(--line);
+  stroke-width: 1.2;
+}
+.dg .note {
+  fill: var(--bg);
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.dg .lead {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+.dg .foll {
+  fill: var(--surface);
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+.dg .idle {
+  fill: none;
+  stroke: var(--idle);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+.dg .cell {
+  fill: var(--surface);
+  stroke: var(--gc-cell-line);
+  stroke-width: 1;
+}
+.dg .cell-on {
+  fill: color-mix(in oklab, var(--accent) 16%, var(--surface));
+  stroke: var(--accent);
+  stroke-width: 1;
+}
+.dg .cell-pending {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 2;
+}
+.dg .cell-old {
+  fill: var(--surface-2);
+  stroke: var(--gc-cell-line);
+  stroke-width: 1;
+  opacity: 0.55;
+}
+.dg .risk {
+  fill: color-mix(in oklab, var(--gc-lost) 16%, transparent);
+  stroke: var(--gc-lost);
+  stroke-width: 1;
+}
+
+.dg .ln {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.4;
+}
+.dg .ln-dash {
+  stroke-dasharray: 5 4;
+}
+.dg .ln-life {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 1.2;
+  stroke-dasharray: 4 4;
+}
+.dg .ln-accent {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.dg .ln-thin {
+  fill: none;
+  stroke: var(--gc-cell-line);
+  stroke-width: 1;
+}
+.dg .head {
+  fill: var(--muted);
+}
+.dg .head-accent {
+  fill: var(--accent);
+}
+.dg .dot {
+  fill: var(--muted);
+}
+.dg .dot-ok {
+  fill: var(--run);
+}
+.dg .dot-bad {
+  fill: var(--gc-lost);
+}

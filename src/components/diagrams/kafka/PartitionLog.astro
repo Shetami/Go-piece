@@ -1,0 +1,69 @@
+---
+/**
+ * Лог одной партиции: оффсеты, сегменты и все отметки, которые на нём живут, —
+ * закоммиченные оффсеты групп, high watermark и конец лога.
+ */
+const N = 14
+const x = (i: number) => 40 + i * 48
+const edge = (i: number) => x(i) - 2
+const HW = 11
+const marks = [
+  { at: 5, y: 150, label: 'billing закоммитила 5', cls: '' },
+  { at: 9, y: 150, label: 'analytics закоммитила 9', cls: '' },
+  { at: HW, y: 176, label: 'HW = 11', cls: 't-accent' },
+  { at: N, y: 202, label: 'LEO = 14 — сюда ляжет следующая', cls: '' },
+]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 250" role="img" aria-labelledby="klog-t">
+      <title id="klog-t">Лог партиции из 14 записей: два сегмента, закоммиченные оффсеты двух групп, high watermark на 11 и конец лога на 14</title>
+
+      <!-- сегменты -->
+      <path d={`M${x(0)} 60 V52 H${x(5) + 44} V60`} class="ln-thin"></path>
+      <text x={(x(0) + x(5) + 44) / 2} y="44" text-anchor="middle" class="t-muted t-mono t-small">00000000000000000000.log · закрыт</text>
+      <path d={`M${x(6)} 60 V52 H${x(13) + 44} V60`} class="ln-thin"></path>
+      <text x={(x(6) + x(13) + 44) / 2} y="44" text-anchor="middle" class="t-muted t-mono t-small">00000000000000000006.log · активный, пишется</text>
+      <text x="20" y="22" class="t-bold">orders-0 — партиция 0 топика orders</text>
+
+      <!-- записи -->
+      {
+        Array.from({ length: N }, (_, i) => (
+          <g>
+            <rect x={x(i)} y="66" width="44" height="40" rx="5" class={i < 2 ? 'cell-old' : i >= HW ? 'cell-pending' : 'cell'}></rect>
+            <text x={x(i) + 22} y="91" text-anchor="middle" class={i >= HW ? 't-mono t-muted' : 't-mono'}>
+              {i}
+            </text>
+          </g>
+        ))
+      }
+      <text x={(x(0) + x(1) + 44) / 2} y="124" text-anchor="middle" class="t-muted t-small">удалит retention</text>
+
+      <!-- отметки -->
+      {
+        marks.map((m) => (
+          <g>
+            <path d={`M${edge(m.at)} ${m.cls ? 60 : 108} V${m.y - 12}`} class={m.cls ? 'ln-accent' : 'ln'}></path>
+            <text x={Math.min(edge(m.at), 745)} y={m.y} text-anchor={m.at === N ? 'end' : 'middle'} class={m.cls || 't-small'}>
+              {m.label}
+            </text>
+          </g>
+        ))
+      }
+
+      <!-- легенда -->
+      <rect x="40" y="222" width="14" height="14" rx="3" class="cell"></rect>
+      <text x="60" y="233" class="t-muted">закоммичено — видно потребителям</text>
+      <rect x="290" y="222" width="14" height="14" rx="3" class="cell-pending"></rect>
+      <text x="310" y="233" class="t-muted">выше HW — есть не на всех репликах</text>
+      <rect x="545" y="222" width="14" height="14" rx="3" class="cell-old"></rect>
+      <text x="565" y="233" class="t-muted">старый сегмент</text>
+    </svg>
+  </div>
+  <figcaption>
+    Партиция — это журнал, в который только дописывают. Номер записи — оффсет. Чтение ничего не удаляет: у каждой
+    группы своя отметка «докуда обработано», а старые данные уходят целыми сегментами по retention. Потребителям
+    видно только то, что ниже high watermark.
+  </figcaption>
+</figure>

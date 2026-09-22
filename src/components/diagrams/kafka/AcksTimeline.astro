@@ -1,0 +1,56 @@
+---
+/**
+ * Три значения acks на одной шкале времени: когда продюсер получает «ок» и
+ * сколько времени после этого запись существует в единственном экземпляре.
+ */
+const T = { send: 170, lead: 290, repl: 430, hw: 500 }
+const rows = [
+  { label: 'acks=0', ack: 186, note: '«ок» сразу, без ответа', risk: [186, T.repl] as const },
+  { label: 'acks=1', ack: T.lead + 18, note: '«ок», пока копия одна', risk: [T.lead + 18, T.repl] as const },
+  { label: 'acks=all', ack: T.hw + 18, note: '«ок» после коммита', risk: null },
+]
+const y = (i: number) => 76 + i * 56
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 250" role="img" aria-labelledby="kacks-t">
+      <title id="kacks-t">acks=0 и acks=1 подтверждают запись раньше, чем она скопирована на фолловеры; acks=all — после коммита</title>
+      <text x={T.send} y="30" text-anchor="middle" class="t-muted">send()</text>
+      <text x={T.lead} y="30" text-anchor="middle" class="t-muted">лидер записал</text>
+      <text x={T.repl} y="30" text-anchor="middle" class="t-muted">копии на ISR</text>
+      <text x={T.hw} y="46" text-anchor="middle" class="t-muted">HW</text>
+      {[T.send, T.lead, T.repl, T.hw].map((xx) => <path d={`M${xx} 52 V${y(2) + 18}`} class="ln-life"></path>)}
+
+      {
+        rows.map((r, i) => (
+          <g>
+            <text x="24" y={y(i) + 4} class="t-mono t-bold">
+              {r.label}
+            </text>
+            {r.risk && <rect x={r.risk[0]} y={y(i) - 12} width={r.risk[1] - r.risk[0]} height="24" rx="4" class="risk"></rect>}
+            <path d={`M${T.send} ${y(i)} H${T.hw + 20}`} class="ln"></path>
+            <circle cx={T.send} cy={y(i)} r="4" class="dot"></circle>
+            <circle cx={T.lead} cy={y(i)} r="4" class="dot"></circle>
+            <circle cx={T.repl} cy={y(i)} r="4" class="dot"></circle>
+            <circle cx={T.hw} cy={y(i)} r="4" class="dot"></circle>
+            <path d={`M${r.ack} ${y(i) - 8} L${r.ack + 8} ${y(i)} L${r.ack} ${y(i) + 8} L${r.ack - 8} ${y(i)} z`} class={r.risk ? 'dot-bad' : 'dot-ok'}></path>
+            <text x={T.hw + 40} y={y(i) + 4} class={r.risk ? 't-bad' : 't-ok'}>
+              {r.note}
+            </text>
+          </g>
+        ))
+      }
+
+      <rect x="170" y="222" width="18" height="12" rx="3" class="risk"></rect>
+      <text x="196" y="232" class="t-muted">подтверждено, но упади лидер сейчас — запись исчезнет</text>
+      <path d="M572 222 L578 228 L572 234 L566 228 z" class="dot-ok"></path>
+      <text x="586" y="232" class="t-muted">момент «ок» для продюсера</text>
+    </svg>
+  </div>
+  <figcaption>
+    Красная полоса — окно, в котором продюсер уже получил подтверждение, а запись существует только на лидере (при
+    acks=0 — может не существовать вовсе). Падение лидера в этом окне — тихая потеря. У acks=all такого окна нет: «ок»
+    приходит, когда копии уже есть на всех репликах ISR.
+  </figcaption>
+</figure>

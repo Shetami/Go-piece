@@ -1,0 +1,72 @@
+---
+/**
+ * Один топик на четыре партиции и три группы: как партиции делятся внутри
+ * группы и почему пятый потребитель оказывается лишним.
+ */
+const py = (p: number) => 64 + p * 50
+const billing = [
+  { name: 'c1', parts: [0, 1], y: 74 },
+  { name: 'c2', parts: [2, 3], y: 124 },
+]
+const search = ['s1 ← p0', 's2 ← p1', 's3 ← p2', 's4 ← p3']
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 300" role="img" aria-labelledby="kgr-t">
+      <title id="kgr-t">Топик на 4 партиции и три группы потребителей: две по две партиции, одна со всеми, пятый участник без партиций</title>
+      <text x="30" y="36" class="t-bold">Топик orders · 4 партиции</text>
+      {
+        [0, 1, 2, 3].map((p) => (
+          <g>
+            <rect x="30" y={py(p)} width="140" height="34" rx="6" class="cell-on"></rect>
+            <text x="100" y={py(p) + 22} text-anchor="middle" class="t-mono t-bold">
+              p{p}
+            </text>
+          </g>
+        ))
+      }
+
+      <text x="260" y="36" class="t-bold">Группа billing</text>
+      <rect x="250" y="50" width="200" height="120" rx="10" class="box-2"></rect>
+      {
+        billing.map((c) => (
+          <g>
+            {c.parts.map((p) => (
+              <path d={`M170 ${py(p) + 17} C 210 ${py(p) + 17}, 220 ${c.y + 17}, 262 ${c.y + 17}`} class="ln"></path>
+            ))}
+            <rect x="262" y={c.y} width="176" height="34" rx="6" class="box"></rect>
+            <text x="350" y={c.y + 22} text-anchor="middle">
+              <tspan class="t-mono t-bold">{c.name}</tspan> ← p{c.parts[0]}, p{c.parts[1]}
+            </text>
+          </g>
+        ))
+      }
+
+      <text x="260" y="204" class="t-bold">Группа audit</text>
+      <rect x="250" y="216" width="200" height="60" rx="10" class="box-2"></rect>
+      <rect x="262" y="229" width="176" height="34" rx="6" class="box"></rect>
+      <text x="350" y="251" text-anchor="middle"><tspan class="t-mono t-bold">a1</tspan> ← p0, p1, p2, p3</text>
+
+      <text x="500" y="36" class="t-bold">Группа search · 5 участников</text>
+      <rect x="490" y="50" width="240" height="226" rx="10" class="box-2"></rect>
+      {
+        search.map((label, i) => (
+          <g>
+            <rect x="502" y={62 + i * 42} width="216" height="32" rx="6" class="box"></rect>
+            <text x="610" y={83 + i * 42} text-anchor="middle" class="t-mono">
+              {label}
+            </text>
+          </g>
+        ))
+      }
+      <rect x="502" y="230" width="216" height="32" rx="6" class="idle"></rect>
+      <text x="610" y="251" text-anchor="middle" class="t-muted"><tspan class="t-mono">s5</tspan> — партиций не досталось</text>
+    </svg>
+  </div>
+  <figcaption>
+    Внутри группы партиция достаётся ровно одному участнику — поэтому порядок в партиции сохраняется и при
+    обработке. Группы друг другу не мешают: audit читает всё сам, billing делит работу на двоих. А пятый участник
+    search простаивает: потолок параллелизма группы равен числу партиций.
+  </figcaption>
+</figure>

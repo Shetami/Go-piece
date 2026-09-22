@@ -1,0 +1,82 @@
+---
+/**
+ * Кластер целиком: продюсеры пишут в лидеров, реплики разложены по брокерам,
+ * группы потребителей читают независимо друг от друга.
+ */
+const brokers = [0, 1, 2]
+const parts = [0, 1, 2]
+const bx = (b: number) => 200 + b * 120
+const py = (p: number) => 142 + p * 50
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 340" role="img" aria-labelledby="kov-t">
+      <title id="kov-t">Продюсеры пишут в лидеров партиций на брокерах кластера, группы потребителей читают партиции</title>
+      <defs>
+        <marker id="kov-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+
+      <!-- продюсеры -->
+      <text x="75" y="40" text-anchor="middle" class="t-bold">Продюсеры</text>
+      <rect x="15" y="70" width="120" height="40" rx="8" class="box"></rect>
+      <text x="75" y="95" text-anchor="middle" class="t-mono">orders-api</text>
+      <rect x="15" y="130" width="120" height="40" rx="8" class="box"></rect>
+      <text x="75" y="155" text-anchor="middle" class="t-mono">payments</text>
+      <path d="M135 90 C 160 90, 160 160, 186 160" class="ln" marker-end="url(#kov-a)"></path>
+      <path d="M135 150 C 160 150, 160 205, 186 205" class="ln" marker-end="url(#kov-a)"></path>
+      <text x="75" y="205" text-anchor="middle" class="t-muted">пишут только</text>
+      <text x="75" y="220" text-anchor="middle" class="t-muted">в лидеров партиций</text>
+
+      <!-- кластер -->
+      <rect x="188" y="30" width="376" height="296" rx="12" class="box-2"></rect>
+      <text x="202" y="52" class="t-bold">Кластер Kafka · топик orders, 3 партиции × 3 реплики</text>
+      <rect x="200" y="64" width="352" height="30" rx="6" class="box"></rect>
+      <text x="376" y="83" text-anchor="middle" class="t-muted">контроллеры KRaft: кто где лидер, кто в ISR</text>
+      {
+        brokers.map((b) => (
+          <g>
+            <rect x={bx(b)} y="104" width="112" height="212" rx="8" class="box"></rect>
+            <text x={bx(b) + 56} y="124" text-anchor="middle" class="t-bold t-mono">B{b}</text>
+            {parts.map((p) => {
+              const lead = p === b
+              return (
+                <g>
+                  <rect x={bx(b) + 10} y={py(p)} width="92" height="38" rx="6" class={lead ? 'lead' : 'foll'}></rect>
+                  <text x={bx(b) + 56} y={py(p) + 16} text-anchor="middle" class="t-mono t-bold">p{p}</text>
+                  <text x={bx(b) + 56} y={py(p) + 30} text-anchor="middle" class={lead ? 't-accent t-small' : 't-muted t-small'}>
+                    {lead ? 'лидер' : 'фолловер'}
+                  </text>
+                </g>
+              )
+            })}
+          </g>
+        ))
+      }
+
+      <!-- потребители -->
+      <path d="M564 110 C 580 110, 582 100, 598 100" class="ln" marker-end="url(#kov-a)"></path>
+      <path d="M564 250 C 580 250, 582 256, 598 256" class="ln" marker-end="url(#kov-a)"></path>
+      <text x="675" y="40" text-anchor="middle" class="t-bold">Группа billing</text>
+      <rect x="600" y="52" width="150" height="112" rx="10" class="box-2"></rect>
+      <rect x="612" y="66" width="126" height="36" rx="6" class="box"></rect>
+      <text x="675" y="89" text-anchor="middle"><tspan class="t-mono t-bold">c1</tspan> ← p0, p1</text>
+      <rect x="612" y="114" width="126" height="36" rx="6" class="box"></rect>
+      <text x="675" y="137" text-anchor="middle"><tspan class="t-mono t-bold">c2</tspan> ← p2</text>
+
+      <text x="675" y="198" text-anchor="middle" class="t-bold">Группа analytics</text>
+      <rect x="600" y="210" width="150" height="64" rx="10" class="box-2"></rect>
+      <rect x="612" y="224" width="126" height="36" rx="6" class="box"></rect>
+      <text x="675" y="247" text-anchor="middle"><tspan class="t-mono t-bold">a1</tspan> ← p0, p1, p2</text>
+      <text x="675" y="298" text-anchor="middle" class="t-muted">читают сами (pull),</text>
+      <text x="675" y="313" text-anchor="middle" class="t-muted">каждая группа — всё целиком</text>
+    </svg>
+  </div>
+  <figcaption>
+    У каждой партиции один лидер, и лидеры разных партиций живут на разных брокерах — так запись распределяется по
+    кластеру. Фолловеры сами забирают данные у своих лидеров. Внутри группы партиции поделены между участниками,
+    а разные группы читают один и тот же топик независимо.
+  </figcaption>
+</figure>
