@@ -1,0 +1,23 @@
+---
+title: Индекс по выражению
+short: 'Индекс не по колонке, а по результату выражения — lower(email), date(created_at), поле JSON. Используется, только если запрос содержит то же самое выражение.'
+aliases: [expression index, functional index, функциональный индекс, lower(), IMMUTABLE]
+category: сущность
+related: [b-tree, index-selectivity]
+---
+
+`WHERE lower(email) = lower($1)` не может использовать индекс по `email`: в индексе лежат значения колонки, а не результат функции. Индекс по выражению хранит именно результат:
+
+```sql
+CREATE INDEX users_email_lower_idx ON users (lower(email));
+CREATE INDEX events_day_idx ON events ((created_at::date));
+CREATE INDEX docs_author_idx ON docs ((data->>'author'));
+```
+
+Условия:
+
+- **Выражение в запросе должно совпадать** с выражением индекса. `lower(email)` и `LOWER(email)` — одно и то же, `lower(trim(email))` — уже нет.
+- **Функция должна быть IMMUTABLE** — всегда давать тот же результат для тех же аргументов. `now()` или приведение `timestamptz` к дате (зависит от часового пояса) — нельзя.
+- **Нужна статистика.** После создания индекса выполните `ANALYZE`: PostgreSQL соберёт статистику по выражению, и оценки станут точнее.
+
+Для регистронезависимых строк есть и альтернатива — тип `citext` или недетерминированные коллации.

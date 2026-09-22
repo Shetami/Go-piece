@@ -1,0 +1,21 @@
+---
+title: Покрывающий индекс
+short: 'Индекс, в котором есть все колонки, нужные запросу. Тогда возможен Index Only Scan: строки таблицы читать не надо — если карта видимости это позволяет.'
+aliases: [covering index, INCLUDE, index-only scan, Index Only Scan, Heap Fetches]
+category: сущность
+related: [visibility-map, composite-index, b-tree, seq-scan]
+---
+
+Обычный Index Scan находит в индексе адрес строки и идёт за ней в таблицу — часто это случайное чтение на каждую строку. Если все колонки запроса уже есть в индексе, в таблицу идти незачем:
+
+```sql
+CREATE INDEX ON orders (user_id, created_at) INCLUDE (total);
+
+SELECT created_at, total FROM orders
+WHERE user_id = 42 ORDER BY created_at DESC LIMIT 20;
+-- Index Only Scan using orders_user_id_created_at_total_idx
+```
+
+`INCLUDE` добавляет колонки в листья, не делая их частью ключа: по ним нельзя искать, но их можно отдать. Индекс от этого растёт, поэтому включают только то, что действительно нужно частым запросам.
+
+Тонкость PostgreSQL: индекс не знает, какая версия строки видна вашему снимку — информация о видимости есть только в таблице. Index Only Scan смотрит в [карту видимости](/glossary/visibility-map/): если страница таблицы помечена «всё видно всем», идти в неё не нужно. Если нет — придётся. В `EXPLAIN ANALYZE` это `Heap Fetches`: чем больше, тем меньше пользы от «only». Карту обновляет VACUUM, поэтому на часто меняющейся таблице без вакуума Index Only Scan вырождается в обычный.

@@ -1,0 +1,45 @@
+---
+/**
+ * Когда коммит получает «ок» при каждом значении synchronous_commit —
+ * на той же шкале, что путь WAL до реплики.
+ */
+const X = { commit: 150, localFlush: 230, write: 360, flush: 450, replay: 560 }
+const rows = [
+  { label: 'off', ack: X.commit + 14, note: 'не ждёт даже своего диска', risk: true },
+  { label: 'local', ack: X.localFlush + 14, note: 'свой диск', risk: true },
+  { label: 'remote_write', ack: X.write + 14, note: 'реплика получила', risk: false },
+  { label: 'on', ack: X.flush + 14, note: 'реплика сбросила на диск', risk: false },
+  { label: 'remote_apply', ack: X.replay + 14, note: 'на реплике уже видно', risk: false },
+]
+const y = (i: number) => 70 + i * 34
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 260" role="img" aria-labelledby="dbsl-t">
+      <title id="dbsl-t">Пять значений synchronous_commit: чем правее момент подтверждения, тем надёжнее коммит и тем дольше он ждёт</title>
+      <text x={X.commit} y="26" text-anchor="middle" class="t-muted t-small">COMMIT</text>
+      <text x={X.localFlush} y="26" text-anchor="middle" class="t-muted t-small">fsync ведущего</text>
+      <text x={X.write} y="26" text-anchor="middle" class="t-muted t-small">реплика: write</text>
+      <text x={X.flush} y="42" text-anchor="middle" class="t-muted t-small">flush</text>
+      <text x={X.replay} y="26" text-anchor="middle" class="t-muted t-small">replay</text>
+      {Object.values(X).map((x) => <path d={`M${x} 48 V${y(4) + 16}`} class="ln-life"></path>)}
+      {
+        rows.map((r, i) => (
+          <g>
+            <text x="20" y={y(i) + 4} class="t-mono t-bold t-small">{r.label}</text>
+            <path d={`M${X.commit} ${y(i)} H${r.ack}`} class="ln"></path>
+            <path d={`M${r.ack} ${y(i) - 7} L${r.ack + 7} ${y(i)} L${r.ack} ${y(i) + 7} L${r.ack - 7} ${y(i)} z`} class={r.risk ? 'dot-bad' : 'dot-ok'}></path>
+            <text x={r.ack + 16} y={y(i) + 4} class={r.risk ? 't-bad t-small' : 't-ok t-small'}>{r.note}</text>
+          </g>
+        ))
+      }
+      <text x="20" y="246" class="t-muted t-small">Уровни правее local работают, только если задан synchronous_standby_names. Иначе они ведут себя как local.</text>
+    </svg>
+  </div>
+  <figcaption>
+    Ромб — момент, когда клиент получает «COMMIT». Красные уровни подтверждают раньше, чем запись есть на реплике:
+    при переключении такой коммит может исчезнуть. Зелёные ждут синхронную реплику — один круг по сети и её диск на
+    каждый коммит. remote_apply к тому же гарантирует, что на синхронной реплике изменение уже видно запросам.
+  </figcaption>
+</figure>

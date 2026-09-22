@@ -1,0 +1,28 @@
+---
+title: Логическая репликация
+short: 'Передача изменений строк (INSERT, UPDATE, DELETE) выбранных таблиц через публикацию и подписку. Работает между версиями PostgreSQL и в чужие системы, но не копирует DDL и последовательности.'
+aliases: [logical replication, CREATE PUBLICATION, CREATE SUBSCRIPTION, logical decoding, pgoutput, CDC, Debezium, wal_level=logical]
+category: механизм
+related: [streaming-replication, replication-slot, wal]
+---
+
+Потоковая репликация пересылает WAL как есть — страницы и байты. Логическая декодирует WAL в изменения строк и пересылает их:
+
+```sql
+-- на источнике (wal_level = logical)
+CREATE PUBLICATION orders_pub FOR TABLE orders, order_items;
+-- на приёмнике
+CREATE SUBSCRIPTION orders_sub
+  CONNECTION 'host=src dbname=shop' PUBLICATION orders_pub;
+```
+
+Что это даёт:
+
+- **Выбор таблиц** и даже строк и колонок (фильтры в публикации).
+- **Разные версии PostgreSQL** — основной способ обновления мажорной версии с минимальным простоем.
+- **Приёмник — обычная база**: на нём можно писать, держать свои индексы и таблицы.
+- **CDC**: Debezium и подобные читают тот же поток и отправляют изменения в Kafka.
+
+Ограничения: DDL не реплицируется (схему меняют на обеих сторонах руками), последовательности не синхронизируются, у таблиц нужен первичный ключ или `REPLICA IDENTITY`. Для отказоустойчивости логическая репликация не предназначена — для этого потоковая.
+
+Логический [слот](/glossary/replication-slot/) держит WAL и горизонт очистки, пока подписчик не заберёт изменения. Остановившийся Debezium — частая причина переполненного диска.

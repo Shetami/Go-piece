@@ -10,6 +10,7 @@ import MemStand from '../../components/stands/mem/MemStand.astro'
 import ChanStand from '../../components/stands/chan/ChanStand.astro'
 import KafkaStand from '../../components/stands/kafka/KafkaStand.astro'
 import TxnStand from '../../components/stands/txn/TxnStand.astro'
+import ReplStand from '../../components/stands/repl/ReplStand.astro'
 
 export async function getStaticPaths() {
   const lectures = await getCollection('lectures', (e) => !e.data.draft)
@@ -19,7 +20,7 @@ export async function getStaticPaths() {
 const { entry } = Astro.props
 const { Content, headings } = await render(entry)
 
-const components = { Term, Callout, Predict, GmpStand, GcStand, MemStand, ChanStand, KafkaStand, TxnStand }
+const components = { Term, Callout, Predict, GmpStand, GcStand, MemStand, ChanStand, KafkaStand, TxnStand, ReplStand }
 ---
 
 <LectureLayout entry={entry} headings={headings}>

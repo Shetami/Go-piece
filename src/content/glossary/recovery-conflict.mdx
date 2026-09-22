@@ -1,0 +1,19 @@
+---
+title: Конфликт с восстановлением
+short: 'Запись WAL на реплике мешает идущему там запросу — чаще всего очистка удаляет версии, которые запрос ещё читает. Реплика либо ждёт и отстаёт, либо отменяет запрос.'
+aliases: [recovery conflict, canceling statement due to conflict with recovery, max_standby_streaming_delay, max_standby_archive_delay, pg_stat_database_conflicts]
+category: состояние
+related: [hot-standby-feedback, replication-lag, vacuum, streaming-replication]
+source: src/backend/storage/ipc/standby.c — ResolveRecoveryConflictWithSnapshot
+---
+
+Реплика — побайтовая копия ведущего. У неё не может быть своих версий строк: если ведущий вычистил мёртвые версии, запись об этом приедет через WAL, и реплика обязана сделать то же самое. А запрос на реплике, начатый раньше, эти версии ещё читает.
+
+Выбор у реплики один из двух, и решает `max_standby_streaming_delay` (по умолчанию 30 с):
+
+- подождать запрос — проигрывание WAL стоит, [отставание](/glossary/replication-lag/) растёт;
+- не дождавшись, отменить его — клиент получит `canceling statement due to conflict with recovery`.
+
+Кроме очистки конфликты бывают из-за блокировок (`DROP TABLE`, `TRUNCATE`, `ALTER` на ведущем против запроса на реплике), удаления табличных пространств и прочего. Счётчики — в `pg_stat_database_conflicts`.
+
+Лекарства — компромиссы: [hot_standby_feedback](/glossary/hot-standby-feedback/) (мусор на ведущем), бо́льшая задержка или `-1` (отставание, плохо для реплики, на которую нужно переключаться), отдельная реплика для отчётов с другими настройками.

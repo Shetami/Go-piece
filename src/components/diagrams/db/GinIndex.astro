@@ -1,0 +1,54 @@
+---
+/**
+ * GIN — обратный индекс: элемент → список строк, где он встречается.
+ */
+const docs = [
+  { id: 1, tags: ['go', 'postgres'] },
+  { id: 2, tags: ['kafka', 'go'] },
+  { id: 3, tags: ['postgres', 'index'] },
+  { id: 4, tags: ['go', 'index', 'postgres'] },
+]
+const post: Record<string, number[]> = {}
+for (const d of docs) for (const t of d.tags) (post[t] ??= []).push(d.id)
+const terms = Object.keys(post).sort()
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 250" role="img" aria-labelledby="dbgin-t">
+      <title id="dbgin-t">Четыре поста с тегами и GIN-индекс по тегам: для каждого тега — список постов; запрос по двум тегам пересекает два списка</title>
+      <text x="20" y="26" class="t-bold">posts.tags</text>
+      {docs.map((d, i) => (
+        <g>
+          <rect x="20" y={40 + i * 44} width="230" height="36" rx="6" class="box"></rect>
+          <text x="34" y={63 + i * 44} class="t-mono t-small">{d.id}</text>
+          <text x="60" y={63 + i * 44} class="t-mono t-small">{`{${d.tags.join(', ')}}`}</text>
+        </g>
+      ))}
+      <text x="320" y="26" class="t-bold">GIN: тег → строки</text>
+      {terms.map((t, i) => (
+        <g>
+          <rect x="320" y={40 + i * 36} width="90" height="28" rx="5" class={t === 'go' || t === 'postgres' ? 'cell-on' : 'cell'}></rect>
+          <text x="365" y={59 + i * 36} text-anchor="middle" class="t-mono t-small">{t}</text>
+          {post[t]!.map((id, j) => (
+            <g>
+              <rect x={420 + j * 34} y={40 + i * 36} width="28" height="28" rx="4" class={(t === 'go' || t === 'postgres') && post.go!.includes(id) && post.postgres!.includes(id) ? 'cell-on' : 'cell'}></rect>
+              <text x={434 + j * 34} y={59 + i * 36} text-anchor="middle" class="t-mono t-small">{id}</text>
+            </g>
+          ))}
+        </g>
+      ))}
+      <text x="560" y="60" class="t-accent t-small">tags @&gt; {'{go, postgres}'}</text>
+      <text x="560" y="80" class="t-small">пересечь два списка:</text>
+      <text x="560" y="98" class="t-small">{`{1, 2, 4} ∩ {1, 3, 4} = {1, 4}`}</text>
+      <text x="560" y="130" class="t-muted t-small">Вставка поста с тремя</text>
+      <text x="560" y="146" class="t-muted t-small">тегами — три вставки</text>
+      <text x="560" y="162" class="t-muted t-small">в индекс.</text>
+    </svg>
+  </div>
+  <figcaption>
+    GIN хранит не значения целиком, а их элементы — теги, ключи JSON, слова. Для каждого элемента — список строк, где он
+    встречается. Поэтому «содержит» и «содержит всё из списка» решаются пересечением списков, а цена — запись: одна
+    строка превращается в столько вставок, сколько в ней элементов.
+  </figcaption>
+</figure>

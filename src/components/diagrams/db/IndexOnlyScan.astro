@@ -1,0 +1,64 @@
+---
+/**
+ * Index Only Scan: колонки берутся из индекса, а в таблицу приходится идти
+ * только за страницами, которые не отмечены в карте видимости.
+ */
+const pages = [
+  { x: 420, vis: true },
+  { x: 480, vis: true },
+  { x: 540, vis: false },
+  { x: 600, vis: true },
+  { x: 660, vis: false },
+]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 250" role="img" aria-labelledby="dbios-t">
+      <title id="dbios-t">Index Only Scan берёт значения из индекса и проверяет карту видимости; в таблицу он идёт только за двумя страницами из пяти</title>
+      <defs>
+        <marker id="dbios-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+      <text x="20" y="26" class="t-bold">Индекс (user_id, created_at) INCLUDE (total)</text>
+      <rect x="20" y="40" width="330" height="80" rx="8" class="lead"></rect>
+      {[0, 1, 2, 3, 4].map((i) => (
+        <g>
+          <rect x={32 + i * 62} y="56" width="56" height="48" rx="4" class="cell"></rect>
+          <text x={60 + i * 62} y="75" text-anchor="middle" class="t-mono t-small">42</text>
+          <text x={60 + i * 62} y="93" text-anchor="middle" class="t-mono t-small t-muted">total</text>
+        </g>
+      ))}
+
+      <path d="M354 53 H414" class="ln" marker-end="url(#dbios-a)"></path>
+      <text x="420" y="26" class="t-bold">карта видимости</text>
+      {pages.map((p) => (
+        <g>
+          <rect x={p.x} y="40" width="50" height="26" rx="4" class={p.vis ? 'cell-on' : 'cell-pending'}></rect>
+          <text x={p.x + 25} y="57" text-anchor="middle" class="t-small">{p.vis ? 'всё видно' : '?'}</text>
+        </g>
+      ))}
+
+      <text x="420" y="116" class="t-bold">страницы таблицы</text>
+      {pages.map((p) => (
+        <g>
+          <rect x={p.x} y="126" width="50" height="40" rx="4" class={p.vis ? 'cell-old' : 'box'}></rect>
+          {!p.vis && <path d={`M${p.x + 25} 68 V122`} class="ln" marker-end="url(#dbios-a)"></path>}
+        </g>
+      ))}
+      <text x="420" y="190" class="t-small">Heap Fetches: 2 — только за страницами,</text>
+      <text x="420" y="206" class="t-small">где карта не знает, видна ли версия.</text>
+      <text x="20" y="150" class="t-muted t-small">user_id, created_at и total — всё</text>
+      <text x="20" y="166" class="t-muted t-small">есть в индексе. Но видна ли версия</text>
+      <text x="20" y="182" class="t-muted t-small">строки нашему снимку, индекс не знает:</text>
+      <text x="20" y="198" class="t-muted t-small">это знает только таблица — или карта</text>
+      <text x="20" y="214" class="t-muted t-small">видимости, которую ведёт VACUUM.</text>
+    </svg>
+  </div>
+  <figcaption>
+    Покрывающий индекс отдаёт все колонки запроса сам. Для страниц, отмеченных в карте видимости как «всё видно всем»,
+    в таблицу не ходят вовсе. Остальные придётся прочитать, чтобы проверить видимость, — в EXPLAIN это Heap Fetches.
+    Чем свежее вакуум, тем меньше таких походов.
+  </figcaption>
+</figure>

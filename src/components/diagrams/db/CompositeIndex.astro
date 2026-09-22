@@ -1,0 +1,48 @@
+---
+/**
+ * Листья составного индекса (tenant_id, created_at): что читается подряд, а что
+ * разбросано по всему индексу.
+ */
+const keys = [
+  [1, '01.09'], [1, '05.09'], [1, '19.09'], [1, '21.09'],
+  [2, '02.09'], [2, '11.09'], [2, '20.09'], [2, '22.09'],
+  [3, '03.09'], [3, '14.09'], [3, '20.09'], [3, '21.09'],
+] as const
+const x = (i: number) => 30 + i * 58
+const hitA = (t: number, d: string) => t === 2 && d >= '20.09'
+const hitB = (_t: number, d: string) => d >= '20.09'
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 250" role="img" aria-labelledby="dbci-t">
+      <title id="dbci-t">В индексе по (tenant_id, created_at) записи арендатора 2 за последние дни лежат подряд, а записи всех арендаторов за последние дни разбросаны по трём местам</title>
+      <text x="30" y="26" class="t-bold">Листья индекса (tenant_id, created_at)</text>
+      {
+        keys.map(([t, d], i) => (
+          <g>
+            <rect x={x(i)} y="44" width="54" height="42" rx="5" class={hitA(t, d) ? 'cell-on' : 'cell'}></rect>
+            <text x={x(i) + 27} y="61" text-anchor="middle" class="t-mono t-small">{t}</text>
+            <text x={x(i) + 27} y="77" text-anchor="middle" class="t-mono t-small t-muted">{d}</text>
+          </g>
+        ))
+      }
+      <path d={`M${x(6)} 96 H${x(7) + 54}`} class="ln-accent"></path>
+      <text x={x(6)} y="114" class="t-accent t-small">WHERE tenant_id = 2 AND created_at ≥ 20.09</text>
+      <text x={x(6)} y="130" class="t-muted t-small">один спуск и две записи подряд</text>
+
+      {
+        keys.map(([t, d], i) =>
+          hitB(t, d) ? <rect x={x(i)} y="150" width="54" height="16" rx="3" class="risk"></rect> : null,
+        )
+      }
+      <text x="30" y="192" class="t-bad t-small">WHERE created_at ≥ 20.09 — без tenant_id</text>
+      <text x="30" y="208" class="t-muted t-small">нужные записи в трёх разных местах: внутри каждого арендатора. Спуститься к ним нельзя —</text>
+      <text x="30" y="224" class="t-muted t-small">придётся читать весь индекс или всю таблицу. Для такого запроса нужен свой индекс по (created_at).</text>
+    </svg>
+  </div>
+  <figcaption>
+    Составной индекс упорядочен сначала по первой колонке, внутри неё — по второй. Запрос с равенством по первой
+    колонке и диапазоном по второй получает один непрерывный кусок листьев. Запрос только по второй колонке — нет.
+  </figcaption>
+</figure>

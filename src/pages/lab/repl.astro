@@ -1,0 +1,24 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro'
+import ReplStand from '../../components/stands/repl/ReplStand.astro'
+---
+
+<BaseLayout
+  title="Стенд: репликация"
+  description="Пошаговая модель потоковой репликации PostgreSQL: WAL от ведущего к репликам, отставание, синхронные реплики, чтение с реплик, падение ведущего и переключение, слоты, конфликты с восстановлением."
+  wide
+>
+  <nav class="text-sm text-muted mb-4">
+    <a href="/lab/" class="hover:text-ink">Лаборатория</a> / Репликация
+  </nav>
+  <div class="flex flex-wrap items-baseline justify-between gap-4 mb-2">
+    <h1 class="text-3xl font-bold tracking-tight">Репликация: ведущий и реплики</h1>
+    <a href="/lectures/databases/replication/" class="text-sm text-accent">читать лекцию →</a>
+  </div>
+  <p class="text-muted max-w-3xl">
+    Пробел — пуск и пауза, стрелки — шаг, Shift+стрелки — 10 шагов. Клик по клетке расписания переносит на этот тик,
+    клик по событию — открывает разбор. В настройках — synchronous_standby_names и synchronous_commit, переключение,
+    слоты, hot_standby_feedback, расписание сбоев и свои клиенты.
+  </p>
+  <ReplStand scenario="failover" mode="lab" />
+</BaseLayout>

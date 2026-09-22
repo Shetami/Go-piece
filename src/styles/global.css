@@ -3389,6 +3389,270 @@ body {
   background: var(--gc-lost);
 }
 
+/* ─────────────────────── стенд «Репликация» ─────────────────────── */
+
+.rp-sched-primary {
+  color: var(--muted) !important;
+  font-family: var(--font-sans) !important;
+  font-weight: 400 !important;
+}
+.rp-nodes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 8px;
+}
+.rp-node {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg);
+  padding: 8px 10px;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  min-width: 0;
+}
+.rp-node.is-primary {
+  border-top: 3px solid var(--accent);
+}
+.rp-node.is-sync {
+  border-top: 3px solid var(--run);
+}
+.rp-node.is-down {
+  border-top: 3px solid var(--gc-lost);
+  border-style: dashed;
+  opacity: 0.8;
+}
+.rp-node.is-hl {
+  box-shadow: 0 0 0 2px var(--hl);
+}
+.rp-node header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+.rp-node header strong {
+  font-family: var(--font-mono);
+}
+.rp-role {
+  font-size: 0.72rem;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+.is-primary .rp-role {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+.is-sync .rp-role {
+  background: color-mix(in oklab, var(--run) 20%, transparent);
+}
+.is-down .rp-role {
+  background: color-mix(in oklab, var(--gc-lost) 18%, transparent);
+}
+.rp-strip {
+  display: flex;
+  gap: 2px;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+.rp-lsn {
+  --c: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 13px;
+  width: 13px;
+  height: 18px;
+  border-radius: 3px;
+  border: 1px solid var(--gc-cell-line);
+  font-size: 0.58rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--ink);
+}
+.rp-lsn.is-none {
+  border-style: dotted;
+  border-color: var(--line);
+}
+.rp-lsn.is-replayed {
+  background: color-mix(in oklab, var(--c) 60%, transparent);
+  border-color: var(--c);
+}
+.rp-lsn.is-flushed {
+  background: color-mix(in oklab, var(--c) 30%, transparent);
+  border-color: var(--c);
+}
+.rp-lsn.is-written {
+  background: color-mix(in oklab, var(--c) 12%, transparent);
+  border-color: color-mix(in oklab, var(--c) 60%, transparent);
+  border-style: dashed;
+}
+.rp-lsn.is-flight {
+  background: repeating-linear-gradient(90deg, color-mix(in oklab, var(--accent) 40%, transparent) 0 2px, transparent 2px 4px);
+  border-color: var(--accent);
+}
+.rp-lsn.is-missing {
+  background: transparent;
+  border-color: var(--gc-lost);
+  border-style: dashed;
+  opacity: 0.6;
+}
+.rp-lsn.is-cleanup {
+  --c: var(--hl);
+}
+.rp-lsn.is-gone {
+  opacity: 0.35;
+}
+.rp-lsn.is-hl {
+  outline: 2px solid var(--hl);
+  outline-offset: 1px;
+}
+.rp-pos,
+.rp-query {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.rp-pos b,
+.rp-query b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.rp-conflict {
+  color: var(--gc-lost) !important;
+}
+.rp-kv {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+}
+.rp-stat {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+.rp-stat th,
+.rp-stat td {
+  padding: 1px 4px;
+  text-align: right;
+  white-space: nowrap;
+}
+.rp-stat th:first-child,
+.rp-stat td:first-child {
+  text-align: left;
+}
+.rp-stat th {
+  color: var(--muted);
+  font-weight: 600;
+  border-bottom: 1px solid var(--line);
+}
+.rp-stat small {
+  color: var(--run);
+  font-weight: 600;
+}
+.rp-stat .is-off td {
+  color: var(--idle);
+}
+.rp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.rp-legend .rp-lsn {
+  margin-left: 6px;
+}
+.rp-clients {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: 8px;
+}
+.rp-client {
+  --c: var(--wl-0);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--c);
+  border-radius: var(--r);
+  padding: 6px 10px;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.rp-client.is-hl {
+  box-shadow: 0 0 0 2px var(--hl);
+}
+.rp-client header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+.rp-client header strong {
+  font-family: var(--font-mono);
+  color: var(--c);
+}
+.rp-op {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
+}
+.rp-wait {
+  font-size: 0.7rem;
+  color: var(--spin);
+}
+
+.mark-rp-commit-hang,
+.mark-rp-conflict-wait,
+.mark-rp-wal-retained,
+.mark-rp-replica-down {
+  background: var(--spin);
+}
+.mark-rp-replica-up,
+.mark-rp-failover-promote {
+  background: var(--run);
+}
+.mark-rp-primary-down,
+.mark-rp-write-error {
+  background: var(--hl);
+}
+.mark-rp-commit-lost,
+.mark-rp-commit-unknown,
+.mark-rp-read-own-stale,
+.mark-rp-read-backwards,
+.mark-rp-replica-broken,
+.mark-rp-conflict-cancel {
+  background: var(--gc-lost);
+  width: 5px;
+}
+
+.dot-rp-wal,
+.dot-rp-commit {
+  background: var(--accent);
+}
+.dot-rp-replica {
+  background: var(--wl-5);
+}
+.dot-rp-read {
+  background: var(--wl-0);
+}
+.dot-rp-write,
+.dot-rp-primary,
+.dot-rp-failover {
+  background: var(--hl);
+}
+.dot-rp-vacuum,
+.dot-rp-feedback,
+.dot-rp-query {
+  background: var(--wl-3);
+}
+.dot-rp-conflict {
+  background: var(--gc-lost);
+}
+
 /* ─────────────────────── схемы в лекциях ─────────────────────── */
 
 .dg {

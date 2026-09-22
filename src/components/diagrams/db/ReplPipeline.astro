@@ -1,0 +1,65 @@
+---
+/**
+ * Путь записи WAL от ведущего до запроса на реплике и где на этом пути
+ * копится отставание: сеть, диск реплики, проигрывание.
+ */
+const stages = [
+  { x: 30, w: 130, title: 'ведущий', sub: 'WAL на диске', pos: 'pg_current_wal_lsn()' },
+  { x: 230, w: 120, title: 'write', sub: 'получено', pos: 'write_lsn' },
+  { x: 410, w: 120, title: 'flush', sub: 'на диске реплики', pos: 'flush_lsn' },
+  { x: 590, w: 140, title: 'replay', sub: 'видно запросам', pos: 'replay_lsn' },
+]
+const gaps = [
+  { from: 0, label: 'сеть', lag: 'write_lag' },
+  { from: 1, label: 'fsync реплики', lag: 'flush_lag' },
+  { from: 2, label: 'проигрывание', lag: 'replay_lag' },
+]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 230" role="img" aria-labelledby="dbrp-t">
+      <title id="dbrp-t">Запись WAL проходит от ведущего через сеть, запись и сброс на диск реплики до проигрывания; на каждом отрезке копится своё отставание</title>
+      <defs>
+        <marker id="dbrp-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+      <text x="30" y="26" class="t-muted">walsender</text>
+      <text x="230" y="26" class="t-muted">walreceiver</text>
+      <text x="590" y="26" class="t-muted">startup-процесс</text>
+      {
+        stages.map((s, i) => (
+          <g>
+            <rect x={s.x} y="40" width={s.w} height="62" rx="8" class={i === 0 ? 'lead' : i === 3 ? 'box-2' : 'box'}></rect>
+            <text x={s.x + s.w / 2} y="66" text-anchor="middle" class="t-bold">{s.title}</text>
+            <text x={s.x + s.w / 2} y="86" text-anchor="middle" class="t-muted t-small">{s.sub}</text>
+            <text x={s.x + s.w / 2} y="124" text-anchor="middle" class="t-mono t-small">{s.pos}</text>
+          </g>
+        ))
+      }
+      {
+        gaps.map((g) => {
+          const a = stages[g.from]!
+          const b = stages[g.from + 1]!
+          const x1 = a.x + a.w + 4
+          const x2 = b.x - 4
+          return (
+            <g>
+              <path d={`M${x1} 71 H${x2}`} class="ln" marker-end="url(#dbrp-a)"></path>
+              <text x={(x1 + x2) / 2} y="62" text-anchor="middle" class="t-small">{g.label}</text>
+              <path d={`M${stages[0]!.x + stages[0]!.w / 2} ${150 + g.from * 24} H${b.x + b.w / 2}`} class="ln-thin"></path>
+              <circle cx={b.x + b.w / 2} cy={150 + g.from * 24} r="3" class="dot"></circle>
+              <text x={b.x + b.w / 2 + 8} y={154 + g.from * 24} class="t-mono t-small t-muted">{g.lag}</text>
+            </g>
+          )
+        })
+      }
+    </svg>
+  </div>
+  <figcaption>
+    Реплика сообщает ведущему три позиции, и ведущий показывает их в pg_stat_replication. Разница между ними раскладывает
+    отставание по причинам. Сеть и диск обычно дают миллисекунды. А проигрывание однопоточное: если ведущий пишет
+    быстрее, чем реплика успевает применять, replay_lag растёт без предела.
+  </figcaption>
+</figure>

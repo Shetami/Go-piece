@@ -1,6 +1,6 @@
 # Go-piece
 
-Понятные лекции по технологиям с интерактивными стендами. Курсы: рантайм Go — планировщик (G, M, P), сборщик мусора, память и каналы; брокеры сообщений — Kafka от `send()` до коммита оффсета; базы данных — хранение и индексы, транзакции и изоляция, PostgreSQL изнутри.
+Понятные лекции по технологиям с интерактивными стендами. Курсы: рантайм Go — планировщик (G, M, P), сборщик мусора, память и каналы; брокеры сообщений — Kafka от `send()` до коммита оффсета; базы данных — хранение, транзакции и изоляция, PostgreSQL изнутри, индексы на практике, репликация.
 
 Сайт статический: Astro + MDX + React-острова + Tailwind, поиск — Pagefind. Бэкенда нет.
 
@@ -18,6 +18,7 @@ pnpm demo:mem contention      # и для аллокатора
 pnpm demo:chan buffer         # и для каналов
 pnpm demo:kafka journey 80 1  # и для Kafka; третий аргумент — путь сообщения m1
 pnpm demo:txn lost-update isolation=repeatable-read retry=true  # и для транзакций; дальше — правки настроек
+pnpm demo:repl failover standbys=any-1  # и для репликации
 ```
 
 Нужен Node 20+ (в `mise.toml` закреплены Node 24 и pnpm 10).
@@ -48,6 +49,8 @@ src/
       explain/                 разбор событий и описание каждого шага пути сообщения
     stands/txn/                стенд «Транзакции»
       engine/                  версии строк (xmin/xmax), снимки, блокировки строк, SSI, VACUUM, WAL, падение
+    stands/repl/               стенд «Репликация»
+      engine/                  поток WAL, write/flush/replay, синхронные реплики, переключение, слоты, конфликты
     diagrams/kafka/            статичные схемы для лекции (SVG на токенах темы)
     diagrams/db/               схемы для курса о базах данных
   data/courses.ts              курсы и анонсы будущих тем
@@ -62,11 +65,11 @@ src/
 
 **Термин.** Файл `src/content/glossary/<id>.mdx` с полями `title`, `short` (одна строка для подсказки), `category`, `related`. В лекции: `<Term id="<id>" />` или `<Term id="<id>">своя подпись</Term>`. Опечатка в id роняет сборку.
 
-**Лекцию.** Файл `src/content/lectures/<курс>/<тема>.mdx` с `title`, `description`, `order`. В тексте доступны `<Term>`, `<Predict>`, `<Callout>`, `<GmpStand scenario="…" />`, `<GcStand scenario="…" />`, `<MemStand scenario="…" />`, `<ChanStand scenario="…" />`, `<KafkaStand scenario="…" />` и `<TxnStand scenario="…" />`. Страница, навигация, оглавление и список терминов появятся сами. Из `planned` в `src/data/courses.ts` уберите анонс этой темы.
+**Лекцию.** Файл `src/content/lectures/<курс>/<тема>.mdx` с `title`, `description`, `order`. В тексте доступны `<Term>`, `<Predict>`, `<Callout>`, `<GmpStand scenario="…" />`, `<GcStand scenario="…" />`, `<MemStand scenario="…" />`, `<ChanStand scenario="…" />`, `<KafkaStand scenario="…" />`, `<TxnStand scenario="…" />` и `<ReplStand scenario="…" />`. Страница, навигация, оглавление и список терминов появятся сами. Из `planned` в `src/data/courses.ts` уберите анонс этой темы.
 
-**Сценарий стенда.** Объект сценария в `engine/scenarios.ts` нужного стенда и в массиве `SCENARIOS` / `GC_SCENARIOS` / `MEM_SCENARIOS` / `CHAN_SCENARIOS` / `KAFKA_SCENARIOS` / `TXN_SCENARIOS`. Поле `claim` обязательно: одна мысль, которую сценарий доказывает. Утверждение из `claim` стоит закрепить тестом в `engine.test.ts`.
+**Сценарий стенда.** Объект сценария в `engine/scenarios.ts` нужного стенда и в массиве `SCENARIOS` / `GC_SCENARIOS` / `MEM_SCENARIOS` / `CHAN_SCENARIOS` / `KAFKA_SCENARIOS` / `TXN_SCENARIOS` / `REPL_SCENARIOS`. Поле `claim` обязательно: одна мысль, которую сценарий доказывает. Утверждение из `claim` стоит закрепить тестом в `engine.test.ts`.
 
-**Новый тип события.** Добавить в `EventType` (или `GcEventType`, `MemEventType`, `ChanEventType`, `KafkaEventType`, `TxnEventType`) и `EVENT_IMPORTANCE`, затем разбор в `explain/events.ts`. Без разбора TypeScript сборку не пропустит, а тест проверит, что термины из разбора есть в справочнике.
+**Новый тип события.** Добавить в `EventType` (или `GcEventType`, `MemEventType`, `ChanEventType`, `KafkaEventType`, `TxnEventType`, `ReplEventType`) и `EVENT_IMPORTANCE`, затем разбор в `explain/events.ts`. Без разбора TypeScript сборку не пропустит, а тест проверит, что термины из разбора есть в справочнике.
 
 ## Деплой
 

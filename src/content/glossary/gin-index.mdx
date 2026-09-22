@@ -1,0 +1,31 @@
+---
+title: GIN-индекс
+short: 'Обратный индекс: для каждого элемента — ключа JSON, элемента массива, слова — список строк, где он встречается. Для поиска «содержит» по jsonb, массивам и полнотекстового поиска.'
+aliases: [GIN, Generalized Inverted Index, jsonb_path_ops, '@>', полнотекстовый поиск, tsvector, pg_trgm, fastupdate]
+category: сущность
+related: [b-tree, gist-index, brin-index]
+source: src/backend/access/gin/README
+---
+
+B-дерево индексирует значение целиком. GIN разбирает значение на элементы и для каждого элемента хранит список строк — как предметный указатель в конце книги.
+
+```sql
+CREATE INDEX ON products USING gin (attrs jsonb_path_ops);
+SELECT * FROM products WHERE attrs @> '{"color": "red"}';
+
+CREATE INDEX ON posts USING gin (tags);
+SELECT * FROM posts WHERE tags @> ARRAY['postgres'];
+
+CREATE INDEX ON articles USING gin (to_tsvector('russian', body));
+SELECT * FROM articles WHERE to_tsvector('russian', body) @@ to_tsquery('russian', 'репликация');
+
+CREATE INDEX ON users USING gin (name gin_trgm_ops);  -- pg_trgm: LIKE '%иван%'
+```
+
+Характер:
+
+- **Отлично ищет «содержит»**: много условий на элементы сразу пересекаются по спискам строк.
+- **Дорогая запись**: одна строка с двадцатью тегами — двадцать вставок. Поэтому по умолчанию GIN копит новые записи в «списке ожидания» (`fastupdate`) и разбирает их вакуумом или при переполнении — отсюда редкие медленные вставки.
+- **Не умеет сортировать и искать диапазоны.**
+
+Для jsonb есть два класса: `jsonb_ops` (по умолчанию, поддерживает больше операторов) и `jsonb_path_ops` (меньше и быстрее, но только `@>` и jsonpath).

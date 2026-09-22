@@ -1,0 +1,55 @@
+---
+/**
+ * BRIN: минимум и максимум на каждую группу страниц. Работает, когда порядок
+ * строк совпадает с порядком значений, и бесполезен, когда нет.
+ */
+const good = [
+  ['01.09', '05.09'],
+  ['05.09', '10.09'],
+  ['10.09', '16.09'],
+  ['16.09', '20.09'],
+  ['20.09', '22.09'],
+]
+const bad = [
+  ['01.09', '22.09'],
+  ['02.09', '21.09'],
+  ['01.09', '20.09'],
+  ['03.09', '22.09'],
+  ['01.09', '22.09'],
+]
+const x = (i: number) => 150 + i * 118
+const hits = (r: string[]) => r[1]! >= '20.09'
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 230" role="img" aria-labelledby="dbbrin-t">
+      <title id="dbbrin-t">BRIN по времени: при упорядоченной вставке запрос за последние дни читает одну группу страниц из пяти, при перемешанных строках — все пять</title>
+      <text x="150" y="24" class="t-muted t-small">группы по 128 страниц: min – max created_at</text>
+      <text x="20" y="62" class="t-small t-bold">журнал событий</text>
+      <text x="20" y="78" class="t-muted t-small">пишется по времени</text>
+      {good.map((r, i) => (
+        <g>
+          <rect x={x(i)} y="44" width="110" height="44" rx="6" class={hits(r) ? 'cell-on' : 'cell-old'}></rect>
+          <text x={x(i) + 55} y="71" text-anchor="middle" class="t-mono t-small">{r[0]} – {r[1]}</text>
+        </g>
+      ))}
+      <text x="150" y="110" class="t-accent t-small">WHERE created_at ≥ 20.09 — читается одна группа из пяти</text>
+
+      <text x="20" y="152" class="t-small t-bold">строки вразнобой</text>
+      <text x="20" y="168" class="t-muted t-small">UPDATE, заливка</text>
+      {bad.map((r, i) => (
+        <g>
+          <rect x={x(i)} y="134" width="110" height="44" rx="6" class="risk"></rect>
+          <text x={x(i) + 55} y="161" text-anchor="middle" class="t-mono t-small">{r[0]} – {r[1]}</text>
+        </g>
+      ))}
+      <text x="150" y="200" class="t-bad t-small">та же выборка: каждая группа «может содержать» — читаются все пять</text>
+    </svg>
+  </div>
+  <figcaption>
+    BRIN хранит для каждой группы страниц только минимум и максимум, поэтому на огромной таблице он занимает мегабайты.
+    Отсеивать группы он может, только если физический порядок строк совпадает с порядком значений. Иначе у каждой
+    группы диапазон «от начала до конца», и индекс не отсеивает ничего.
+  </figcaption>
+</figure>
