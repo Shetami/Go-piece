@@ -1,0 +1,63 @@
+---
+title: Свой errgroup
+description: Group с Go и Wait — первая ошибка, отмена контекста для остальных, ожидание всех. То, что делает golang.org/x/sync/errgroup.
+kind: implement
+topic: concurrency
+level: hard
+order: 40
+related: [errgroup, context-cancellation, sync-once]
+lecture: concurrency/coordination
+---
+
+Реализуйте `Group` по образцу `errgroup`. Поля выбирайте сами.
+
+Что проверяют скрытые тесты:
+
+- `Wait` возвращается только после завершения всех задач;
+- первая ошибка возвращается из `Wait`, и контекст группы отменяется
+  сразу — остальные задачи видят `ctx.Done()`;
+- без ошибок контекст отменяется после `Wait`.
+
+<Reveal>
+
+```go
+type Group struct {
+	wg     sync.WaitGroup
+	once   sync.Once
+	err    error
+	cancel context.CancelFunc
+}
+
+func (g *Group) Go(f func() error) {
+	g.wg.Go(func() {
+		if err := f(); err != nil {
+			g.once.Do(func() {
+				g.err = err
+				if g.cancel != nil {
+					g.cancel()
+				}
+			})
+		}
+	})
+}
+```
+
+**Три инструмента на три обязанности.** `WaitGroup` — дождаться всех.
+`Once` — запомнить *первую* ошибку и отменить один раз, без мьютекса и
+гонки за `g.err`. `cancel` — сообщить остальным задачам, что продолжать
+бессмысленно.
+
+**Почему чтение `g.err` в `Wait` без мьютекса — не гонка.** Запись
+происходит внутри горутины до её `Done`, а `Wait` читает после
+`wg.Wait()`. `Done` → `Wait` — это happens-before, и запись гарантированно
+видна.
+
+**Отмена после `Wait`** освобождает ресурсы контекста и предупреждает
+ошибку «использовал контекст группы после её завершения».
+
+**Чего здесь нет из настоящего `errgroup`**: `SetLimit` для ограничения
+параллельности, `TryGo` и перехвата паник (в Go 1.25+ `errgroup` передаёт
+панику из горутины в `Wait`). Но ядро — ровно это, и спрашивают его часто:
+«как бы вы написали errgroup сами».
+
+</Reveal>

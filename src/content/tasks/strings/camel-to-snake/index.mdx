@@ -1,0 +1,57 @@
+---
+title: camelCase в snake_case с аббревиатурами
+description: userName — просто. HTTPServer и parseURL — уже нет. Граница слова внутри аббревиатуры.
+kind: implement
+topic: strings
+level: medium
+order: 30
+---
+
+Напишите тело `ToSnake`.
+
+Что проверяют скрытые тесты:
+
+- `"userName"` и `"UserName"` → `"user_name"`, уже змеиная строка не меняется;
+- аббревиатуры остаются словом: `"parseURL"` → `"parse_url"`,
+  `"HTTPServer"` → `"http_server"`, `"getHTTPResponse"` → `"get_http_response"`,
+  `"ID"` → `"id"`;
+- цифры: `"base64Encode"` → `"base64_encode"`.
+
+<Reveal>
+
+```go
+func ToSnake(s string) string {
+	rs := []rune(s)
+	var b strings.Builder
+	for i, r := range rs {
+		if i > 0 && unicode.IsUpper(r) {
+			prev := rs[i-1]
+			nextLower := i+1 < len(rs) && unicode.IsLower(rs[i+1])
+			if unicode.IsLower(prev) || unicode.IsDigit(prev) || (unicode.IsUpper(prev) && nextLower) {
+				b.WriteByte('_')
+			}
+		}
+		b.WriteRune(unicode.ToLower(r))
+	}
+	return b.String()
+}
+```
+
+**Два вида границы слова.** Наивное правило «подчёркивание перед каждой
+заглавной» даёт `h_t_t_p_server`. На самом деле граница бывает в двух
+местах:
+
+- `aB` — строчная (или цифра), потом заглавная: `user|Name`, `base64|Encode`;
+- `ABc` — заглавная, заглавная, строчная: граница *перед* последней
+  заглавной аббревиатуры. `HTTP|Server`: `S` — заглавная, перед ней `P`,
+  после — `e`.
+
+Для этого нужно смотреть на символ впереди, отсюда работа со слайсом рун,
+а не просто `range` по строке.
+
+**Где это нужно.** Генерация имён колонок из полей структуры, JSON-теги,
+имена метрик. В Go-мире принято писать аббревиатуры целиком заглавными
+(`userID`, `ServeHTTP`) — поэтому второе правило тут не экзотика, а
+основной случай.
+
+</Reveal>

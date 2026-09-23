@@ -12,11 +12,13 @@ func parseAll(inputs []string) ([]int, error) {
 	var err error
 
 	for _, s := range inputs {
-		// Присваивание, а не объявление: n объявляем отдельно,
-		// чтобы := не завело внутри цикла новый err.
-		var n int
-		n, err = strconv.Atoi(s)
-		if err != nil {
+		// Своё имя для ошибки итерации: := больше не затеняет внешний err,
+		// а первая ошибка запоминается и не затирается следующими удачами.
+		n, e := strconv.Atoi(s)
+		if e != nil {
+			if err == nil {
+				err = e
+			}
 			continue
 		}
 		out = append(out, n)

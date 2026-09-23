@@ -1,0 +1,49 @@
+---
+title: Своя ошибка, которая ещё и сентинел
+description: Тип ошибки с подробностями, который одновременно отвечает на errors.Is(err, ErrNotFound). Метод Is.
+kind: implement
+topic: errors
+level: medium
+order: 60
+---
+
+Допишите `NotFoundError`, чтобы им было удобно пользоваться двумя
+способами: проверять категорию через `errors.Is(err, ErrNotFound)` и
+доставать подробности через `errors.As`.
+
+Что проверяют скрытые тесты:
+
+- `Error()` — `"order 42: не найдено"`;
+- обёрнутый `*NotFoundError` находится через `errors.Is(err, ErrNotFound)`;
+- `errors.As` достаёт его с полями;
+- с посторонними ошибками вроде `io.EOF` он не совпадает.
+
+<Reveal>
+
+```go
+func (e *NotFoundError) Error() string {
+	return e.Resource + " " + e.ID + ": " + ErrNotFound.Error()
+}
+
+func (e *NotFoundError) Is(target error) bool {
+	return target == ErrNotFound
+}
+```
+
+**Как `errors.Is` использует метод `Is`.** Для каждого звена цепочки он
+сначала сравнивает звено с целью через `==`, а если у звена есть метод
+`Is(error) bool` — спрашивает и его. Наш метод говорит «да, я — это
+`ErrNotFound`». Сам `*NotFoundError` при этом остаётся отдельным типом со
+своими полями.
+
+**Альтернатива — `Unwrap`.** `func (e *NotFoundError) Unwrap() error { return ErrNotFound }`
+даст тот же эффект для `errors.Is`. Разница в смысле: `Unwrap` говорит
+«внутри меня лежит эта ошибка», `Is` — «я эквивалентен ей». Если тип
+оборачивает ещё что-то настоящее (ошибку базы), `Unwrap` занят, и
+категорию выражают через `Is`.
+
+**Зачем обе проверки.** Вызывающим обычно достаточно категории:
+`errors.Is(err, ErrNotFound)` → 404. А логу или клиенту API нужны детали
+— какой ресурс и какой ID. Один тип обслуживает оба случая.
+
+</Reveal>

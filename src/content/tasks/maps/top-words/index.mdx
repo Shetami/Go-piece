@@ -1,0 +1,58 @@
+---
+title: Самые частые слова
+description: Частотный словарь на мапе и сортировка по двум ключам. Регистр, пунктуация, кириллица и ничьи.
+kind: implement
+topic: maps
+level: medium
+order: 30
+---
+
+Напишите тело `TopWords`: `k` самых частых слов текста.
+
+Что проверяют скрытые тесты:
+
+- `"go go go rust rust zig"`, `k=2` → `[go rust]`;
+- регистр не важен, знаки препинания — разделители: `"Go, go! GO?"` — это
+  три раза `go`;
+- при равной частоте — по алфавиту, в том числе для кириллицы;
+- `k` больше числа разных слов и пустой текст — без паники.
+
+<Reveal>
+
+```go
+func TopWords(text string, k int) []string {
+	words := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+
+	freq := make(map[string]int)
+	for _, w := range words {
+		freq[w]++
+	}
+
+	keys := slices.Collect(maps.Keys(freq))
+	slices.SortFunc(keys, func(a, b string) int {
+		return cmp.Or(cmp.Compare(freq[b], freq[a]), cmp.Compare(a, b))
+	})
+	return keys[:min(k, len(keys))]
+}
+```
+
+**Разбиение.** `strings.Fields` режет только по пробелам — «go,» останется
+со запятой. `FieldsFunc` режет по любому условию на руну; здесь — всё, что
+не буква и не цифра.
+
+**Сортировка по двум ключам.** `cmp.Or` (Go 1.22) возвращает первый
+ненулевой аргумент: сначала сравниваем частоты (`b`, `a` — по убыванию),
+при равенстве — сами слова. Без второго ключа порядок равных зависел бы от
+порядка обхода мапы, то есть был бы случайным.
+
+**`min(k, len(keys))`** защищает от выхода за границу, когда разных слов
+меньше `k`.
+
+**Про сложность.** Сортировка всех ключей — O(u log u), где u — число
+разных слов. Если слов миллионы, а `k` — десять, выгоднее куча на `k`
+элементов (`container/heap`): O(u log k). На собеседовании про это обычно
+спрашивают следующим вопросом.
+
+</Reveal>

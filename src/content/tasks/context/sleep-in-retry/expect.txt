@@ -1,0 +1,4 @@
+попытка 1
+попытка 2
+попытка 3
+итог: context deadline exceeded

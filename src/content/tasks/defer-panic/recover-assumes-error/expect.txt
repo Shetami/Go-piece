@@ -1,0 +1,3 @@
+ошибка-значение
+паника: просто строка
+assignment to entry in nil map

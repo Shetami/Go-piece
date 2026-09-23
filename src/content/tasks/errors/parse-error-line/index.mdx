@@ -1,0 +1,48 @@
+---
+title: Ошибка разбора с номером строки
+description: Свой тип ошибки с Unwrap — чтобы и номер строки достать, и причину проверить. Плюс strings.Cut.
+kind: implement
+topic: errors
+level: medium
+order: 70
+---
+
+Допишите `ParseConfig` и методы `ParseError`.
+
+Что проверяют скрытые тесты:
+
+- комментарии и пустые строки пропускаются, пробелы срезаются, значение
+  может содержать `=`: `url=a=b` → `"a=b"`;
+- при ошибке — `*ParseError` с номером строки, считая комментарии и
+  пустые строки;
+- причина проверяется через `errors.Is(err, ErrNoEquals)`;
+- номер строки есть в тексте ошибки;
+- пустой ключ — `ErrEmptyKey`.
+
+<Reveal>
+
+```go
+func (e *ParseError) Error() string { return fmt.Sprintf("строка %d: %v", e.Line, e.Err) }
+func (e *ParseError) Unwrap() error { return e.Err }
+
+key, value, ok := strings.Cut(line, "=")
+if !ok {
+	return nil, &ParseError{Line: i + 1, Err: ErrNoEquals}
+}
+```
+
+**Два вопроса к одной ошибке.** «Где?» — это данные, их достают через
+`errors.As` в `*ParseError`. «Что?» — это категория, её проверяют через
+`errors.Is`. `Unwrap` связывает одно с другим: `errors.Is` проходит сквозь
+`ParseError` к сентинелу. Ровно так устроен `*fs.PathError` из стандартной
+библиотеки.
+
+**`strings.Cut`** (Go 1.18) режет по *первому* вхождению и сообщает, нашёл
+ли. `strings.Split(line, "=")` сломался бы на `url=a=b`, а
+`strings.SplitN(line, "=", 2)` требует проверять длину результата.
+
+**Номер строки.** `i + 1` — от индекса к человеческой нумерации. И номер
+считается по исходному тексту, включая пропущенные строки: именно его
+человек увидит в редакторе.
+
+</Reveal>

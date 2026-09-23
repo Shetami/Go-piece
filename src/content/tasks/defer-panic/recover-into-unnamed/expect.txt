@@ -1,0 +1,2 @@
+5 <nil>
+0 деление: runtime error: integer divide by zero
