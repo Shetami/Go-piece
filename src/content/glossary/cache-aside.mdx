@@ -1,0 +1,32 @@
+---
+title: Cache-aside
+short: 'Приложение само ходит в кэш: при промахе читает базу и кладёт значение в кэш. Самая распространённая стратегия кэширования; её альтернативы — read-through, write-through и write-behind.'
+aliases: [cache aside, lazy loading, кэш сбоку, read-through, write-through, write-behind, write-back, кэширование]
+category: механизм
+related: [cache-hit-ratio, cache-invalidation, cache-stampede, singleflight]
+---
+
+```go
+func (s *Service) User(ctx context.Context, id int64) (User, error) {
+    key := fmt.Sprintf("user:%d", id)
+    if v, err := s.rdb.Get(ctx, key).Bytes(); err == nil {
+        return decode(v)
+    }
+    u, err := s.db.User(ctx, id) // промах: идём в базу
+    if err != nil {
+        return User{}, err
+    }
+    s.rdb.Set(ctx, key, encode(u), 5*time.Minute) // и кладём в кэш
+    return u, nil
+}
+```
+
+Достоинства: кэшируется только то, что действительно спрашивают, а падение кэша не ломает сервис — только делает его медленнее. Недостатки: первый запрос за каждым ключом всегда медленный, код кэширования размазан по приложению, а при записи нужно не забыть [инвалидацию](/glossary/cache-invalidation/).
+
+Другие стратегии отличаются тем, кто ходит в базу:
+
+- **read-through** — в базу ходит сам кэш (или библиотека-обёртка), приложение знает только про кэш;
+- **write-through** — запись идёт в кэш и синхронно в базу: кэш всегда свежий, запись дороже;
+- **write-behind (write-back)** — запись идёт в кэш, а в базу сбрасывается позже пачкой: быстро, но при падении кэша данные теряются.
+
+Отдельный вопрос — где кэш живёт. В памяти процесса он самый быстрый, но у каждой реплики свой (и своя версия данных). Общий кэш вроде Redis одинаков для всех, зато это ещё один сетевой вызов и ещё одна зависимость, которая может упасть.

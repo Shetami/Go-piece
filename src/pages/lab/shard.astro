@@ -1,0 +1,24 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro'
+import ShardStand from '../../components/stands/shard/ShardStand.astro'
+---
+
+<BaseLayout
+  title="Стенд: шардирование"
+  description="Пошаговая модель шардированного хранилища: раскладка ключей остатком от деления, кольцом согласованного хеширования и диапазонами, добавление шарда с переездом ключей, горячий ключ и запросы без ключа шардирования."
+  wide
+>
+  <nav class="text-sm text-muted mb-4">
+    <a href="/lab/" class="hover:text-ink">Лаборатория</a> / Шардирование
+  </nav>
+  <div class="flex flex-wrap items-baseline justify-between gap-4 mb-2">
+    <h1 class="text-3xl font-bold tracking-tight">Шарды: раскладка, переезд, перекос</h1>
+    <a href="/lectures/system-design/sharding/" class="text-sm text-accent">читать лекцию →</a>
+  </div>
+  <p class="text-muted max-w-3xl">
+    Пробел — пуск и пауза, стрелки — шаг, Shift+стрелки — 10 шагов. Клик по графику переносит на этот тик, клик по
+    событию открывает разбор. В настройках — схема раскладки и виртуальные узлы, число шардов, горячий ключ, доля
+    запросов без ключа шардирования, скорость переезда и события вроде добавления шарда.
+  </p>
+  <ShardStand scenario="add-shard" mode="lab" />
+</BaseLayout>

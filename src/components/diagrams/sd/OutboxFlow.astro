@@ -1,0 +1,55 @@
+---
+/**
+ * Две записи подряд против transactional outbox: где именно теряется событие.
+ */
+const Y = { top: 56, bottom: 168 }
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 250" role="img" aria-labelledby="sdof-t">
+      <title id="sdof-t">При двух записях подряд падение между базой и брокером теряет событие; при outbox событие лежит в базе и уезжает позже</title>
+      <defs>
+        <marker id="sdof-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+
+      <text x="20" y="28" class="t-bold">Две записи подряд</text>
+      <rect x="20" y={Y.top} width="120" height="46" rx="8" class="box"></rect>
+      <text x="80" y={Y.top + 28} text-anchor="middle" class="t-small">сервис</text>
+      <rect x="210" y={Y.top} width="120" height="46" rx="8" class="box-2"></rect>
+      <text x="270" y={Y.top + 21} text-anchor="middle" class="t-small">база</text>
+      <text x="270" y={Y.top + 37} text-anchor="middle" class="t-muted t-small">заказ записан</text>
+      <rect x="400" y={Y.top} width="120" height="46" rx="8" class="box-2"></rect>
+      <text x="460" y={Y.top + 28} text-anchor="middle" class="t-small">брокер</text>
+      <path d={`M140 ${Y.top + 23} H206`} class="ln" marker-end="url(#sdof-a)"></path>
+      <path d={`M330 ${Y.top + 23} H396`} class="ln ln-dash" marker-end="url(#sdof-a)"></path>
+      <text x="363" y={Y.top + 14} text-anchor="middle" class="t-bad t-small">✕ здесь падаем</text>
+      <rect x="540" y={Y.top} width="200" height="46" rx="8" class="risk"></rect>
+      <text x="640" y={Y.top + 21} text-anchor="middle" class="t-small">заказ есть,</text>
+      <text x="640" y={Y.top + 37} text-anchor="middle" class="t-small">события нет никогда</text>
+
+      <text x="20" y={Y.bottom - 28} class="t-bold">Transactional outbox</text>
+      <rect x="20" y={Y.bottom} width="120" height="46" rx="8" class="box"></rect>
+      <text x="80" y={Y.bottom + 28} text-anchor="middle" class="t-small">сервис</text>
+      <rect x="210" y={Y.bottom} width="160" height="46" rx="8" class="lead"></rect>
+      <text x="290" y={Y.bottom + 20} text-anchor="middle" class="t-small">одна транзакция</text>
+      <text x="290" y={Y.bottom + 36} text-anchor="middle" class="t-muted t-small">заказ + строка outbox</text>
+      <rect x="430" y={Y.bottom} width="120" height="46" rx="8" class="box-2"></rect>
+      <text x="490" y={Y.bottom + 21} text-anchor="middle" class="t-small">отправщик</text>
+      <text x="490" y={Y.bottom + 37} text-anchor="middle" class="t-muted t-small">читает outbox</text>
+      <rect x="610" y={Y.bottom} width="130" height="46" rx="8" class="box-2"></rect>
+      <text x="675" y={Y.bottom + 28} text-anchor="middle" class="t-small">брокер</text>
+      <path d={`M140 ${Y.bottom + 23} H206`} class="ln" marker-end="url(#sdof-a)"></path>
+      <path d={`M370 ${Y.bottom + 23} H426`} class="ln" marker-end="url(#sdof-a)"></path>
+      <path d={`M550 ${Y.bottom + 23} H606`} class="ln" marker-end="url(#sdof-a)"></path>
+      <text x="490" y={Y.bottom + 68} text-anchor="middle" class="t-ok t-small">упали здесь — строка дождётся перезапуска</text>
+    </svg>
+  </div>
+  <figcaption>
+    В первом случае запись в базу и отправка в брокер — две независимые операции, и между ними всегда есть окно, в
+    котором заказ уже есть, а события о нём ещё нет. Во втором событие попадает в базу вместе с заказом, одной
+    транзакцией, а отправка становится задачей отдельного процесса, который переживёт и падение, и недоступный брокер.
+  </figcaption>
+</figure>

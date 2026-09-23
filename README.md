@@ -1,6 +1,6 @@
 # Go-piece
 
-Понятные лекции по технологиям с интерактивными стендами. Курсы: рантайм Go — планировщик (G, M, P), сборщик мусора, память и каналы; брокеры сообщений — Kafka от `send()` до коммита оффсета; базы данных — хранение, транзакции и изоляция, PostgreSQL изнутри, индексы на практике, репликация; system design — нагрузка, очереди и задержка.
+Понятные лекции по технологиям с интерактивными стендами. Курсы: рантайм Go — планировщик (G, M, P), сборщик мусора, память и каналы; брокеры сообщений — Kafka от `send()` до коммита оффсета; базы данных — хранение, транзакции и изоляция, PostgreSQL изнутри, индексы на практике, репликация; system design — нагрузка и очереди, балансировка и масштабирование, кэширование, шардирование, устойчивость, согласованность между сервисами.
 
 Сайт статический: Astro + MDX + React-острова + Tailwind, поиск — Pagefind. Бэкенда нет.
 
@@ -20,6 +20,11 @@ pnpm demo:kafka journey 80 1  # и для Kafka; третий аргумент �
 pnpm demo:txn lost-update isolation=repeatable-read retry=true  # и для транзакций; дальше — правки настроек
 pnpm demo:repl failover standbys=any-1  # и для репликации
 pnpm demo:load retry-storm cancelOnTimeout=true  # и для сервиса под нагрузкой
+pnpm demo:lb black-hole outlier=true    # и для балансировщика
+pnpm demo:cache ttl-sync coalesce=true  # и для кэша
+pnpm demo:shard add-shard scheme=ring   # и для шардов
+pnpm demo:resil cascade timeout=8       # и для сервиса с зависимостью
+pnpm demo:saga dual-write publish=outbox  # и для обмена событиями
 ```
 
 Нужен Node 20+ (в `mise.toml` закреплены Node 24 и pnpm 10).
@@ -55,6 +60,16 @@ src/
     stands/load/               стенд «Нагрузка»
       engine/                  воркеры и очередь, случайный поток с зерном, таймауты, повторы, отмена, предел очереди
       ui/Charts.tsx            графики прогона: очередь, перцентили задержки, поток и полезные ответы
+    stands/lb/                 стенд «Балансировка»
+      engine/                  алгоритмы выбора реплики, поломки реплик, проверки здоровья, автомасштабирование
+    stands/cache/              стенд «Кэш»
+      engine/                  LRU и TTL, популярность по Ципфу, лавины промахов, объединение запросов, инвалидация
+    stands/shard/              стенд «Шарды»
+      engine/                  три схемы раскладки ключей, переезд при решардировании, перекос, веерные запросы
+    stands/resil/              стенд «Устойчивость»
+      engine/                  воркеры, занятые ожиданием зависимости, таймауты, предохранитель, переборки, заглушки
+    stands/saga/               стенд «Согласованность»
+      engine/                  outbox против двух записей, дубли доставки, идемпотентность, сага с компенсациями
     diagrams/kafka/            статичные схемы для лекции (SVG на токенах темы)
     diagrams/db/               схемы для курса о базах данных
     diagrams/sd/               схемы для курса System design
@@ -70,11 +85,11 @@ src/
 
 **Термин.** Файл `src/content/glossary/<id>.mdx` с полями `title`, `short` (одна строка для подсказки), `category`, `related`. В лекции: `<Term id="<id>" />` или `<Term id="<id>">своя подпись</Term>`. Опечатка в id роняет сборку.
 
-**Лекцию.** Файл `src/content/lectures/<курс>/<тема>.mdx` с `title`, `description`, `order`. В тексте доступны `<Term>`, `<Predict>`, `<Callout>`, `<GmpStand scenario="…" />`, `<GcStand scenario="…" />`, `<MemStand scenario="…" />`, `<ChanStand scenario="…" />`, `<KafkaStand scenario="…" />`, `<TxnStand scenario="…" />`, `<ReplStand scenario="…" />` и `<LoadStand scenario="…" />`. Страница, навигация, оглавление и список терминов появятся сами. Из `planned` в `src/data/courses.ts` уберите анонс этой темы.
+**Лекцию.** Файл `src/content/lectures/<курс>/<тема>.mdx` с `title`, `description`, `order`. В тексте доступны `<Term>`, `<Predict>`, `<Callout>`, `<GmpStand scenario="…" />`, `<GcStand scenario="…" />`, `<MemStand scenario="…" />`, `<ChanStand scenario="…" />`, `<KafkaStand scenario="…" />`, `<TxnStand scenario="…" />`, `<ReplStand scenario="…" />`, `<LoadStand scenario="…" />`, `<LbStand scenario="…" />`, `<CacheStand scenario="…" />`, `<ShardStand scenario="…" />`, `<ResilStand scenario="…" />` и `<SagaStand scenario="…" />`. Страница, навигация, оглавление и список терминов появятся сами. Из `planned` в `src/data/courses.ts` уберите анонс этой темы.
 
-**Сценарий стенда.** Объект сценария в `engine/scenarios.ts` нужного стенда и в массиве `SCENARIOS` / `GC_SCENARIOS` / `MEM_SCENARIOS` / `CHAN_SCENARIOS` / `KAFKA_SCENARIOS` / `TXN_SCENARIOS` / `REPL_SCENARIOS` / `LOAD_SCENARIOS`. Поле `claim` обязательно: одна мысль, которую сценарий доказывает. Утверждение из `claim` стоит закрепить тестом в `engine.test.ts`.
+**Сценарий стенда.** Объект сценария в `engine/scenarios.ts` нужного стенда и в массиве `SCENARIOS` / `GC_SCENARIOS` / `MEM_SCENARIOS` / `CHAN_SCENARIOS` / `KAFKA_SCENARIOS` / `TXN_SCENARIOS` / `REPL_SCENARIOS` / `LOAD_SCENARIOS` / `LB_SCENARIOS` / `CACHE_SCENARIOS` / `SHARD_SCENARIOS` / `RESIL_SCENARIOS` / `SAGA_SCENARIOS`. Поле `claim` обязательно: одна мысль, которую сценарий доказывает. Утверждение из `claim` стоит закрепить тестом в `engine.test.ts`.
 
-**Новый тип события.** Добавить в `EventType` (или `GcEventType`, `MemEventType`, `ChanEventType`, `KafkaEventType`, `TxnEventType`, `ReplEventType`, `LoadEventType`) и `EVENT_IMPORTANCE`, затем разбор в `explain/events.ts`. Без разбора TypeScript сборку не пропустит, а тест проверит, что термины из разбора есть в справочнике.
+**Новый тип события.** Добавить в `EventType` (или `GcEventType`, `MemEventType`, `ChanEventType`, `KafkaEventType`, `TxnEventType`, `ReplEventType`, `LoadEventType`, `LbEventType`, `CacheEventType`, `ShardEventType`, `ResilEventType`, `SagaEventType`) и `EVENT_IMPORTANCE`, затем разбор в `explain/events.ts`. Без разбора TypeScript сборку не пропустит, а тест проверит, что термины из разбора есть в справочнике.
 
 ## Деплой
 

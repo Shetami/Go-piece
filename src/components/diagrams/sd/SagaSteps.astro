@@ -1,0 +1,45 @@
+---
+/**
+ * Сага: шаги вперёд и компенсации назад.
+ */
+const steps = [
+  { x: 40, t: 'заказ создан', c: 'отменить заказ' },
+  { x: 260, t: 'деньги списаны', c: 'вернуть деньги' },
+  { x: 480, t: 'доставка создана', c: 'отменить доставку' },
+]
+const W = 180
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 230" role="img" aria-labelledby="sdss-t">
+      <title id="sdss-t">Шаги саги идут вперёд; если шаг не удался, для уже выполненных шагов выполняются компенсации в обратном порядке</title>
+      <defs>
+        <marker id="sdss-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+      <text x="20" y="24" class="t-muted t-small">шаги вперёд: каждый — локальная транзакция своего сервиса</text>
+      {
+        steps.map((s, i) => (
+          <g>
+            <rect x={s.x} y="40" width={W} height="44" rx="8" class={i === 2 ? 'risk' : 'box'}></rect>
+            <text x={s.x + W / 2} y="67" text-anchor="middle" class="t-small">{s.t}</text>
+            {i < 2 && <path d={`M${s.x + W} 62 H${steps[i + 1]!.x - 4}`} class="ln" marker-end="url(#sdss-a)"></path>}
+            <rect x={s.x} y="140" width={W} height="44" rx="8" class="box-2"></rect>
+            <text x={s.x + W / 2} y="167" text-anchor="middle" class="t-small">{s.c}</text>
+            {i > 0 && <path d={`M${s.x} 162 H${steps[i - 1]!.x + W + 4}`} class="ln ln-dash" marker-end="url(#sdss-a)"></path>}
+          </g>
+        ))
+      }
+      <path d="M570 84 V136" class="ln ln-dash" marker-end="url(#sdss-a)"></path>
+      <text x="586" y="114" class="t-bad t-small">шаг не удался</text>
+      <text x="20" y="206" class="t-muted t-small">компенсации назад: не откат транзакции, а новые действия — возврат, отмена резерва, письмо</text>
+    </svg>
+  </div>
+  <figcaption>
+    Общей транзакции на три сервиса нет, поэтому «откат» приходится писать руками: у каждого шага есть
+    компенсирующее действие, и при неудаче они выполняются в обратном порядке. Компенсация — такой же ненадёжный
+    шаг, как и прямой: её тоже повторяют и делают идемпотентной.
+  </figcaption>
+</figure>

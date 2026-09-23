@@ -1,0 +1,61 @@
+---
+/**
+ * L4 против L7 для долгих соединений: L4 балансирует соединения, и все
+ * запросы по одному HTTP/2-соединению уходят на одну реплику; L7 раскладывает
+ * каждый запрос отдельно.
+ */
+const reps = [0, 1, 2]
+const ry = (i: number) => 44 + i * 58
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 240" role="img" aria-labelledby="sdl4-t">
+      <title id="sdl4-t">Балансировщик L4 отправляет всё соединение клиента на одну реплику; L7 распределяет запросы внутри соединения по всем репликам</title>
+      <defs>
+        <marker id="sdl4-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+      <text x="20" y="22" class="t-bold">L4: балансирует соединения</text>
+      <rect x="20" y="100" width="70" height="44" rx="8" class="box"></rect>
+      <text x="55" y="120" text-anchor="middle" class="t-small">клиент</text>
+      <text x="55" y="134" text-anchor="middle" class="t-muted t-small">1 соединение</text>
+      <rect x="130" y="100" width="70" height="44" rx="8" class="lead"></rect>
+      <text x="165" y="126" text-anchor="middle" class="t-small">L4</text>
+      <path d="M90 122 H126" class="ln" marker-end="url(#sdl4-a)"></path>
+      {reps.map((i) => (
+        <g>
+          <rect x="260" y={ry(i)} width="90" height="40" rx="8" class={i === 0 ? 'box' : 'box-2'}></rect>
+          <text x="305" y={ry(i) + 25} text-anchor="middle" class="t-small">реплика {i + 1}</text>
+        </g>
+      ))}
+      <path d={`M200 122 L256 ${ry(0) + 20}`} class="ln" marker-end="url(#sdl4-a)"></path>
+      <text x="224" y="72" class="t-small">все запросы</text>
+      <text x="360" y={ry(1) + 25} class="t-muted t-small">простаивают</text>
+
+      <path d="M395 20 V225" class="ln-life"></path>
+
+      <text x="420" y="22" class="t-bold">L7: балансирует запросы</text>
+      <rect x="420" y="100" width="70" height="44" rx="8" class="box"></rect>
+      <text x="455" y="120" text-anchor="middle" class="t-small">клиент</text>
+      <text x="455" y="134" text-anchor="middle" class="t-muted t-small">1 соединение</text>
+      <rect x="530" y="100" width="70" height="44" rx="8" class="lead"></rect>
+      <text x="565" y="120" text-anchor="middle" class="t-small">L7</text>
+      <text x="565" y="134" text-anchor="middle" class="t-muted t-small">Envoy</text>
+      <path d="M490 122 H526" class="ln" marker-end="url(#sdl4-a)"></path>
+      {reps.map((i) => (
+        <g>
+          <rect x="650" y={ry(i)} width="90" height="40" rx="8" class="box"></rect>
+          <text x="695" y={ry(i) + 25} text-anchor="middle" class="t-small">реплика {i + 1}</text>
+          <path d={`M600 122 L646 ${ry(i) + 20}`} class="ln" marker-end="url(#sdl4-a)"></path>
+        </g>
+      ))}
+    </svg>
+  </div>
+  <figcaption>
+    gRPC и HTTP/2 гонят все запросы клиента по одному долгому соединению. L4-балансировщик (Kubernetes Service,
+    NLB) выбирает реплику один раз, при открытии соединения, — и дальше все запросы этого клиента идут на неё. L7
+    (Envoy, nginx, ALB) видит отдельные запросы и раскладывает их по всем репликам.
+  </figcaption>
+</figure>

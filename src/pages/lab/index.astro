@@ -8,6 +8,11 @@ import { KAFKA_SCENARIOS } from '../../components/stands/kafka/engine/scenarios.
 import { TXN_SCENARIOS } from '../../components/stands/txn/engine/scenarios.ts'
 import { REPL_SCENARIOS } from '../../components/stands/repl/engine/scenarios.ts'
 import { LOAD_SCENARIOS } from '../../components/stands/load/engine/scenarios.ts'
+import { LB_SCENARIOS } from '../../components/stands/lb/engine/scenarios.ts'
+import { CACHE_SCENARIOS } from '../../components/stands/cache/engine/scenarios.ts'
+import { SHARD_SCENARIOS } from '../../components/stands/shard/engine/scenarios.ts'
+import { RESIL_SCENARIOS } from '../../components/stands/resil/engine/scenarios.ts'
+import { SAGA_SCENARIOS } from '../../components/stands/saga/engine/scenarios.ts'
 ---
 
 <BaseLayout title="Лаборатория" description="Интерактивные стенды без лекции: выберите сценарий и крутите настройки.">
@@ -111,6 +116,61 @@ import { LOAD_SCENARIOS } from '../../components/stands/load/engine/scenarios.ts
     </span>
     <ul class="text-sm text-muted list-disc pl-5 space-y-1">
       {LOAD_SCENARIOS.map((s) => <li><b class="text-ink font-medium">{s.title}</b> — {s.claim}</li>)}
+    </ul>
+  </a>
+  <a href="/lab/lb/" class="block rounded-xl border border-line bg-surface p-6 hover:border-muted">
+    <span class="text-xs font-semibold text-accent">System design</span>
+    <span class="block text-xl font-semibold mt-1 mb-2 text-ink">Балансировка: реплики и их поломки</span>
+    <span class="block text-muted mb-4">
+      Балансировщик перед репликами: четыре алгоритма, медленные, сломанные и зависшие реплики, проверки здоровья,
+      исключение по ошибкам, повторы на другой реплике и автомасштабирование. Готовые сценарии:
+    </span>
+    <ul class="text-sm text-muted list-disc pl-5 space-y-1">
+      {LB_SCENARIOS.map((s) => <li><b class="text-ink font-medium">{s.title}</b> — {s.claim}</li>)}
+    </ul>
+  </a>
+  <a href="/lab/cache/" class="block rounded-xl border border-line bg-surface p-6 hover:border-muted">
+    <span class="text-xs font-semibold text-accent">System design</span>
+    <span class="block text-xl font-semibold mt-1 mb-2 text-ink">Кэш: попадания, промахи и лавины</span>
+    <span class="block text-muted mb-4">
+      Кэш перед базой: неравномерная популярность ключей, вытеснение и TTL, лавина промахов на горячем ключе,
+      объединение одинаковых запросов, отдача просроченного значения, инвалидация и холодный старт. Готовые сценарии:
+    </span>
+    <ul class="text-sm text-muted list-disc pl-5 space-y-1">
+      {CACHE_SCENARIOS.map((s) => <li><b class="text-ink font-medium">{s.title}</b> — {s.claim}</li>)}
+    </ul>
+  </a>
+  <a href="/lab/shard/" class="block rounded-xl border border-line bg-surface p-6 hover:border-muted">
+    <span class="text-xs font-semibold text-accent">System design</span>
+    <span class="block text-xl font-semibold mt-1 mb-2 text-ink">Шарды: раскладка, переезд, перекос</span>
+    <span class="block text-muted mb-4">
+      Три схемы раскладки ключей, добавление шарда с переездом данных на ходу, горячий ключ, который нельзя
+      разделить, и запросы без ключа шардирования, уходящие во все шарды сразу. Готовые сценарии:
+    </span>
+    <ul class="text-sm text-muted list-disc pl-5 space-y-1">
+      {SHARD_SCENARIOS.map((s) => <li><b class="text-ink font-medium">{s.title}</b> — {s.claim}</li>)}
+    </ul>
+  </a>
+  <a href="/lab/resil/" class="block rounded-xl border border-line bg-surface p-6 hover:border-muted">
+    <span class="text-xs font-semibold text-accent">System design</span>
+    <span class="block text-xl font-semibold mt-1 mb-2 text-ink">Устойчивость: когда зависимость подвела</span>
+    <span class="block text-muted mb-4">
+      Сервис, который зовёт другой сервис: каскад через занятые воркеры, таймауты и повторы, предохранитель,
+      переборки, ограничитель частоты и ответы-заглушки вместо ошибок. Готовые сценарии:
+    </span>
+    <ul class="text-sm text-muted list-disc pl-5 space-y-1">
+      {RESIL_SCENARIOS.map((s) => <li><b class="text-ink font-medium">{s.title}</b> — {s.claim}</li>)}
+    </ul>
+  </a>
+  <a href="/lab/saga/" class="block rounded-xl border border-line bg-surface p-6 hover:border-muted">
+    <span class="text-xs font-semibold text-accent">System design</span>
+    <span class="block text-xl font-semibold mt-1 mb-2 text-ink">Согласованность: события, дубли и компенсации</span>
+    <span class="block text-muted mb-4">
+      Заказы, платежи и доставка обмениваются событиями: две записи подряд против transactional outbox, потеря
+      событий, дубли доставки и двойные списания, ключ идемпотентности и сага с компенсацией. Готовые сценарии:
+    </span>
+    <ul class="text-sm text-muted list-disc pl-5 space-y-1">
+      {SAGA_SCENARIOS.map((s) => <li><b class="text-ink font-medium">{s.title}</b> — {s.claim}</li>)}
     </ul>
   </a>
   </div>

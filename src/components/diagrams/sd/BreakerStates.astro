@@ -1,0 +1,53 @@
+---
+/**
+ * Три состояния предохранителя и переходы между ними.
+ */
+const nodes = [
+  { x: 40, y: 90, w: 190, h: 70, t: 'замкнут', s: 'вызовы идут, неудачи считаются', cls: 'lead' },
+  { x: 300, y: 90, w: 190, h: 70, t: 'разомкнут', s: 'вызовов нет: сразу ошибка или заглушка', cls: 'risk' },
+  { x: 560, y: 90, w: 180, h: 70, t: 'полуоткрыт', s: 'один пробный вызов', cls: 'box-2' },
+]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 260" role="img" aria-labelledby="sdbs-t">
+      <title id="sdbs-t">Предохранитель размыкается после нескольких неудач, через паузу пропускает пробный вызов и замыкается, если тот прошёл</title>
+      <defs>
+        <marker id="sdbs-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+      {
+        nodes.map((n) => (
+          <g>
+            <rect x={n.x} y={n.y} width={n.w} height={n.h} rx="10" class={n.cls}></rect>
+            <text x={n.x + n.w / 2} y={n.y + 28} text-anchor="middle" class="t-bold">{n.t}</text>
+            <text x={n.x + n.w / 2} y={n.y + 48} text-anchor="middle" class="t-muted t-small">{n.s}</text>
+          </g>
+        ))
+      }
+      <path d="M230 112 H296" class="ln" marker-end="url(#sdbs-a)"></path>
+      <text x="263" y="100" text-anchor="middle" class="t-small">N неудач</text>
+      <text x="263" y="86" text-anchor="middle" class="t-muted t-small">подряд</text>
+
+      <path d="M490 112 H556" class="ln" marker-end="url(#sdbs-a)"></path>
+      <text x="523" y="100" text-anchor="middle" class="t-small">пауза</text>
+      <text x="523" y="86" text-anchor="middle" class="t-muted t-small">истекла</text>
+
+      <path d="M650 160 Q650 220 135 210 Q135 190 135 165" class="ln" marker-end="url(#sdbs-a)"></path>
+      <text x="390" y="228" text-anchor="middle" class="t-ok t-small">проба удалась</text>
+
+      <path d="M600 160 Q480 200 395 165" class="ln ln-dash" marker-end="url(#sdbs-a)"></path>
+      <text x="480" y="192" text-anchor="middle" class="t-bad t-small">проба не удалась</text>
+
+      <text x="135" y="60" text-anchor="middle" class="t-muted t-small">успех обнуляет счётчик</text>
+      <path d="M100 66 Q135 44 170 66" class="ln-thin" marker-end="url(#sdbs-a)"></path>
+    </svg>
+  </div>
+  <figcaption>
+    Пока вызовы удаются, предохранитель замкнут. После нескольких неудач подряд (а лучше — при превышении доли
+    ошибок за окно) он размыкается: вызовов нет вовсе, ответ приходит мгновенно. Через паузу пропускается один
+    пробный вызов: удался — возвращаемся к нормальной работе, нет — снова пауза.
+  </figcaption>
+</figure>

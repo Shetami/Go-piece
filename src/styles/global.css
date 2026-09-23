@@ -3694,6 +3694,9 @@ body {
   display: block;
   cursor: crosshair;
   touch-action: pan-y;
+  /* До гидратации ширина ещё не измерена: пусть серверная отрисовка сожмётся, а не вылезет за край. */
+  max-width: 100%;
+  height: auto;
 }
 .ld-chart-head {
   display: flex;
@@ -3961,6 +3964,579 @@ body {
   background: var(--gc-lost);
 }
 
+/* ─────────────────────── стенд «Балансировка» ─────────────────────── */
+
+/* Реплики — категориальная палитра из восьми цветов, проверенная на различимость в обеих темах. */
+.ld-c-r0 { --c: #2a78d6; }
+.ld-c-r1 { --c: #eb6834; }
+.ld-c-r2 { --c: #1baf7a; }
+.ld-c-r3 { --c: #eda100; }
+.ld-c-r4 { --c: #e87ba4; }
+.ld-c-r5 { --c: #008300; }
+.ld-c-r6 { --c: #4a3aa7; }
+.ld-c-r7 { --c: #e34948; }
+.dark .ld-c-r0 { --c: #3987e5; }
+.dark .ld-c-r1 { --c: #d95926; }
+.dark .ld-c-r2 { --c: #199e70; }
+.dark .ld-c-r3 { --c: #c98500; }
+.dark .ld-c-r4 { --c: #d55181; }
+.dark .ld-c-r5 { --c: #008300; }
+.dark .ld-c-r6 { --c: #9085e9; }
+.dark .ld-c-r7 { --c: #e66767; }
+
+.lb-summary {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.lb-summary b {
+  color: var(--ink);
+}
+.lb-replicas {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+  gap: 8px;
+}
+.lb-replica {
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--c);
+  border-radius: var(--r);
+  background: var(--bg);
+  padding: 8px 10px;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  min-width: 0;
+}
+.lb-replica.is-out {
+  border-style: dashed;
+  opacity: 0.75;
+}
+.lb-replica.is-hl {
+  box-shadow: 0 0 0 2px var(--hl);
+}
+.lb-replica header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.lb-replica header strong {
+  font-family: var(--font-mono);
+}
+.lb-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--c);
+}
+.lb-badge {
+  font-size: 0.72rem;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+.lb-badge.is-warn {
+  background: color-mix(in oklab, var(--spin) 22%, transparent);
+}
+.lb-badge.is-bad {
+  background: color-mix(in oklab, var(--gc-lost) 20%, transparent);
+}
+.lb-badge.is-boot {
+  background: var(--accent-soft);
+}
+.lb-rot {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.lb-rot.is-on::before {
+  content: '● ';
+  color: var(--run);
+}
+.lb-rot.is-off::before {
+  content: '○ ';
+  color: var(--gc-lost);
+}
+.lb-workers {
+  display: flex;
+  gap: 3px;
+}
+.lb-worker {
+  display: inline-block;
+  flex: 1 1 0;
+  min-width: 14px;
+  height: 8px;
+  border-radius: 2px;
+  border: 1px dashed var(--line);
+  overflow: hidden;
+}
+.lb-worker.is-busy {
+  border: 1px solid var(--ld-work);
+  background: color-mix(in oklab, var(--ld-work) 12%, transparent);
+}
+.rp-legend .lb-worker {
+  flex: 0 0 18px;
+  margin-left: 6px;
+}
+.lb-worker span {
+  display: block;
+  height: 100%;
+  background: var(--ld-work);
+}
+.lb-worker.is-zombie span,
+.lb-worker.is-stuck span {
+  background: var(--gc-lost);
+}
+.lb-stats {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.lb-stats b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.mark-lb-replica-fault,
+.mark-lb-queue-grow,
+.mark-lb-load-change,
+.mark-lb-scale-decide {
+  background: var(--spin);
+}
+.mark-lb-replica-recover,
+.mark-lb-health-restore,
+.mark-lb-scale-ready {
+  background: var(--run);
+}
+.mark-lb-health-eject,
+.mark-lb-outlier-eject {
+  background: var(--gc-lost);
+  width: 5px;
+}
+
+.dot-lb-req {
+  background: var(--ld-work);
+}
+.dot-lb-replica,
+.dot-lb-queue,
+.dot-lb-load {
+  background: var(--spin);
+}
+.dot-lb-health,
+.dot-lb-outlier {
+  background: var(--gc-lost);
+}
+.dot-lb-scale {
+  background: var(--run);
+}
+
+/* ─────────────────────── стенд «Кэш» ─────────────────────── */
+
+.ca-view {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 8px;
+}
+@media (max-width: 760px) {
+  .ca-view {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.ca-keys,
+.ca-db {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg);
+  padding: 8px 10px;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  min-width: 0;
+}
+.ca-keys header,
+.ca-db header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+.ca-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  align-items: center;
+}
+/* Клетка ключа: заполненная — в кэше, штрихованная — просрочена, пустая — нет в кэше. */
+.ca-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid var(--gc-cell-line);
+  font-size: 0.6rem;
+  color: var(--ink);
+}
+.ca-key.is-fresh {
+  background: color-mix(in oklab, var(--ld-work) 45%, transparent);
+  border-color: var(--ld-work);
+}
+.ca-key.is-expired {
+  background: repeating-linear-gradient(135deg, color-mix(in oklab, var(--ld-wait) 40%, transparent) 0 2px, transparent 2px 5px);
+  border-color: var(--ld-wait);
+}
+.ca-key.is-stale {
+  border-color: var(--ld-waste);
+  border-width: 2px;
+}
+.ca-key.is-absent {
+  background: transparent;
+  border-style: dotted;
+}
+.ca-key.is-inflight {
+  border-color: var(--accent);
+  border-style: dashed;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 30%, transparent);
+}
+.ca-key.is-hl {
+  outline: 2px solid var(--hl);
+  outline-offset: 1px;
+}
+.rp-legend .ca-key {
+  margin-left: 6px;
+}
+.ld-chip.is-write {
+  border-color: var(--ld-waste);
+  background: color-mix(in oklab, var(--ld-waste) 22%, transparent);
+}
+.ld-chip.is-joined {
+  border-color: var(--ld-work);
+  background: color-mix(in oklab, var(--ld-work) 30%, transparent);
+  width: 18px;
+}
+
+.mark-ca-cache-flush,
+.mark-ca-db-stampede {
+  background: var(--gc-lost);
+  width: 5px;
+}
+.mark-ca-db-queue,
+.mark-ca-cache-stale-set,
+.mark-ca-load-change {
+  background: var(--spin);
+}
+.mark-ca-cache-warm,
+.mark-ca-db-drained {
+  background: var(--run);
+}
+
+.dot-ca-req {
+  background: var(--ld-work);
+}
+.dot-ca-db {
+  background: var(--spin);
+}
+.dot-ca-cache {
+  background: var(--wl-3);
+}
+.dot-ca-write {
+  background: var(--ld-waste);
+}
+.dot-ca-load {
+  background: var(--accent);
+}
+
+/* ─────────────────────── стенд «Шарды» ─────────────────────── */
+
+.sh-keys {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg);
+  padding: 8px 10px;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.sh-keys header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+.sh-keymap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  align-items: center;
+}
+/* Клетка ключа окрашена в цвет владельца; переезжающий ключ — в рамке. */
+.sh-key {
+  display: inline-block;
+  width: 10px;
+  height: 14px;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--c) 55%, transparent);
+  border: 1px solid color-mix(in oklab, var(--c) 70%, transparent);
+}
+.sh-key.is-moving {
+  border: 2px dashed var(--gc-lost);
+  border-radius: 3px;
+}
+.sh-key.is-hl {
+  outline: 2px solid var(--hl);
+  outline-offset: 1px;
+}
+.rp-legend .sh-key {
+  margin-left: 6px;
+}
+
+.mark-sh-reshard-start,
+.mark-sh-queue-grow,
+.mark-sh-load-change {
+  background: var(--spin);
+}
+.mark-sh-reshard-done {
+  background: var(--run);
+}
+.mark-sh-shard-skew {
+  background: var(--gc-lost);
+  width: 5px;
+}
+
+.dot-sh-req {
+  background: var(--ld-work);
+}
+.dot-sh-scatter {
+  background: var(--ld-in);
+}
+.dot-sh-reshard {
+  background: var(--wl-3);
+}
+.dot-sh-shard,
+.dot-sh-queue,
+.dot-sh-load {
+  background: var(--spin);
+}
+
+/* ─────────────────────── стенд «Устойчивость» ─────────────────────── */
+
+.rs-view {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 8px;
+}
+@media (max-width: 760px) {
+  .rs-view {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.rs-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg);
+  padding: 8px 10px;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  min-width: 0;
+}
+.rs-panel.is-warn {
+  border-top: 3px solid var(--spin);
+}
+.rs-panel.is-bad {
+  border-top: 3px solid var(--gc-lost);
+}
+.rs-panel header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+.rs-workers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+/* Воркер A: точка — работает сам, песочные часы — ждёт зависимость. */
+.rs-worker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 22px;
+  border-radius: 4px;
+  border: 1px dashed var(--line);
+  font-size: 0.72rem;
+}
+.rs-worker.is-own {
+  border: 1px solid var(--ld-work);
+  background: color-mix(in oklab, var(--ld-work) 14%, transparent);
+  color: var(--ld-work);
+}
+.rs-worker.is-wait {
+  border: 1px solid var(--ld-wait);
+  background: color-mix(in oklab, var(--ld-wait) 18%, transparent);
+}
+.rs-worker.is-hl {
+  outline: 2px solid var(--hl);
+  outline-offset: 1px;
+}
+.rp-legend .rs-worker {
+  margin-left: 6px;
+}
+.ld-chip.is-local {
+  border-color: var(--ld-work);
+  background: color-mix(in oklab, var(--ld-work) 18%, transparent);
+}
+
+.mark-rs-dep-fault,
+.mark-rs-breaker-open,
+.mark-rs-pool-saturated {
+  background: var(--gc-lost);
+  width: 5px;
+}
+.mark-rs-queue-grow,
+.mark-rs-load-change {
+  background: var(--spin);
+}
+.mark-rs-breaker-close,
+.mark-rs-dep-recover {
+  background: var(--run);
+}
+
+.dot-rs-req {
+  background: var(--ld-work);
+}
+.dot-rs-dep {
+  background: var(--spin);
+}
+.dot-rs-breaker {
+  background: var(--wl-3);
+}
+.dot-rs-pool,
+.dot-rs-bulkhead,
+.dot-rs-queue {
+  background: var(--gc-lost);
+}
+.dot-rs-load {
+  background: var(--accent);
+}
+
+/* ─────────────────────── стенд «Согласованность» ─────────────────────── */
+
+.sg-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg);
+  padding: 8px 10px;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  min-width: 0;
+}
+.sg-panel.is-bad {
+  border-top: 3px solid var(--gc-lost);
+}
+.sg-panel header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+.sg-orders {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  align-items: center;
+  font-size: 0.6rem;
+}
+/* Заказ: цвет — состояние, рамка — проблема. */
+.sg-order {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid var(--gc-cell-line);
+  font-weight: 700;
+}
+.sg-order.is-created {
+  background: color-mix(in oklab, var(--ld-wait) 30%, transparent);
+  border-color: var(--ld-wait);
+}
+.sg-order.is-paid {
+  background: color-mix(in oklab, var(--ld-in) 35%, transparent);
+  border-color: var(--ld-in);
+}
+.sg-order.is-shipped {
+  background: color-mix(in oklab, var(--ld-work) 45%, transparent);
+  border-color: var(--ld-work);
+}
+.sg-order.is-cancelled {
+  background: var(--surface-2);
+  border-style: dashed;
+}
+.sg-order.is-lost {
+  border: 2px dashed var(--gc-lost);
+}
+.sg-order.is-double {
+  border: 2px solid var(--gc-lost);
+  color: var(--gc-lost);
+}
+.sg-order.is-hl {
+  outline: 2px solid var(--hl);
+  outline-offset: 1px;
+}
+.rp-legend .sg-order {
+  margin-left: 6px;
+}
+.sg-consumers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.sg-consumer b {
+  color: var(--ink);
+}
+
+.mark-sg-event-lost,
+.mark-sg-pay-double,
+.mark-sg-saga-stuck {
+  background: var(--gc-lost);
+  width: 5px;
+}
+.mark-sg-broker-down,
+.mark-sg-svc-crash,
+.mark-sg-pay-giveup {
+  background: var(--spin);
+}
+.mark-sg-broker-up,
+.mark-sg-saga-compensate {
+  background: var(--run);
+}
+
+.dot-sg-order,
+.dot-sg-ship {
+  background: var(--ld-work);
+}
+.dot-sg-outbox,
+.dot-sg-relay {
+  background: var(--ld-in);
+}
+.dot-sg-event {
+  background: var(--spin);
+}
+.dot-sg-pay {
+  background: var(--wl-3);
+}
+.dot-sg-saga,
+.dot-sg-svc,
+.dot-sg-broker {
+  background: var(--gc-lost);
+}
+
 /* ─────────────────────── схемы в лекциях ─────────────────────── */
 
 .dg {
@@ -4147,4 +4723,22 @@ body {
 }
 .dg .sd-bar {
   fill: var(--ld-wait);
+}
+
+/* Схема сравнения раскладок: цвета совпадают с карточками шардов в стенде. */
+.dg .sh-c0 {
+  fill: color-mix(in oklab, #2a78d6 55%, transparent);
+}
+.dg .sh-c1 {
+  fill: color-mix(in oklab, #eb6834 55%, transparent);
+}
+.dg .sh-c2 {
+  fill: color-mix(in oklab, #1baf7a 55%, transparent);
+}
+.dg .sh-c3 {
+  fill: color-mix(in oklab, #eda100 55%, transparent);
+}
+.dg .ln-moved {
+  stroke: var(--gc-lost);
+  stroke-width: 2;
 }

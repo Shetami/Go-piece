@@ -1,0 +1,28 @@
+---
+import { getCollection } from 'astro:content'
+import LbStandIsland from './ui/LbStand.tsx'
+import { lbScenarioById } from './engine/scenarios.ts'
+
+/**
+ * Стенд в MDX: <LbStand scenario="black-hole" />.
+ * Обёртка нужна, чтобы при сборке подтянуть определения терминов в остров
+ * и проверить, что такой сценарий существует.
+ */
+interface Props {
+  scenario: string
+  mode?: 'embed' | 'lab'
+}
+
+const { scenario, mode = 'embed' } = Astro.props
+if (!lbScenarioById(scenario)) {
+  throw new Error(`<LbStand scenario="${scenario}">: нет такого сценария в engine/scenarios.ts`)
+}
+
+const terms = Object.fromEntries(
+  (await getCollection('glossary')).map((e) => [e.id, { title: e.data.title, short: e.data.short }]),
+)
+---
+
+<div class:list={['not-prose', mode === 'embed' && 'wide']} data-pagefind-ignore>
+  <LbStandIsland client:visible scenario={scenario} mode={mode} terms={terms} />
+</div>

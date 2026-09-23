@@ -1,0 +1,66 @@
+---
+/**
+ * Доля попаданий в зависимости от размера кэша при неравномерной и
+ * равномерной популярности ключей. Тысяча ключей, распределение Ципфа.
+ */
+const N = 1000
+function share(size: number, s: number): number {
+  let acc = 0
+  let total = 0
+  for (let i = 1; i <= N; i++) total += 1 / i ** s
+  for (let i = 1; i <= size; i++) acc += 1 / i ** s
+  return acc / total
+}
+const W = 760
+const H = 300
+const M = { l: 54, r: 150, t: 20, b: 46 }
+const x = (size: number) => M.l + (size / N) * (W - M.l - M.r)
+const y = (v: number) => M.t + (H - M.t - M.b) * (1 - v)
+const curve = (s: number) => {
+  let d = ''
+  for (let i = 0; i <= 100; i++) {
+    const size = Math.round((i / 100) * N)
+    d += `${i === 0 ? 'M' : 'L'}${x(size).toFixed(1)} ${y(share(Math.max(1, size), s)).toFixed(1)}`
+  }
+  return d
+}
+const marks = [50, 100, 200, 500]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-labelledby="sdhc-t">
+      <title id="sdhc-t">При неравномерной популярности кэш на 10% ключей даёт около 70% попаданий, а при равномерной — ровно 10%</title>
+      {[0, 0.25, 0.5, 0.75, 1].map((v) => (
+        <g>
+          <path d={`M${M.l} ${y(v)} H${W - M.r}`} class="ln-thin"></path>
+          <text x={M.l - 8} y={y(v) + 4} text-anchor="end" class="t-muted t-small">{Math.round(v * 100)}%</text>
+        </g>
+      ))}
+      {[0, 250, 500, 750, 1000].map((size) => (
+        <text x={x(size)} y={H - M.b + 18} text-anchor="middle" class="t-muted t-small">{size}</text>
+      ))}
+      <text x={(M.l + W - M.r) / 2} y={H - 8} text-anchor="middle" class="t-muted">размер кэша, ключей из тысячи</text>
+      <text x="12" y={M.t + 4} class="t-muted t-small">попаданий</text>
+      <path d={curve(1)} class="sd-curve sd-work"></path>
+      <path d={curve(0)} class="sd-curve sd-wait"></path>
+      {marks.map((size) => (
+        <g>
+          <circle cx={x(size)} cy={y(share(size, 1))} r="4" class="sd-dot sd-work-fill"></circle>
+          <text x={x(size)} y={y(share(size, 1)) - 10} text-anchor="middle" class="t-small">{Math.round(share(size, 1) * 100)}%</text>
+        </g>
+      ))}
+      <path d={`M${W - M.r + 14} 70 h16`} class="sd-curve sd-work"></path>
+      <text x={W - M.r + 36} y="74" class="t-small">как в жизни</text>
+      <text x={W - M.r + 36} y="88" class="t-muted t-small">закон Ципфа</text>
+      <path d={`M${W - M.r + 14} 112 h16`} class="sd-curve sd-wait"></path>
+      <text x={W - M.r + 36} y="116" class="t-small">все ключи</text>
+      <text x={W - M.r + 36} y="130" class="t-muted t-small">одинаково популярны</text>
+    </svg>
+  </div>
+  <figcaption>
+    Первые проценты памяти дают больше всего попаданий: кэш на 50 ключей из тысячи забирает 60% чтений, на 200 —
+    79%, а следующие 300 ключей добавляют всего 12 пунктов. Если популярность равномерная (оранжевая прямая),
+    кэш забирает ровно ту долю запросов, какую долю данных вмещает, и смысла в нём почти нет.
+  </figcaption>
+</figure>

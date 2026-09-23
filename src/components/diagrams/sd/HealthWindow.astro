@@ -1,0 +1,43 @@
+---
+/**
+ * Окно слепоты: от поломки реплики до её исключения проходит до
+ * interval × threshold, и всё это время запросы уходят в мёртвую реплику.
+ */
+const X0 = 60
+const S = 18 // пикселей на тик
+const x = (t: number) => X0 + t * S
+const checks = [0, 10, 20, 30]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 200" role="img" aria-labelledby="sdhw-t">
+      <title id="sdhw-t">Реплика зависла на тике 0; проверки каждые 10 тиков, исключение после трёх провалов — запросы уходят в неё до тика 20, а ждут ответа до тика 32</title>
+      <path d={`M${x(0)} 60 H${x(36)}`} class="ln"></path>
+      {Array.from({ length: 37 }, (_, t) => t % 5 === 0 && (
+        <g>
+          <path d={`M${x(t)} 56 V64`} class="ln"></path>
+          <text x={x(t)} y="80" text-anchor="middle" class="t-muted t-small">{t}</text>
+        </g>
+      ))}
+      <rect x={x(0)} y="96" width={x(20) - x(0)} height="26" rx="4" class="risk"></rect>
+      <text x={x(10)} y="113" text-anchor="middle" class="t-small">запросы уходят в зависшую реплику</text>
+      <rect x={x(20)} y="96" width={x(32) - x(20)} height="26" rx="4" class="cell-pending"></rect>
+      <text x={x(26)} y="113" text-anchor="middle" class="t-small">ждут таймаута</text>
+      {checks.map((t, i) => (
+        <g>
+          <circle cx={x(t)} cy="36" r="7" class={i < 3 ? 'dot-bad' : 'dot'}></circle>
+          <text x={x(t)} y="20" text-anchor="middle" class="t-small">{i < 3 ? `провал ${i + 1}` : ''}</text>
+        </g>
+      ))}
+      <text x={x(0)} y="150" class="t-bad t-small">▲ реплика зависла</text>
+      <text x={x(20)} y="150" class="t-small">▲ исключена</text>
+      <text x={x(32)} y="170" class="t-small">▲ последний таймаут (таймаут клиента 12)</text>
+    </svg>
+  </div>
+  <figcaption>
+    Проверки каждые 10 тиков, исключение после трёх провалов подряд. Реплика ломается сразу после проверки — и
+    ещё 20 тиков получает свою долю запросов. Каждый из них ответит только таймаутом. Интервал × порог — это
+    время, когда поломка видна пользователям.
+  </figcaption>
+</figure>

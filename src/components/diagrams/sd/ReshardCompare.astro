@@ -1,0 +1,58 @@
+---
+/**
+ * Что происходит с раскладкой при добавлении четвёртого шарда: остаток от
+ * деления переставляет почти все ключи, кольцо — только долю нового шарда.
+ * Раскладка берётся из того же движка, что и стенд.
+ */
+import { ownerOf, resolveConfig } from '../../stands/shard/engine/world.ts'
+
+const keys = 48
+const base = resolveConfig({ keys, vnodes: 64 })
+const rows = (['mod', 'ring'] as const).map((scheme) => {
+  const c = { ...base, scheme }
+  const before = Array.from({ length: keys }, (_, k) => ownerOf(c, k, 3))
+  const after = Array.from({ length: keys }, (_, k) => ownerOf(c, k, 4))
+  const moved = before.filter((o, k) => o !== after[k]).length
+  return { scheme, before, after, moved }
+})
+const CELL = 13
+const W = 760
+const x = (k: number) => 210 + k * CELL
+const title: Record<string, string> = { mod: 'остаток от деления', ring: 'кольцо' }
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox={`0 0 ${W} 250`} role="img" aria-labelledby="sdrc-t">
+      <title id="sdrc-t">При остатке от деления четвёртый шард забирает ключи почти у всех; при согласованном хешировании переезжает лишь четверть</title>
+      {
+        rows.map((r, i) => {
+          const y0 = 34 + i * 108
+          return (
+            <g>
+              <text x="20" y={y0 + 6} class="t-bold">{title[r.scheme]}</text>
+              <text x="20" y={y0 + 24} class="t-muted t-small">переезжает {Math.round((r.moved / keys) * 100)}% ключей</text>
+              <text x="150" y={y0 + 6} text-anchor="end" class="t-muted t-small">3 шарда</text>
+              <text x="150" y={y0 + 44} text-anchor="end" class="t-muted t-small">4 шарда</text>
+              {r.before.map((o, k) => (
+                <rect x={x(k)} y={y0 - 6} width={CELL - 3} height="16" rx="2" class={`sh-c${o}`}></rect>
+              ))}
+              {r.after.map((o, k) => (
+                <g>
+                  <rect x={x(k)} y={y0 + 32} width={CELL - 3} height="16" rx="2" class={`sh-c${o}`}></rect>
+                  {o !== r.before[k] && <path d={`M${x(k) + (CELL - 3) / 2} ${y0 + 12} v16`} class="ln-moved"></path>}
+                </g>
+              ))}
+            </g>
+          )
+        })
+      }
+      <text x="210" y="228" class="t-muted t-small">каждая клетка — ключ, цвет — шард-владелец; красная черта — ключ сменил владельца</text>
+    </svg>
+  </div>
+  <figcaption>
+    Сорок восемь ключей до и после добавления четвёртого шарда. При раскладке «хеш по модулю числа шардов»
+    владельца меняют две трети: было «% 3», стало «% 4». На большом числе ключей это три четверти. Кольцо согласованного хеширования отдаёт новому шарду
+    только его долю, и остальные ключи остаются на своих местах.
+  </figcaption>
+</figure>

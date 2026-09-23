@@ -1,0 +1,52 @@
+---
+/**
+ * Гонка cache-aside: чтение прочитало старое значение до записи,
+ * а положило его в кэш после инвалидации.
+ */
+const L = { read: 60, write: 170, cache: 280 }
+const steps = [
+  { y: 70, actor: 'read', text: '1. промах в кэше, идём в базу', cls: 't-muted' },
+  { y: 110, actor: 'read', text: '2. база отдала версию 1', cls: 't-muted' },
+  { y: 150, actor: 'write', text: '3. запись: в базе версия 2', cls: 't-muted' },
+  { y: 190, actor: 'write', text: '4. удаляем ключ из кэша', cls: 't-muted' },
+  { y: 230, actor: 'read', text: '5. чтение кладёт в кэш версию 1', cls: 't-bad' },
+]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 290" role="img" aria-labelledby="sdsr-t">
+      <title id="sdsr-t">Чтение прочитало старую версию до записи, а положило её в кэш после инвалидации — в кэше снова старое значение</title>
+      <defs>
+        <marker id="sdsr-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+      <text x={L.read} y="26" class="t-bold">чтение</text>
+      <text x={L.write} y="26" class="t-bold">запись</text>
+      <text x={L.cache} y="26" class="t-bold">кэш и база</text>
+      <path d={`M${L.read + 14} 36 V264`} class="ln-life"></path>
+      <path d={`M${L.write + 14} 36 V264`} class="ln-life"></path>
+      <path d={`M${L.cache + 20} 36 V264`} class="ln-life"></path>
+      {
+        steps.map((s) => (
+          <g>
+            <path
+              d={`M${(s.actor === 'read' ? L.read : L.write) + 14} ${s.y} H${L.cache + 16}`}
+              class={s.cls === 't-bad' ? 'ln ln-dash' : 'ln'}
+              marker-end="url(#sdsr-a)"
+            ></path>
+            <text x={L.cache + 34} y={s.y + 4} class={`${s.cls} t-small`}>{s.text}</text>
+          </g>
+        ))
+      }
+      <rect x={L.cache + 20} y="248" width="330" height="26" rx="4" class="risk"></rect>
+      <text x={L.cache + 34} y="265" class="t-small">в кэше версия 1, в базе версия 2 — и так до истечения TTL</text>
+    </svg>
+  </div>
+  <figcaption>
+    Удаление ключа при записи не спасает от гонки: чтение, начавшееся раньше записи, может закончиться позже неё и
+    вернуть в кэш уже устаревшее значение. Поэтому TTL ставят даже там, где есть инвалидация, — он ограничивает
+    время жизни такой ошибки.
+  </figcaption>
+</figure>
