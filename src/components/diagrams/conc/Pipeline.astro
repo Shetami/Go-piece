@@ -1,0 +1,53 @@
+---
+/**
+ * Конвейер: стадии соединены каналами, каждую стадию закрывает её владелец,
+ * и закрытие волной идёт от источника к стоку.
+ */
+const stages = [
+  { t: 'gen', s: 'читает источник', who: 'стадия 1' },
+  { t: 'parse', s: 'разбирает строки', who: 'стадия 2' },
+  { t: 'enrich', s: 'ходит в сервис', who: 'стадия 3' },
+  { t: 'sink', s: 'пишет в базу', who: 'сток' },
+]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 210" role="img" aria-labelledby="ccp-t">
+      <title id="ccp-t">Четыре стадии конвейера соединены каналами; закрытие идёт слева направо, отмена — сразу всем</title>
+      <defs>
+        <marker id="ccp-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+      {
+        stages.map((st, i) => {
+          const x = 20 + i * 190
+          return (
+            <g>
+              <rect x={x} y="30" width="130" height="70" rx="8" class={i === 3 ? 'box-2' : 'box'}></rect>
+              <text x={x + 65} y="50" text-anchor="middle" class="t-muted t-small">{st.who}</text>
+              <text x={x + 65} y="72" text-anchor="middle" class="t-bold t-mono">{st.t}</text>
+              <text x={x + 65} y="90" text-anchor="middle" class="t-small">{st.s}</text>
+              {i < 3 && (
+                <g>
+                  <path d={`M${x + 130} 65 H${x + 186}`} class="ln" marker-end="url(#ccp-a)"></path>
+                  <text x={x + 158} y="58" text-anchor="middle" class="t-small t-mono">chan</text>
+                  <text x={x + 158} y="118" text-anchor="middle" class="t-small t-accent">close ↓</text>
+                </g>
+              )}
+            </g>
+          )
+        })
+      }
+      <rect x="20" y="146" width="720" height="30" rx="8" class="note"></rect>
+      <text x="380" y="166" text-anchor="middle" class="t-small">ctx.Done() — все стадии слушают одну отмену и выходят, не дожидаясь соседей</text>
+      <text x="20" y="200" class="t-muted t-small">Выход стадии закрывает та горутина, что в него пишет. Закрытие входа — сигнал «данных больше не будет».</text>
+    </svg>
+  </div>
+  <figcaption>
+    Данные и закрытие идут в одну сторону: стадия дочитывает вход до конца, закрывает свой выход, и следующая
+    узнаёт об этом из <code>range</code>. Отмена идёт поперёк: её видят все сразу, и никто не ждёт, пока до него
+    докатится волна.
+  </figcaption>
+</figure>

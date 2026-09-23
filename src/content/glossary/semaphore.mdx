@@ -1,0 +1,32 @@
+---
+title: Семафор
+short: Счётчик свободных слотов. Взять слот перед работой, вернуть после — и одновременно работают не больше n. В Go — буферизованный канал или golang.org/x/sync/semaphore.
+aliases: [semaphore, семафор, semaphore.Weighted, 'chan struct{}']
+category: механизм
+related: [worker-pool, errgroup, chan-buffer]
+---
+
+Самый короткий семафор — канал с буфером на `n`:
+
+```go
+sem := make(chan struct{}, 8)
+for _, j := range jobs {
+    sem <- struct{}{}            // занять слот; при восьми занятых — ждать
+    go func() {
+        defer func() { <-sem }() // вернуть слот
+        do(j)
+    }()
+}
+```
+
+Ожидание слота здесь нельзя отменить. Если оно должно уважать контекст — `semaphore.Weighted`:
+
+```go
+sem := semaphore.NewWeighted(8)
+if err := sem.Acquire(ctx, 1); err != nil {
+    return err // контекст отменён, пока ждали
+}
+defer sem.Release(1)
+```
+
+Weighted умеет и неравные веса: тяжёлая задача берёт 4 слота, лёгкая — 1. Так ограничивают, например, суммарный объём памяти под одновременно обрабатываемые файлы.

@@ -1,0 +1,32 @@
+---
+title: Fan-out и fan-in
+short: 'Fan-out — несколько горутин читают один канал задач, fan-in — выходы нескольких горутин сливаются в один канал. Выход закрывает не воркер, а тот, кто дождался всех.'
+aliases: [fan-out, fan-in, merge, слияние каналов]
+category: механизм
+related: [pipeline, worker-pool, waitgroup, chan-close]
+---
+
+```go
+func merge[T any](ctx context.Context, ins ...<-chan T) <-chan T {
+    out := make(chan T)
+    var wg sync.WaitGroup
+    for _, in := range ins {
+        wg.Go(func() {
+            for v := range in {
+                select {
+                case out <- v:
+                case <-ctx.Done():
+                    return
+                }
+            }
+        })
+    }
+    go func() {
+        wg.Wait()
+        close(out) // писателей несколько — закрывает тот, кто дождался всех
+    }()
+    return out
+}
+```
+
+После fan-out порядок результатов теряется. Если он нужен — тащите индекс вместе со значением и раскладывайте по `results[i]`, или соберите по индексу на выходе.

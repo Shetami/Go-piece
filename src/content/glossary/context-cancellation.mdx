@@ -1,0 +1,30 @@
+---
+title: Отмена через context
+short: 'Контекст несёт сигнал «хватит» вниз по дереву вызовов: закрытый канал ctx.Done() и причину в ctx.Err(). Отмена родителя отменяет всех потомков, но не наоборот.'
+aliases: [context, context.Context, ctx.Done, WithCancel, WithTimeout, WithCancelCause, отмена]
+category: механизм
+related: [request-deadline, goroutine-leak, errgroup, chan-close]
+source: context/context.go
+---
+
+`ctx.Done()` — это канал, который **закрывается** при отмене. Поэтому его можно слушать в `select` любым числом горутин одновременно: закрытие будит всех ([закрытие канала](/glossary/chan-close/)).
+
+```go
+ctx, cancel := context.WithTimeout(parent, 2*time.Second)
+defer cancel() // всегда: иначе таймер и связь с родителем живут до срабатывания
+
+select {
+case res := <-work:
+    return res, nil
+case <-ctx.Done():
+    return nil, context.Cause(ctx) // Canceled, DeadlineExceeded или своя причина
+}
+```
+
+Правила обращения:
+
+- **Контекст — первый аргумент**, а не поле структуры. Он описывает конкретный вызов, а не объект.
+- **`cancel` вызывают всегда**, даже если работа завершилась успешно. `go vet` ругается на потерянный `cancel`.
+- **Отмена идёт только вниз.** Потомок не может отменить родителя; `WithoutCancel` (Go 1.21) отрезает отмену для работы, которая должна пережить запрос.
+- **Отмена ничего не прерывает сама.** Код, который не смотрит в `ctx`, продолжит работать. Блокирующие вызовы стандартной библиотеки (`http`, `database/sql`, `net`) контекст уважают; свои циклы должны проверять его сами.
+- **`WithCancelCause` / `context.Cause`** (Go 1.20) говорят, *почему* отменили, — это сильно упрощает разбор логов.

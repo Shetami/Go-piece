@@ -1,0 +1,46 @@
+---
+/**
+ * Fan-out и fan-in: один вход раздаётся нескольким воркерам, их выходы сливаются в один.
+ */
+const workers = [0, 1, 2]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 260" role="img" aria-labelledby="ccf-t">
+      <title id="ccf-t">Один канал задач читают три воркера, их результаты сливаются в один канал, который закрывается после Wait</title>
+      <defs>
+        <marker id="ccf-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+      <rect x="20" y="95" width="140" height="60" rx="8" class="box"></rect>
+      <text x="90" y="120" text-anchor="middle" class="t-bold t-mono">jobs</text>
+      <text x="90" y="140" text-anchor="middle" class="t-small">один канал</text>
+      {
+        workers.map((w) => {
+          const y = 20 + w * 80
+          return (
+            <g>
+              <path d={`M160 125 L286 ${y + 30}`} class="ln" marker-end="url(#ccf-a)"></path>
+              <rect x="290" y={y} width="160" height="60" rx="8" class="box-2"></rect>
+              <text x="370" y={y + 26} text-anchor="middle" class="t-bold t-mono">worker {w + 1}</text>
+              <text x="370" y={y + 45} text-anchor="middle" class="t-small">for j := range jobs</text>
+              <path d={`M450 ${y + 30} L576 125`} class="ln" marker-end="url(#ccf-a)"></path>
+            </g>
+          )
+        })
+      }
+      <rect x="580" y="95" width="160" height="60" rx="8" class="box"></rect>
+      <text x="660" y="120" text-anchor="middle" class="t-bold t-mono">results</text>
+      <text x="660" y="140" text-anchor="middle" class="t-small">close после wg.Wait()</text>
+      <text x="200" y="250" text-anchor="middle" class="t-accent t-small">fan-out: кто свободен, тот и берёт</text>
+      <text x="560" y="250" text-anchor="middle" class="t-accent t-small">fan-in: один выход на всех</text>
+    </svg>
+  </div>
+  <figcaption>
+    Раздавать работу не нужно: свободный воркер сам забирает следующую задачу из общего канала. Сложность —
+    на выходе: у <code>results</code> несколько писателей, поэтому закрывает его не воркер, а отдельная горутина,
+    дождавшаяся всех.
+  </figcaption>
+</figure>

@@ -1,0 +1,27 @@
+---
+title: errgroup
+short: WaitGroup с ошибкой и отменой из golang.org/x/sync/errgroup. Wait возвращает первую ошибку, WithContext отменяет контекст соседей, SetLimit ограничивает параллелизм.
+aliases: [errgroup.Group, errgroup.WithContext, SetLimit, TryGo]
+category: сущность
+related: [waitgroup, context-cancellation, semaphore, worker-pool]
+---
+
+```go
+g, ctx := errgroup.WithContext(ctx)
+g.SetLimit(8) // не больше восьми горутин одновременно
+for _, id := range ids {
+    g.Go(func() error {
+        return process(ctx, id)
+    })
+}
+if err := g.Wait(); err != nil {
+    return err // первая ошибка; остальные потеряны
+}
+```
+
+Что важно знать:
+
+- **Возвращается первая ошибка.** Остальные отбрасываются. Нужны все — собирайте их сами, например в срез под мьютексом, и склеивайте `errors.Join`.
+- **Контекст из `WithContext` отменяется** при первой ошибке **и** при возврате `Wait`. Использовать его после `Wait` нельзя — он уже отменён.
+- **Отмена — это просьба.** errgroup не прерывает горутины: они должны сами проверять `ctx` и выходить.
+- **`SetLimit(n)`** превращает группу в пул: `Go` блокируется, пока не освободится место. `TryGo` не блокируется, а возвращает `false`.

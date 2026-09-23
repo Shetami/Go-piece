@@ -1,0 +1,34 @@
+---
+title: sync.WaitGroup
+short: Счётчик запущенных горутин. Add увеличивает, Done уменьшает, Wait спит, пока счётчик не станет нулём. Ошибок и отмены не знает.
+aliases: [WaitGroup, wg, wg.Go, sync.WaitGroup]
+category: сущность
+related: [errgroup, goroutine, goroutine-leak]
+source: sync/waitgroup.go
+---
+
+```go
+var wg sync.WaitGroup
+for _, u := range urls {
+    wg.Go(func() { fetch(u) }) // Go 1.25+: Add(1) + go + defer Done() одной строкой
+}
+wg.Wait()
+```
+
+До Go 1.25 то же самое пишут руками:
+
+```go
+wg.Add(1)
+go func() {
+    defer wg.Done()
+    fetch(u)
+}()
+```
+
+Три правила, которые ломают чаще всего:
+
+- **`Add` — до `go`, а не внутри горутины.** Иначе `Wait` может проскочить раньше, чем горутина успеет увеличить счётчик. `wg.Go` эту ошибку исключает.
+- **WaitGroup нельзя копировать.** Передавайте указатель; `go vet` (проверка copylocks) ловит передачу по значению.
+- **Счётчик ниже нуля — паника.** Обычно это лишний `Done` в ветке с ошибкой.
+
+WaitGroup не собирает ошибки и не умеет отменять соседей. Если это нужно — [errgroup](/glossary/errgroup/).

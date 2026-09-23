@@ -1,0 +1,33 @@
+---
+title: Страхующий запрос
+short: Если ответ не пришёл за время, за которое обычно приходит 95% ответов, отправить копию запроса на другую реплику и взять тот ответ, что придёт первым. Режет хвост задержки ценой нескольких процентов нагрузки.
+aliases: [hedged request, hedging, дублирующий запрос, backup request]
+category: механизм
+related: [tail-latency, latency-percentile, context-cancellation, retry-backoff]
+---
+
+Идея из статьи Дина и Баррозо «The Tail at Scale». Медленный ответ чаще всего вызван не запросом, а случайным состоянием реплики: сборкой мусора, соседом по узлу, очередью. Вторая реплика в этот момент, скорее всего, свободна.
+
+```go
+func hedged(ctx context.Context, after time.Duration, call func(context.Context) (Resp, error)) (Resp, error) {
+    ctx, cancel := context.WithCancel(ctx)
+    defer cancel() // проигравший запрос отменится
+    type res struct { r Resp; err error }
+    ch := make(chan res, 2) // буфер на все попытки — проигравшему есть куда положить ответ
+    launch := func() { r, err := call(ctx); ch <- res{r, err} }
+
+    go launch()
+    t := time.NewTimer(after)
+    defer t.Stop()
+    select {
+    case x := <-ch:
+        return x.r, x.err
+    case <-t.C:
+        go launch()
+    }
+    x := <-ch
+    return x.r, x.err
+}
+```
+
+Условия применимости: запрос **идемпотентный** (его можно выполнить дважды), порог — около p95, а не p50, иначе нагрузка удвоится. Если реплики перегружены все, страховка только добавит нагрузки — поэтому её ограничивают долей запросов.
