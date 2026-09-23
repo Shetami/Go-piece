@@ -1,0 +1,120 @@
+---
+import { getCollection, getEntry, render } from 'astro:content'
+import BaseLayout from '../../layouts/BaseLayout.astro'
+import Term from '../../components/content/Term.astro'
+import Callout from '../../components/content/Callout.astro'
+import Reveal from '../../components/content/Reveal.astro'
+import TaskRunner from '../../components/practice/ui/TaskRunner.tsx'
+import { taskCode } from '../../lib/task-files.ts'
+import { taskKind, taskLevel, taskTopic } from '../../data/practice.ts'
+
+export async function getStaticPaths() {
+  const tasks = await getCollection('tasks', (t) => !t.data.draft)
+  return tasks.map((entry) => ({ params: { id: entry.id }, props: { entry } }))
+}
+
+const { entry } = Astro.props
+const { title, description, kind, topic, level, related, lecture } = entry.data
+const { Content } = await render(entry)
+
+// Заготовка и эталон читаются на сборке и уезжают в остров пропсами.
+// Скрытые тесты и эталонный вывод сюда не попадают — они только у /api/check.
+const { starter, solution } = taskCode(entry.id)
+
+const kindInfo = taskKind(kind)
+const topicInfo = taskTopic(topic)
+const levelInfo = taskLevel(level)
+
+const glossary = await getCollection('glossary')
+const terms = related.map((ref) => glossary.find((g) => g.id === ref.id)).filter((g) => g !== undefined)
+
+const lectureEntry = lecture ? await getEntry('lectures', lecture) : undefined
+
+// Соседние задачи той же темы — чтобы после разбора было куда идти.
+const siblings = (await getCollection('tasks', (t) => !t.data.draft && t.data.topic === topic)).sort(
+  (a, b) => a.data.order - b.data.order,
+)
+const idx = siblings.findIndex((t) => t.id === entry.id)
+const next = idx >= 0 ? siblings[idx + 1] : undefined
+---
+
+<BaseLayout title={title} description={description} wide>
+  <article data-pagefind-body>
+    <nav class="text-sm text-muted mb-4" data-pagefind-ignore>
+      <a href="/practice/" class="hover:text-ink">Практика</a> / <a
+        href={`/practice/?topic=${topic}`}
+        class="hover:text-ink">{topicInfo.title}</a
+      >
+    </nav>
+
+    <div class="flex flex-wrap items-center gap-2 mb-3" data-pagefind-ignore>
+      <span class="pr-badge pr-badge-kind">{kindInfo.title}</span>
+      <span class="pr-badge">{topicInfo.title}</span>
+      <span class="pr-badge">{levelInfo.title}</span>
+    </div>
+
+    <h1 class="text-3xl md:text-4xl font-bold tracking-tight leading-tight mb-3">{title}</h1>
+    <p class="text-lg text-muted max-w-[70ch] mb-8">{description}</p>
+
+    <div class="grid lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] gap-8 items-start">
+      <div class="prose dark:prose-invert lg:sticky lg:top-20">
+        <Content components={{ Term, Callout, Reveal }} />
+      </div>
+
+      <div data-pagefind-ignore>
+        <TaskRunner
+          client:load
+          taskId={entry.id}
+          kind={kind}
+          prompt={kindInfo.prompt}
+          starter={starter}
+          solution={solution}
+        />
+        <p class="text-xs text-muted mt-3">
+          Код компилирует и исполняет песочница <a href="https://go.dev/play/" class="text-accent">go.dev</a>: настоящий
+          компилятор, настоящий рантайм. Часы там поддельные — <code>time.Sleep</code> не стоит ничего, а сеть и файлы недоступны.
+        </p>
+      </div>
+    </div>
+
+    {
+      terms.length > 0 && (
+        <section class="mt-16 pt-8 border-t border-line" data-pagefind-ignore>
+          <h2 class="text-xl font-bold mb-4">Что перечитать рядом</h2>
+          <dl class="grid sm:grid-cols-2 gap-x-8 gap-y-4 max-w-4xl">
+            {terms.map((t) => (
+              <div>
+                <dt>
+                  <a href={`/glossary/${t.id}/`} class="font-semibold text-accent">
+                    {t.data.title}
+                  </a>
+                </dt>
+                <dd class="text-sm text-muted mt-0.5">{t.data.short}</dd>
+              </div>
+            ))}
+          </dl>
+          {lectureEntry && (
+            <p class="mt-6 text-sm">
+              Лекция по теме: <a href={`/lectures/${lectureEntry.id}/`} class="text-accent">{lectureEntry.data.title}</a>
+            </p>
+          )}
+        </section>
+      )
+    }
+
+    <nav class="mt-12" data-pagefind-ignore>
+      {
+        next ? (
+          <a href={`/practice/${next.id}/`} class="block rounded-xl border border-line p-4 hover:border-muted max-w-md">
+            <span class="text-xs text-muted">следующая по теме →</span>
+            <span class="block font-semibold text-ink">{next.data.title}</span>
+          </a>
+        ) : (
+          <a href="/practice/" class="text-sm text-accent">
+            ← все задачи
+          </a>
+        )
+      }
+    </nav>
+  </article>
+</BaseLayout>

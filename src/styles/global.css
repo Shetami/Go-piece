@@ -38,6 +38,27 @@
   --gc-trigger: #c77c02;
   --gc-limit: #ae3ec9;
 
+  /* Редактор кода. Цвета здесь — переменные, потому что тему страницы меняет
+     класс на <html>, а CodeMirror пересоздавать ради этого нельзя. */
+  --cm-bg: #ffffff;
+  --cm-ink: #1c1b18;
+  --cm-caret: #0a7ea4;
+  --cm-selection: #cfe8f0;
+  --cm-active-line: #f6f4ef;
+  --cm-gutter-bg: #faf9f6;
+  --cm-gutter-ink: #a6a196;
+  --cm-gutter-line: #e2ded5;
+  --cm-tooltip-bg: #ffffff;
+  --cm-keyword: #a626a4;
+  --cm-type: #0184bc;
+  --cm-func: #4078f2;
+  --cm-string: #2b8a3e;
+  --cm-number: #c18401;
+  --cm-comment: #9a958b;
+  --cm-punct: #6a655b;
+  --cm-error: #e03131;
+  --cm-pick: #7048e8;
+
   color-scheme: light;
 }
 
@@ -74,6 +95,25 @@
   --gc-goal: #4cc2e6;
   --gc-trigger: #fcc419;
   --gc-limit: #da77f2;
+
+  --cm-bg: #1a1a17;
+  --cm-ink: #ecebe6;
+  --cm-caret: #4cc2e6;
+  --cm-selection: #2d4a55;
+  --cm-active-line: #23221e;
+  --cm-gutter-bg: #1a1a17;
+  --cm-gutter-ink: #6b6759;
+  --cm-gutter-line: #34332d;
+  --cm-tooltip-bg: #25241f;
+  --cm-keyword: #d98ad4;
+  --cm-type: #4cc2e6;
+  --cm-func: #82aaff;
+  --cm-string: #8bd49c;
+  --cm-number: #f0b862;
+  --cm-comment: #726d61;
+  --cm-punct: #a39e93;
+  --cm-error: #ff6b6b;
+  --cm-pick: #b197fc;
 
   color-scheme: dark;
 }
@@ -4741,4 +4781,415 @@ body {
 .dg .ln-moved {
   stroke: var(--gc-lost);
   stroke-width: 2;
+}
+
+/* ─── Практика ───────────────────────────────────────────────────────────────
+   Раздел задач: редактор, вывод, вердикты. Классы с приставкой pr-, чтобы не
+   пересекаться со стендами, у которых своя, ничем не связанная раскладка. */
+
+.reveal {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  margin: 1.75rem 0;
+}
+.reveal-summary {
+  cursor: pointer;
+  padding: 0.7rem 1rem;
+  font-weight: 600;
+  color: var(--accent);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.reveal-summary::-webkit-details-marker {
+  display: none;
+}
+.reveal-summary::before {
+  content: '▸';
+  font-size: 0.8em;
+  transition: transform 0.15s;
+}
+.reveal[open] .reveal-summary::before {
+  transform: rotate(90deg);
+}
+.reveal-body {
+  padding: 0 1rem 0.5rem;
+  border-top: 1px solid var(--line);
+  max-width: none;
+}
+.reveal-body > :first-child {
+  margin-top: 1rem;
+}
+
+.pr-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.1rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--muted);
+  background: var(--surface-2);
+  white-space: nowrap;
+}
+.pr-badge-kind {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.pr-solved-dot {
+  font-size: 0.72rem;
+  color: var(--run);
+  font-weight: 600;
+}
+.pr-solved-dot::before {
+  content: '✓ ';
+}
+
+.pr-filter {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 0.2rem 0.7rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pr-filter:hover {
+  color: var(--ink);
+  border-color: var(--muted);
+}
+.pr-filter.is-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+/* ─── Рабочее место ───────────────────────────────────────────────────────── */
+
+.pr-runner {
+  font-size: 0.875rem;
+  color: var(--ink);
+}
+.pr-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.pr-toolbar-gap {
+  flex: 1;
+}
+.pr-btn {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: 6px;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pr-btn:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+.pr-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.pr-btn-main {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+  min-width: 7rem;
+}
+.pr-btn-main:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.pr-btn-ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+.pr-btn-ghost:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--surface-2);
+  border-color: transparent;
+}
+
+.pr-solved {
+  border: 1px solid var(--run);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--run) 10%, transparent);
+  color: var(--run);
+  font-weight: 600;
+  padding: 0.5rem 0.8rem;
+  margin-bottom: 0.75rem;
+}
+
+.pr-split {
+  display: grid;
+  gap: 1rem;
+  align-items: start;
+}
+@media (min-width: 1280px) {
+  .pr-split {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 24rem);
+  }
+}
+
+.pr-pane {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.pr-pane-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+.pr-lock {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 0.35rem;
+  white-space: nowrap;
+}
+.pr-hint {
+  color: var(--hl);
+}
+.pr-keys {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+.pr-keys kbd {
+  font-family: var(--font-mono);
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 0.3rem;
+  background: var(--surface-2);
+}
+
+/* ─── Редактор ───────────────────────────────────────────────────────────── */
+
+.cm-host {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--cm-bg);
+}
+.cm-host[data-readonly] {
+  border-style: dashed;
+}
+.cm-host .cm-editor {
+  max-height: 34rem;
+}
+.cm-host .cm-scroller {
+  overflow: auto;
+}
+
+/* Колонка выбора строки — механика задач «найди баг».
+   Пустые кружки видны всегда и приглушённо: невидимая колонка, о которой
+   сказано только в подсказке, — это не механика, а загадка. */
+.cm-pickGutter {
+  cursor: pointer;
+  padding-left: 6px;
+  min-width: 1.15rem;
+  text-align: center;
+}
+.cm-pickGutter .cm-gutterElement {
+  cursor: pointer;
+  font-size: 0.7rem;
+  line-height: inherit;
+}
+.cm-pickDot {
+  color: var(--cm-gutter-ink);
+  opacity: 0.55;
+}
+.cm-pickGutter .cm-gutterElement:hover .cm-pickDot {
+  color: var(--cm-pick);
+  opacity: 1;
+}
+.cm-pickDot.is-picked {
+  color: var(--cm-pick);
+  opacity: 1;
+}
+.cm-pickedLine {
+  background: color-mix(in srgb, var(--cm-pick) 16%, transparent);
+  box-shadow: inset 2px 0 0 var(--cm-pick);
+}
+
+/* ─── Ответ и вердикт ────────────────────────────────────────────────────── */
+
+.pr-answer {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 0.75rem;
+}
+.pr-answer-label {
+  display: block;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+.pr-answer-input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  line-height: 1.6;
+  padding: 0.5rem 0.6rem;
+  resize: vertical;
+}
+.pr-answer-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.pr-picked {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--ink);
+}
+
+.pr-verdict {
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 0.7rem 0.9rem;
+}
+.pr-verdict-pass {
+  border-left-color: var(--run);
+}
+.pr-verdict-fail {
+  border-left-color: var(--sys);
+}
+.pr-verdict-title {
+  font-weight: 700;
+}
+.pr-verdict-pass .pr-verdict-title {
+  color: var(--run);
+}
+.pr-verdict-fail .pr-verdict-title {
+  color: var(--sys);
+}
+.pr-verdict-detail {
+  margin: 0.5rem 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--muted);
+}
+
+/* ─── Консоль ────────────────────────────────────────────────────────────── */
+
+.pr-console {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.pr-console-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  background: var(--surface-2);
+}
+.pr-spinner {
+  color: var(--accent);
+}
+.pr-console-body {
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-height: 24rem;
+  overflow: auto;
+}
+.pr-output {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--ink);
+}
+.pr-stderr {
+  color: var(--sys);
+}
+.pr-caret {
+  color: var(--accent);
+  animation: pr-blink 1s steps(2) infinite;
+}
+@keyframes pr-blink {
+  50% {
+    opacity: 0;
+  }
+}
+.pr-msg {
+  border-radius: 6px;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.78rem;
+}
+.pr-msg pre {
+  margin: 0.3rem 0 0;
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.pr-msg-title {
+  font-weight: 700;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.pr-msg-error {
+  background: color-mix(in srgb, var(--sys) 12%, transparent);
+  color: var(--sys);
+}
+.pr-msg-vet {
+  background: color-mix(in srgb, var(--spin) 14%, transparent);
+  color: var(--spin);
+}
+.pr-msg-fail {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.pr-note,
+.pr-empty {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.pr-note code {
+  font-family: var(--font-mono);
+  background: var(--surface-2);
+  border-radius: 3px;
+  padding: 0 0.25rem;
 }

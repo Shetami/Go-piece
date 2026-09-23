@@ -6,6 +6,7 @@ import { SITE } from '../data/site.ts'
 
 const lectures = (await getCollection('lectures', (e) => !e.data.draft)).sort((a, b) => a.data.order - b.data.order)
 const termCount = (await getCollection('glossary')).length
+const taskCount = (await getCollection('tasks', (t) => !t.data.draft)).length
 ---
 
 <BaseLayout title={SITE.name}>
@@ -20,8 +21,19 @@ const termCount = (await getCollection('glossary')).length
     <div class="flex flex-wrap gap-3">
       <a href="/lectures/go-runtime/scheduler/" class="btn btn-primary !px-4 !py-2">Начать с планировщика Go</a>
       <a href="/lab/" class="btn !px-4 !py-2">Открыть стенды</a>
+      <a href="/practice/" class="btn !px-4 !py-2">Практика · {taskCount}</a>
       <a href="/glossary/" class="btn !px-4 !py-2">Справочник · {termCount}</a>
     </div>
+  </section>
+
+  <section class="mb-14 rounded-xl border border-line bg-surface p-6 max-w-3xl">
+    <h2 class="text-2xl font-bold mb-2">Практика</h2>
+    <p class="text-muted mb-4">
+      Задачи по Go в том виде, в каком их задают на собеседованиях: что выведет программа, найди баг, почини,
+      реализуй. Код пишется прямо на странице, а компилирует и запускает его настоящий Go — с настоящими
+      сообщениями компилятора, <code class="font-mono text-sm">go vet</code> и дедлоками.
+    </p>
+    <a href="/practice/" class="text-accent font-medium">Все задачи →</a>
   </section>
 
   {

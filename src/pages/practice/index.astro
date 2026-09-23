@@ -1,0 +1,130 @@
+---
+import { getCollection } from 'astro:content'
+import BaseLayout from '../../layouts/BaseLayout.astro'
+import { TASK_KINDS, TASK_TOPICS, taskLevel } from '../../data/practice.ts'
+
+const tasks = (await getCollection('tasks', (t) => !t.data.draft)).sort((a, b) => {
+  if (a.data.topic !== b.data.topic) return a.data.topic.localeCompare(b.data.topic)
+  return a.data.order - b.data.order
+})
+
+// В фильтрах показываем только то, по чему есть задачи: пустая кнопка «Мапы»
+// обещает несуществующее и раздражает больше, чем её отсутствие.
+const usedKinds = new Set(tasks.map((t) => t.data.kind))
+const usedTopics = new Set(tasks.map((t) => t.data.topic))
+const kinds = TASK_KINDS.filter((k) => usedKinds.has(k.id))
+const topics = TASK_TOPICS.filter((t) => usedTopics.has(t.id))
+---
+
+<BaseLayout
+  title="Практика"
+  description="Задачи по Go в том виде, в каком их задают на собеседованиях: что выведет программа, найди баг, почини, реализуй. Код пишется в редакторе и исполняется настоящим компилятором."
+>
+  <h1 class="text-3xl font-bold tracking-tight mb-2">Практика</h1>
+  <p class="text-muted mb-8 max-w-2xl">
+    Задачи разложены по двум осям: <b class="text-ink font-medium">как спрашивают</b> и <b class="text-ink font-medium"
+      >о чём спрашивают</b
+    >. Первая ось важнее, чем кажется: одну и ту же тему спрашивают четырьмя разными способами, и готовиться к ним надо
+    по-разному. Код вы пишете в редакторе на странице, а компилирует и запускает его настоящий Go.
+  </p>
+
+  <div class="mb-8 grid gap-4 max-w-4xl" data-pagefind-ignore>
+    {
+      kinds.map((k) => (
+        <div class="rounded-lg border border-line bg-surface px-4 py-3">
+          <span class="font-semibold text-ink">{k.title}</span>
+          <span class="text-muted text-sm"> — {k.blurb}</span>
+        </div>
+      ))
+    }
+  </div>
+
+  <div class="flex flex-wrap gap-6 mb-6 text-sm" data-pagefind-ignore>
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="text-muted">Формат:</span>
+      <button type="button" class="pr-filter is-on" data-filter="kind" data-value="">все</button>
+      {kinds.map((k) => <button type="button" class="pr-filter" data-filter="kind" data-value={k.id}>{k.title}</button>)}
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="text-muted">Тема:</span>
+      <button type="button" class="pr-filter is-on" data-filter="topic" data-value="">все</button>
+      {topics.map((t) => <button type="button" class="pr-filter" data-filter="topic" data-value={t.id}>{t.title}</button>)}
+    </div>
+  </div>
+
+  <ul class="grid gap-4 max-w-4xl" id="pr-list">
+    {
+      tasks.map((task) => (
+        <li data-kind={task.data.kind} data-topic={task.data.topic}>
+          <a href={`/practice/${task.id}/`} class="block rounded-xl border border-line bg-surface p-5 hover:border-muted">
+            <span class="flex flex-wrap items-center gap-2 mb-2">
+              <span class="pr-badge pr-badge-kind">{TASK_KINDS.find((k) => k.id === task.data.kind)?.title}</span>
+              <span class="pr-badge">{TASK_TOPICS.find((t) => t.id === task.data.topic)?.title}</span>
+              <span class="pr-badge">{taskLevel(task.data.level).title}</span>
+              <span class="pr-solved-dot" data-task={task.id} hidden>
+                решено
+              </span>
+            </span>
+            <span class="block text-lg font-semibold text-ink mb-1">{task.data.title}</span>
+            <span class="block text-muted text-sm">{task.data.description}</span>
+          </a>
+        </li>
+      ))
+    }
+  </ul>
+
+  <p class="text-muted mt-10 text-sm max-w-2xl" id="pr-empty" hidden>
+    По такому сочетанию фильтров задач пока нет. Задачи добавляются — пока в каждом формате их по одной.
+  </p>
+</BaseLayout>
+
+<script>
+  /*
+   * Фильтры и отметки «решено». Оба состояния живут в браузере и нарочно
+   * не ломают страницу без JS: без скриптов виден полный список, а это
+   * ровно то, что нужно и читателю, и поисковому индексу.
+   */
+  const list = document.getElementById('pr-list')
+  const empty = document.getElementById('pr-empty')
+  const picked: Record<string, string> = { kind: '', topic: '' }
+
+  function apply() {
+    let shown = 0
+    for (const li of list?.querySelectorAll<HTMLElement>('li') ?? []) {
+      const ok =
+        (picked.kind === '' || li.dataset.kind === picked.kind) &&
+        (picked.topic === '' || li.dataset.topic === picked.topic)
+      li.hidden = !ok
+      if (ok) shown++
+    }
+    if (empty) empty.hidden = shown > 0
+  }
+
+  for (const btn of document.querySelectorAll<HTMLButtonElement>('.pr-filter')) {
+    btn.addEventListener('click', () => {
+      const group = btn.dataset.filter ?? ''
+      picked[group] = btn.dataset.value ?? ''
+      for (const other of document.querySelectorAll<HTMLElement>(`.pr-filter[data-filter="${group}"]`)) {
+        other.classList.toggle('is-on', other === btn)
+      }
+      apply()
+      const url = new URL(location.href)
+      picked[group] ? url.searchParams.set(group, picked[group]) : url.searchParams.delete(group)
+      history.replaceState(null, '', url)
+    })
+  }
+
+  // Ссылка с фильтром (её ставит страница задачи) должна открываться уже отфильтрованной.
+  const params = new URLSearchParams(location.search)
+  for (const group of ['kind', 'topic']) {
+    const value = params.get(group)
+    if (!value) continue
+    document.querySelector<HTMLButtonElement>(`.pr-filter[data-filter="${group}"][data-value="${value}"]`)?.click()
+  }
+
+  for (const dot of document.querySelectorAll<HTMLElement>('.pr-solved-dot')) {
+    try {
+      if (localStorage.getItem(`go-piece:practice:${dot.dataset.task}:solved`) === '1') dot.hidden = false
+    } catch {}
+  }
+</script>

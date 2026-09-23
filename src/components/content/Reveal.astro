@@ -1,0 +1,23 @@
+---
+/**
+ * Разбор задачи под спойлером.
+ *
+ * Всё, что в условии задачи идёт до `<Reveal>`, видно сразу; сам разбор
+ * открывается кликом. Это `<details>`, а не React-остров: разбор должен
+ * попадать в поиск Pagefind и открываться печатью, даже если скрипты не
+ * доехали. Открыть его насильно умеет страница задачи — когда решение
+ * засчитано, она распахивает спойлер сама.
+ */
+interface Props {
+  title?: string
+}
+
+const { title = 'Разбор' } = Astro.props
+---
+
+<details class="reveal">
+  <summary class="reveal-summary">{title}</summary>
+  <div class="reveal-body prose">
+    <slot />
+  </div>
+</details>
