@@ -1,0 +1,3 @@
+шаг 1
+шаг 2
+прервано: context deadline exceeded

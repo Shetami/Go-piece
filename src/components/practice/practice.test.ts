@@ -35,20 +35,26 @@ interface Task {
   id: string
   dir: string
   front: Record<string, string>
+  /** Те же поля, но как они записаны в файле — с кавычками, если они есть. */
+  raw: Record<string, string>
   body: string
   files: Set<string>
 }
 
 /** Разбор фронтматтера — ровно настолько, насколько он здесь нужен: плоские строки и списки. */
-function frontmatter(source: string): { front: Record<string, string>; body: string } {
+function frontmatter(source: string): { front: Record<string, string>; raw: Record<string, string>; body: string } {
   const m = source.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/)
   assert.ok(m?.[1] !== undefined && m[2] !== undefined, 'нет фронтматтера')
   const front: Record<string, string> = {}
+  const raw: Record<string, string> = {}
   for (const line of m[1].split('\n')) {
     const kv = line.match(/^([a-zA-Z]+):\s*(.*)$/)
-    if (kv?.[1]) front[kv[1]] = (kv[2] ?? '').trim().replace(/^["'](.*)["']$/, '$1')
+    if (!kv?.[1]) continue
+    const value = (kv[2] ?? '').trim()
+    raw[kv[1]] = value
+    front[kv[1]] = value.replace(/^["'](.*)["']$/, '$1')
   }
-  return { front, body: m[2] }
+  return { front, raw, body: m[2] }
 }
 
 function collect(): Task[] {
@@ -61,8 +67,8 @@ function collect(): Task[] {
       if (!statSync(dir).isDirectory()) continue
       const files = new Set(readdirSync(dir))
       assert.ok(files.has('index.mdx'), `${topic}/${slug}: нет index.mdx`)
-      const { front, body } = frontmatter(readFileSync(join(dir, 'index.mdx'), 'utf8'))
-      out.push({ id: `${topic}/${slug}`, dir, front, body, files })
+      const { front, raw, body } = frontmatter(readFileSync(join(dir, 'index.mdx'), 'utf8'))
+      out.push({ id: `${topic}/${slug}`, dir, front, raw, body, files })
     }
   }
   return out
@@ -72,6 +78,21 @@ const TASKS = collect()
 
 test('задачи вообще есть', () => {
   assert.ok(TASKS.length > 0, 'в src/content/tasks ни одной задачи')
+})
+
+test('фронтматтер не разваливает YAML', () => {
+  /*
+   * `title: Merge: собрать...` — незакавыченный скаляр с «: » внутри, и весь
+   * разбор фронтматтера падает. Ошибка вылезает только на сборке и сообщением
+   * про отступы, по которому не догадаешься, в чём дело. Ловим здесь.
+   */
+  for (const task of TASKS) {
+    for (const [key, value] of Object.entries(task.raw)) {
+      if (/^["'[]/.test(value)) continue
+      assert.ok(!value.includes(': '), `${task.id}: значение ${key} содержит «: » — возьмите его в кавычки`)
+      assert.ok(!/^[[{>|*&!%@`]/.test(value), `${task.id}: значение ${key} начинается со служебного символа YAML`)
+    }
+  }
 })
 
 test('у каждой задачи есть заготовка и эталон', () => {

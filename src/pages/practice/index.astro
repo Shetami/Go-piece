@@ -1,10 +1,20 @@
 ---
 import { getCollection } from 'astro:content'
 import BaseLayout from '../../layouts/BaseLayout.astro'
-import { TASK_KINDS, TASK_TOPICS, taskLevel } from '../../data/practice.ts'
+import { TASK_KINDS, TASK_LEVELS, TASK_TOPICS, taskLevel } from '../../data/practice.ts'
+
+/*
+ * Порядок: темы — как они перечислены в TASK_TOPICS (список составлен от
+ * простого к сложному, а не по алфавиту), внутри темы — от разминки к злым.
+ */
+const topicRank = new Map(TASK_TOPICS.map((t, i) => [t.id, i]))
+const levelRank = new Map(TASK_LEVELS.map((l, i) => [l.id, i]))
 
 const tasks = (await getCollection('tasks', (t) => !t.data.draft)).sort((a, b) => {
-  if (a.data.topic !== b.data.topic) return a.data.topic.localeCompare(b.data.topic)
+  const byTopic = (topicRank.get(a.data.topic) ?? 99) - (topicRank.get(b.data.topic) ?? 99)
+  if (byTopic !== 0) return byTopic
+  const byLevel = (levelRank.get(a.data.level) ?? 99) - (levelRank.get(b.data.level) ?? 99)
+  if (byLevel !== 0) return byLevel
   return a.data.order - b.data.order
 })
 
@@ -74,7 +84,7 @@ const topics = TASK_TOPICS.filter((t) => usedTopics.has(t.id))
   </ul>
 
   <p class="text-muted mt-10 text-sm max-w-2xl" id="pr-empty" hidden>
-    По такому сочетанию фильтров задач пока нет. Задачи добавляются — пока в каждом формате их по одной.
+    По такому сочетанию фильтров задач пока нет. Снимите один из фильтров или загляните позже — список пополняется.
   </p>
 </BaseLayout>
 
