@@ -1,0 +1,77 @@
+---
+/**
+ * Устройство кластера: управляющий слой и рабочие узлы. Все разговаривают только с API-сервером.
+ */
+const cp = [
+  { x: 40, t: 'kube-scheduler', s: 'выбирает узел поду' },
+  { x: 250, t: 'controller-manager', s: 'догоняет желаемое' },
+]
+const nodes = [40, 290, 540]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 400" role="img" aria-labelledby="k8a-t">
+      <title id="k8a-t">Управляющий слой — API-сервер, etcd, планировщик и контроллеры; на каждом узле — kubelet, kube-proxy и поды. Все связи идут через API-сервер</title>
+      <defs>
+        <marker id="k8a-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+
+      <rect x="20" y="16" width="720" height="150" rx="12" class="note"></rect>
+      <text x="36" y="38" class="t-muted">управляющий слой (control plane)</text>
+
+      {
+        cp.map((c) => (
+          <g>
+            <rect x={c.x} y="54" width="180" height="56" rx="8" class="box-2"></rect>
+            <text x={c.x + 90} y="78" text-anchor="middle" class="t-bold">{c.t}</text>
+            <text x={c.x + 90} y="96" text-anchor="middle" class="t-muted t-small">{c.s}</text>
+          </g>
+        ))
+      }
+      <rect x="470" y="54" width="130" height="90" rx="8" class="lead"></rect>
+      <text x="535" y="92" text-anchor="middle" class="t-bold">API-сервер</text>
+      <text x="535" y="110" text-anchor="middle" class="t-muted t-small">единственная дверь</text>
+
+      <rect x="630" y="64" width="96" height="70" rx="8" class="box"></rect>
+      <text x="678" y="94" text-anchor="middle" class="t-bold">etcd</text>
+      <text x="678" y="112" text-anchor="middle" class="t-muted t-small">всё состояние</text>
+      <path d="M600 99 H628" class="ln" marker-start="url(#k8a-a)" marker-end="url(#k8a-a)"></path>
+
+      <path d="M220 90 Q350 150 468 110" class="ln" marker-end="url(#k8a-a)"></path>
+      <path d="M430 82 H468" class="ln" marker-end="url(#k8a-a)"></path>
+      <text x="340" y="146" text-anchor="middle" class="t-muted t-small">watch и запись</text>
+
+      <text x="640" y="30" text-anchor="middle" class="t-small">kubectl, CI →</text>
+      <path d="M660 36 Q600 40 560 52" class="ln ln-dash" marker-end="url(#k8a-a)"></path>
+
+      {
+        nodes.map((x, i) => (
+          <g>
+            <rect x={x} y="220" width="190" height="160" rx="12" class="box"></rect>
+            <text x={x + 14} y="242" class="t-muted">узел {i + 1}</text>
+            <rect x={x + 14} y="252" width="162" height="30" rx="6" class="box-2"></rect>
+            <text x={x + 95} y="272" text-anchor="middle" class="t-small">kubelet + containerd</text>
+            <rect x={x + 14} y="288" width="162" height="26" rx="6" class="box-2"></rect>
+            <text x={x + 95} y="305" text-anchor="middle" class="t-small">kube-proxy · CNI</text>
+            <rect x={x + 14} y="324" width="48" height="42" rx="6" class="cell-on"></rect>
+            <text x={x + 38} y="349" text-anchor="middle" class="t-small">под</text>
+            <rect x={x + 71} y="324" width="48" height="42" rx="6" class="cell-on"></rect>
+            <text x={x + 95} y="349" text-anchor="middle" class="t-small">под</text>
+            <rect x={x + 128} y="324" width="48" height="42" rx="6" class={i === 2 ? 'cell-pending' : 'cell-on'}></rect>
+            <text x={x + 152} y="349" text-anchor="middle" class="t-small">{i === 2 ? '…' : 'под'}</text>
+            <path d={`M${x + 95} 218 L535 146`} class="ln ln-dash" marker-end="url(#k8a-a)"></path>
+          </g>
+        ))
+      }
+      <text x="380" y="196" text-anchor="middle" class="t-muted t-small">kubelet каждого узла смотрит, какие поды назначены ему, и отчитывается о статусе</text>
+    </svg>
+  </div>
+  <figcaption>
+    Кластер — это API-сервер с базой etcd и множество программ, которые читают и пишут объекты через него.
+    Никто, кроме API-сервера, не ходит в etcd, и никто не разговаривает друг с другом напрямую: планировщик
+    не «приказывает» kubelet-у, он записывает имя узла в под, а kubelet это видит.
+  </figcaption>
+</figure>

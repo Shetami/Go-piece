@@ -1,0 +1,41 @@
+---
+/**
+ * Планировщик: фильтрация узлов и оценка оставшихся. Всё считается по requests.
+ */
+const nodes = [
+  { n: 'node-1', free: '0,3 CPU · 6 Gi', why: 'мало CPU', ok: false },
+  { n: 'node-2', free: '2 CPU · 1 Gi', why: 'мало памяти', ok: false },
+  { n: 'node-3', free: '4 CPU · 8 Gi', why: 'taint gpu', ok: false },
+  { n: 'node-4', free: '1,5 CPU · 4 Gi', why: 'балл 62', ok: true },
+  { n: 'node-5', free: '3 CPU · 10 Gi', why: 'балл 81 ✓', ok: true },
+]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 270" role="img" aria-labelledby="k8f-t">
+      <title id="k8f-t">Под с requests 1 CPU и 2 Gi: три узла отсеяны фильтрами, из двух оставшихся выбран узел с лучшим баллом</title>
+      <rect x="20" y="100" width="150" height="70" rx="8" class="lead"></rect>
+      <text x="95" y="126" text-anchor="middle" class="t-bold">новый под</text>
+      <text x="95" y="146" text-anchor="middle" class="t-small">requests: 1 CPU, 2 Gi</text>
+      <text x="340" y="24" text-anchor="middle" class="t-muted t-small">свободно по requests</text>
+      <text x="590" y="24" text-anchor="middle" class="t-muted t-small">фильтр → оценка</text>
+      {
+        nodes.map((nd, i) => (
+          <g>
+            <path d={`M170 135 L250 ${52 + i * 46}`} class="ln-thin"></path>
+            <rect x="250" y={34 + i * 46} width="180" height="36" rx="6" class={nd.ok ? 'box-2' : 'cell-old'}></rect>
+            <text x="262" y={56 + i * 46} class="t-bold t-small">{nd.n}</text>
+            <text x="420" y={56 + i * 46} text-anchor="end" class="t-small">{nd.free}</text>
+            <rect x="500" y={34 + i * 46} width="180" height="36" rx="6" class={nd.ok ? (i === 4 ? 'cell-on' : 'box') : 'risk'}></rect>
+            <text x="590" y={56 + i * 46} text-anchor="middle" class={nd.ok ? 't-small' : 't-bad t-small'}>{nd.ok ? nd.why : `отсеян: ${nd.why}`}</text>
+          </g>
+        ))
+      }
+    </svg>
+  </div>
+  <figcaption>
+    Сначала фильтры: хватает ли свободных requests, пускают ли taint-ы, выполнены ли правила размещения.
+    Потом оценка оставшихся. Реальная загрузка узлов в этом расчёте не участвует — только то, что поды заказали.
+  </figcaption>
+</figure>

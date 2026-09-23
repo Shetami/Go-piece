@@ -1,0 +1,24 @@
+---
+title: PodDisruptionBudget
+short: 'Сколько подов приложения можно одновременно выселить при плановых работах: например, «готовыми должны остаться хотя бы 2». Защищает от обновления узлов, но не от их падения.'
+aliases: [PDB, PodDisruptionBudget, minAvailable, maxUnavailable, disruption budget]
+category: настройка
+related: [k8s-eviction, rolling-update, taints-tolerations]
+---
+
+```yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: api}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels: {app: api}
+```
+
+Бюджет учитывается только добровольными прерываниями через Eviction API: `kubectl drain`, автомасштабирование кластера, обновление узлов. Упавший узел, OOMKilled и удаление пода руками бюджет не спрашивают. И выкатка Deployment тоже — её регулирует `maxUnavailable` в стратегии.
+
+Две ловушки:
+
+- **`minAvailable` равен числу реплик** (или `maxUnavailable: 0`) — выселить нельзя ни один под, и `drain` зависает навсегда. Обновление кластера стоит.
+- **Одна реплика и PDB** — то же самое. Для одиночного пода бюджет бессмыслен: либо реплик больше, либо смириться с простоем.

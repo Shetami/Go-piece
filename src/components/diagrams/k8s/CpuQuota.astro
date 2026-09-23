@@ -1,0 +1,37 @@
+---
+/**
+ * Троттлинг: лимит 1 CPU = 100 мс времени на период 100 мс. Восемь потоков съедают квоту за 12,5 мс.
+ */
+const threads = 8
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 290" role="img" aria-labelledby="k8q-t">
+      <title id="k8q-t">При лимите в одно ядро восемь потоков расходуют квоту за 12,5 мс, и остаток периода контейнер стоит</title>
+      <text x="20" y="28" class="t-bold">лимит 1 CPU · период 100 мс · GOMAXPROCS = 8</text>
+      {
+        Array.from({ length: threads }, (_, i) => (
+          <g>
+            <text x="20" y={62 + i * 22} class="t-muted t-small t-mono">поток {i + 1}</text>
+            <rect x="90" y={50 + i * 22} width="70" height="16" rx="3" class="cell-on"></rect>
+            <rect x="160" y={50 + i * 22} width="490" height="16" rx="3" class="risk"></rect>
+            <rect x="650" y={50 + i * 22} width="70" height="16" rx="3" class="cell-on"></rect>
+          </g>
+        ))
+      }
+      <path d="M90 234 H720" class="ln"></path>
+      <path d="M90 228 V240 M160 228 V240 M650 228 V240" class="ln"></path>
+      <text x="90" y="256" class="t-small">0</text>
+      <text x="160" y="256" class="t-small">12,5 мс — квота кончилась</text>
+      <text x="650" y="256" class="t-small">100 мс</text>
+      <text x="405" y="150" text-anchor="middle" class="t-bad">троттлинг: 87,5 мс ни один поток не работает</text>
+      <text x="20" y="280" class="t-muted t-small">Средняя загрузка — одно ядро, «в пределах лимита». А запрос, попавший в красную зону, ждёт почти 90 мс.</text>
+    </svg>
+  </div>
+  <figcaption>
+    Лимит CPU — это не «одно ядро», а «100 мс процессорного времени на каждые 100 мс», по всем потокам вместе.
+    Параллельная работа — например, разметка сборщика мусора — выбирает квоту за первые миллисекунды
+    периода, и дальше контейнер стоит.
+  </figcaption>
+</figure>

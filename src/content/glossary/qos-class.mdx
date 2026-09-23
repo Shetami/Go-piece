@@ -1,0 +1,15 @@
+---
+title: Класс QoS пода
+short: 'Kubernetes делит поды на Guaranteed, Burstable и BestEffort по тому, как заданы requests и limits. Когда на узле кончается память, первыми убивают BestEffort, последними — Guaranteed.'
+aliases: [QoS, QoS class, Guaranteed, Burstable, BestEffort, qosClass]
+category: состояние
+related: [resource-requests-limits, k8s-eviction, oom-killed]
+---
+
+- **Guaranteed** — у каждого контейнера заданы requests и limits по CPU и памяти, и они равны. Под получает ровно то, что заказал.
+- **Burstable** — requests заданы хотя бы у одного контейнера, но условия Guaranteed не выполнены. Может брать больше заказанного, если на узле свободно.
+- **BestEffort** — ни requests, ни limits. Живёт на остатках и уходит первым.
+
+Класс влияет на порядок [вытеснения](/glossary/k8s-eviction/) при нехватке памяти на узле и на то, кого первым выберет OOM-killer ядра. Посмотреть: `kubectl get pod <под> -o jsonpath='{.status.qosClass}'`.
+
+Guaranteed дают критичным сервисам и базам. Для обычных сервисов достаточно Burstable с памятью requests = limits.

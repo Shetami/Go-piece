@@ -1,0 +1,15 @@
+---
+title: Deployment
+short: 'Контроллер, который держит нужное число одинаковых подов и умеет плавно заменять их новой версией. Основной способ запускать сервисы без состояния.'
+aliases: [deployment, деплоймент, kubectl rollout, rollout, откат, rollback]
+category: сущность
+related: [k8s-replicaset, rolling-update, k8s-pod, k8s-controller]
+---
+
+Deployment сам подами не управляет. Он управляет [ReplicaSet](/glossary/k8s-replicaset/)-ами: на каждую версию шаблона пода — свой ReplicaSet. При выкатке новый ReplicaSet растёт, старый уменьшается, и так до конца.
+
+Выкатку запускает любое изменение `spec.template` — образа, переменных окружения, ресурсов. Изменение `replicas` выкатку не запускает: это просто масштабирование.
+
+Старые ReplicaSet-ы остаются с нулём подов (по умолчанию десять штук, `revisionHistoryLimit`), поэтому откат мгновенный: `kubectl rollout undo deployment/api` снова растит старый ReplicaSet.
+
+Полезные команды: `kubectl rollout status` ждёт окончания выкатки, `kubectl rollout history` показывает ревизии, `kubectl rollout restart` пересоздаёт поды без изменения образа.

@@ -1,0 +1,18 @@
+---
+title: Service
+short: 'Постоянный адрес и DNS-имя для набора подов, выбранных по меткам. Поды приходят и уходят, адрес Service остаётся. Трафик раздаётся только готовым подам.'
+aliases: [service, svc, сервис, ClusterIP, NodePort, LoadBalancer, ExternalName, Service DNS, cluster.local]
+category: сущность
+related: [kube-proxy, endpoint-slice, headless-service, k8s-ingress, readiness-probe]
+---
+
+Service выбирает поды по `selector` и получает виртуальный IP (ClusterIP) и DNS-имя `<имя>.<namespace>.svc.cluster.local`. Из того же namespace достаточно короткого `http://api:8080`.
+
+Типы:
+
+- **ClusterIP** — по умолчанию, адрес доступен только внутри кластера;
+- **NodePort** — вдобавок открывает порт 30000–32767 на каждом узле;
+- **LoadBalancer** — вдобавок просит облако создать внешний балансировщик;
+- **ExternalName** — DNS-псевдоним на внешнее имя, без проксирования.
+
+Какие поды сейчас за Service, видно в `kubectl get endpointslices -l kubernetes.io/service-name=api`. Под попадает туда, только когда его [readiness-проба](/glossary/readiness-probe/) проходит. Пустой список — первое, что проверяют, когда «сервис не отвечает»: либо селектор не совпадает с метками подов, либо ни один под не готов.

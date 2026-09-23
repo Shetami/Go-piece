@@ -1,0 +1,52 @@
+---
+/**
+ * Остановка пода: две параллельные дорожки — сигнал процессу и удаление из балансировки.
+ */
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 270" role="img" aria-labelledby="k8d-t">
+      <title id="k8d-t">При удалении пода сигнал процессу и удаление из балансировки идут параллельно; пауза в preStop закрывает щель между ними</title>
+      <defs>
+        <marker id="k8d-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+      <path d="M130 240 H740" class="ln" marker-end="url(#k8d-a)"></path>
+      <text x="130" y="258" class="t-muted t-small">0 с — под удалён</text>
+      <text x="400" y="258" class="t-muted t-small">~5 с</text>
+      <text x="690" y="258" class="t-muted t-small">30 с</text>
+      <path d="M130 30 V240" class="ln-life"></path>
+      <path d="M410 30 V240" class="ln-life"></path>
+      <path d="M700 30 V240" class="ln-life"></path>
+
+      <text x="20" y="62" class="t-bold t-small">kubelet</text>
+      <rect x="130" y="44" width="200" height="30" rx="6" class="box-2"></rect>
+      <text x="230" y="63" text-anchor="middle" class="t-small">preStop: sleep 5</text>
+      <rect x="330" y="44" width="200" height="30" rx="6" class="lead"></rect>
+      <text x="430" y="63" text-anchor="middle" class="t-small">SIGTERM → Shutdown()</text>
+      <rect x="530" y="44" width="170" height="30" rx="6" class="note"></rect>
+      <text x="615" y="63" text-anchor="middle" class="t-muted t-small">запас</text>
+      <rect x="700" y="44" width="40" height="30" rx="6" class="risk"></rect>
+      <text x="720" y="63" text-anchor="middle" class="t-small">KILL</text>
+
+      <text x="20" y="122" class="t-bold t-small">балансировка</text>
+      <rect x="130" y="104" width="120" height="30" rx="6" class="risk"></rect>
+      <text x="190" y="123" text-anchor="middle" class="t-small">трафик ещё идёт</text>
+      <rect x="250" y="104" width="450" height="30" rx="6" class="note"></rect>
+      <text x="475" y="123" text-anchor="middle" class="t-muted t-small">под убран из EndpointSlice, kube-proxy и ingress обновили правила</text>
+
+      <text x="20" y="182" class="t-bold t-small">без паузы</text>
+      <rect x="130" y="164" width="120" height="30" rx="6" class="risk"></rect>
+      <text x="190" y="178" text-anchor="middle" class="t-bad t-small">connection</text>
+      <text x="190" y="190" text-anchor="middle" class="t-bad t-small">refused</text>
+      <text x="262" y="184" class="t-muted t-small">процесс уже закрыл порт, а запросы ещё приходят</text>
+    </svg>
+  </div>
+  <figcaption>
+    Удаление пода запускает сразу две вещи: остановку процесса и его удаление из балансировки. Вторая
+    доходит до всех узлов не мгновенно. Пауза в preStop даёт ей время, а Shutdown() доделывает начатые
+    запросы. Всё вместе должно уложиться в terminationGracePeriodSeconds, иначе придёт SIGKILL.
+  </figcaption>
+</figure>

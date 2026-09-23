@@ -1,0 +1,55 @@
+---
+/**
+ * Путь запроса к Service: DNS → ClusterIP → правила ядра → под. Выбор пода — один раз на соединение.
+ */
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 290" role="img" aria-labelledby="k8s-t">
+      <title id="k8s-t">Клиент разрешает имя Service в ClusterIP, ядро узла подменяет адрес на IP одного из готовых подов</title>
+      <defs>
+        <marker id="k8s-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+      <rect x="20" y="100" width="130" height="70" rx="8" class="box-2"></rect>
+      <text x="85" y="128" text-anchor="middle" class="t-bold">под-клиент</text>
+      <text x="85" y="148" text-anchor="middle" class="t-mono t-small">GET http://api</text>
+
+      <rect x="40" y="20" width="200" height="50" rx="8" class="box"></rect>
+      <text x="140" y="40" text-anchor="middle" class="t-bold t-small">CoreDNS</text>
+      <text x="140" y="58" text-anchor="middle" class="t-mono t-small">api → 10.96.14.2</text>
+      <path d="M85 98 V72" class="ln" marker-start="url(#k8s-a)" marker-end="url(#k8s-a)"></path>
+
+      <rect x="200" y="100" width="210" height="70" rx="8" class="lead"></rect>
+      <text x="305" y="124" text-anchor="middle" class="t-bold">ядро узла клиента</text>
+      <text x="305" y="142" text-anchor="middle" class="t-small">10.96.14.2:80 → один из подов</text>
+      <text x="305" y="158" text-anchor="middle" class="t-muted t-small">правила от kube-proxy, DNAT</text>
+      <path d="M150 135 H198" class="ln" marker-end="url(#k8s-a)"></path>
+
+      <rect x="290" y="20" width="200" height="50" rx="8" class="box"></rect>
+      <text x="390" y="40" text-anchor="middle" class="t-bold t-small">EndpointSlice api</text>
+      <text x="390" y="58" text-anchor="middle" class="t-small">только ready-поды</text>
+      <path d="M340 72 V98" class="ln ln-dash" marker-end="url(#k8s-a)"></path>
+
+      <rect x="560" y="30" width="170" height="44" rx="8" class="cell-on"></rect>
+      <text x="645" y="57" text-anchor="middle" class="t-small">под 10.244.1.17 ready</text>
+      <rect x="560" y="112" width="170" height="44" rx="8" class="cell-on"></rect>
+      <text x="645" y="139" text-anchor="middle" class="t-small">под 10.244.2.5 ready</text>
+      <rect x="560" y="194" width="170" height="44" rx="8" class="cell-pending"></rect>
+      <text x="645" y="216" text-anchor="middle" class="t-small">под 10.244.3.9</text>
+      <text x="645" y="230" text-anchor="middle" class="t-muted t-small">не ready — трафика нет</text>
+
+      <path d="M410 125 Q480 60 556 52" class="ln" marker-end="url(#k8s-a)"></path>
+      <path d="M410 140 H556" class="ln" marker-end="url(#k8s-a)"></path>
+      <text x="484" y="164" text-anchor="middle" class="t-muted t-small">выбор — на соединение</text>
+
+      <text x="20" y="274" class="t-muted t-small">ClusterIP — не адрес машины, а ключ для правил ядра. Прокси посередине нет: пакет идёт прямо с узла клиента в под.</text>
+    </svg>
+  </div>
+  <figcaption>
+    Имя Service разрешается в виртуальный ClusterIP, а ядро узла подменяет его на адрес одного из готовых
+    подов. Решение принимается при открытии TCP-соединения — все запросы внутри него пойдут в тот же под.
+  </figcaption>
+</figure>

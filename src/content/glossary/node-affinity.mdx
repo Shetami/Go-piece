@@ -1,0 +1,26 @@
+---
+title: Правила размещения подов
+short: 'Affinity притягивает под к узлам или к другим подам, anti-affinity отталкивает, topologySpreadConstraints распределяет реплики по зонам и узлам. Бывают обязательные и желательные.'
+aliases: [affinity, nodeAffinity, podAffinity, podAntiAffinity, nodeSelector, topologySpreadConstraints, topology spread, зоны доступности]
+category: настройка
+related: [taints-tolerations, kube-scheduler, pod-disruption-budget]
+---
+
+- `nodeSelector` / **nodeAffinity** — на какие узлы можно: `disktype=ssd`, конкретная зона, архитектура `arm64`.
+- **podAffinity** — рядом с какими подами: кэш поближе к приложению.
+- **podAntiAffinity** — подальше от каких подов: две реплики базы — не на одном узле.
+- **topologySpreadConstraints** — равномерно по доменам: реплики поровну по зонам, перекос не больше одной.
+
+`requiredDuringScheduling…` — обязательное правило: не выполняется — под `Pending`. `preferredDuringScheduling…` — пожелание с весом.
+
+Для обычного сервиса полезен один рецепт — разложить реплики по зонам и узлам:
+
+```yaml
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector: {matchLabels: {app: api}}
+```
+
+Без этого планировщик вполне может поставить все три реплики в одну зону, и падение зоны положит сервис целиком.

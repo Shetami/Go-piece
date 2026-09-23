@@ -1,0 +1,54 @@
+---
+/**
+ * Что происходит после kubectl apply: цепочка контроллеров, каждый из которых
+ * видит результат предыдущего через watch и дописывает свою часть.
+ */
+const steps = [
+  { t: 'kubectl apply', s: 'replicas: 3', who: 'вы' },
+  { t: 'Deployment', s: 'создаёт ReplicaSet', who: 'контроллер' },
+  { t: 'ReplicaSet', s: '3 пода без узла', who: 'контроллер' },
+  { t: 'планировщик', s: 'пишет nodeName', who: 'kube-scheduler' },
+  { t: 'kubelet', s: 'запускает поды', who: 'на узле' },
+  { t: 'EndpointSlice', s: 'готовые поды', who: 'контроллер' },
+]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 250" role="img" aria-labelledby="k8c-t">
+      <title id="k8c-t">После kubectl apply шесть участников по очереди видят изменения через API-сервер и делают свой шаг</title>
+      <defs>
+        <marker id="k8c-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+      <rect x="20" y="112" width="720" height="30" rx="8" class="lead"></rect>
+      <text x="380" y="132" text-anchor="middle" class="t-bold">API-сервер и etcd: объекты и их изменения</text>
+      {
+        steps.map((st, i) => {
+          const x = 24 + i * 122
+          const top = i % 2 === 0
+          const y = top ? 20 : 170
+          return (
+            <g>
+              <rect x={x} y={y} width="112" height="66" rx="8" class={i === 0 ? 'box-2' : 'box'}></rect>
+              <text x={x + 56} y={y + 18} text-anchor="middle" class="t-muted t-small">{i + 1} · {st.who}</text>
+              <text x={x + 56} y={y + 38} text-anchor="middle" class="t-bold t-small">{st.t}</text>
+              <text x={x + 56} y={y + 55} text-anchor="middle" class="t-small">{st.s}</text>
+              {top ? (
+                <path d={`M${x + 56} 86 V108`} class="ln" marker-end="url(#k8c-a)"></path>
+              ) : (
+                <path d={`M${x + 56} 146 V166`} class="ln" marker-start="url(#k8c-a)" marker-end="url(#k8c-a)"></path>
+              )}
+            </g>
+          )
+        })
+      }
+    </svg>
+  </div>
+  <figcaption>
+    Никто не вызывает никого. Каждый участник подписан на свои объекты, видит, что мир отличается от желаемого,
+    и записывает в API следующий кусок. Сломайся любой шаг — предыдущие останутся на месте, а следующий
+    доделает работу, когда поднимется.
+  </figcaption>
+</figure>

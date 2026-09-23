@@ -1,0 +1,16 @@
+---
+title: Headless Service
+short: 'Service без виртуального IP (clusterIP: None). DNS отдаёт адреса всех готовых подов сразу, и клиент выбирает сам. Нужен для StatefulSet и для балансировки gRPC на клиенте.'
+aliases: [headless service, clusterIP None, безголовый сервис]
+category: сущность
+related: [k8s-service, k8s-statefulset, load-balancer]
+---
+
+У обычного Service DNS-имя разрешается в один ClusterIP, и соединение раздаёт ядро. У headless DNS возвращает A-записи всех готовых подов.
+
+Два главных применения:
+
+- **[StatefulSet](/glossary/k8s-statefulset/).** Каждый под получает своё имя `db-0.db.default.svc.cluster.local`, и к конкретной реплике можно обратиться напрямую — например, к ведущему.
+- **gRPC.** Клиент gRPC в Go с резолвером `dns:///api-headless:9090` и политикой `round_robin` откроет соединение к каждому поду и будет раздавать запросы сам. Через обычный ClusterIP все запросы ушли бы по одному соединению в один под.
+
+Нюанс: клиент должен периодически перечитывать DNS, иначе не узнает о новых подах.

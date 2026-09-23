@@ -1,0 +1,19 @@
+---
+title: kubelet
+short: 'Агент на каждом узле. Видит поды, назначенные на его узел, запускает их контейнеры через среду выполнения, выполняет пробы и отчитывается о состоянии в API-сервер.'
+aliases: [kubelet, кублет, containerd, CRI, container runtime, среда выполнения контейнеров]
+category: сущность
+related: [k8s-pod, kube-apiserver, readiness-probe, liveness-probe, k8s-eviction]
+---
+
+kubelet сам контейнеры не запускает: он говорит со средой выполнения (обычно containerd) по интерфейсу CRI. Та скачивает образ, создаёт пространства имён и cgroups и запускает процесс.
+
+На kubelet лежат:
+
+- запуск и перезапуск контейнеров по `restartPolicy`;
+- [пробы](/glossary/readiness-probe/): readiness, liveness и startup выполняет именно kubelet, а не балансировщик;
+- монтирование томов, секретов и ConfigMap-ов;
+- статус пода и узла в API-сервере; перестал отчитываться — через ~40 секунд узел станет `NotReady`;
+- [вытеснение](/glossary/k8s-eviction/) подов, когда на узле кончается память или диск.
+
+Сеть пода настраивает CNI-плагин (Calico, Cilium, Flannel), который kubelet вызывает при создании пода.

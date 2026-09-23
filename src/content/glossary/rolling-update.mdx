@@ -1,0 +1,18 @@
+---
+title: Плавная выкатка
+short: 'Замена подов новой версией по частям: поднять несколько новых, дождаться готовности, убрать столько же старых. Скорость и запас задают maxSurge и maxUnavailable.'
+aliases: [rolling update, RollingUpdate, maxSurge, maxUnavailable, Recreate, progressDeadlineSeconds, minReadySeconds, canary, blue-green, канареечная выкатка]
+category: механизм
+related: [k8s-deployment, readiness-probe, graceful-shutdown, pod-disruption-budget]
+---
+
+`maxSurge` — сколько подов можно создать сверх `replicas`; `maxUnavailable` — сколько может не быть готовыми. По умолчанию оба 25%. При 4 репликах это «плюс один новый, минус один старый» за шаг.
+
+- `maxSurge: 1, maxUnavailable: 0` — ёмкость не падает ни на секунду, но нужен запас ресурсов на лишний под.
+- `maxSurge: 0, maxUnavailable: 1` — лишних ресурсов не нужно, ёмкость на время выкатки меньше.
+
+Вся конструкция опирается на [readiness-пробу](/glossary/readiness-probe/): «новый под готов» значит «проба прошла». Без пробы под считается готовым сразу после старта процесса, и выкатка сломанной версии пройдёт «успешно». `minReadySeconds` добавляет паузу: под должен продержаться готовым столько секунд.
+
+Если выкатка не продвигается `progressDeadlineSeconds` (по умолчанию 600), Deployment получает условие `Progressing=False`. Сам он при этом ничего не откатывает — это делает CI или человек через `kubectl rollout undo`.
+
+Стратегия `Recreate` сначала убивает все старые поды, потом создаёт новые — с простоем. Нужна, когда две версии не могут работать одновременно.

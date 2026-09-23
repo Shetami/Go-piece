@@ -1,0 +1,33 @@
+---
+title: Мягкая остановка пода
+short: 'Под получает SIGTERM, должен перестать брать новые запросы, доделать текущие и выйти. Через terminationGracePeriodSeconds (30 с) придёт SIGKILL. Трафик может приходить ещё секунды после SIGTERM.'
+aliases: [graceful shutdown, SIGTERM, SIGKILL, preStop, terminationGracePeriodSeconds, Terminating, exit code 143, http.Server.Shutdown]
+category: механизм
+related: [endpoint-slice, readiness-probe, rolling-update, request-deadline]
+---
+
+Удаление пода запускает два процесса **параллельно**:
+
+1. kubelet выполняет `preStop`-хук, затем шлёт процессу SIGTERM;
+2. контроллер убирает под из EndpointSlice, и kube-proxy, DNS и балансировщики постепенно перестают слать ему трафик.
+
+Второе занимает от долей секунды до нескольких секунд. Если приложение по SIGTERM сразу закрывает сокет, запросы, успевшие прийти в эту щель, получат `connection refused`. Лечится паузой перед остановкой: `preStop: {sleep: {seconds: 5}}` (с версии 1.30) или просто `time.Sleep` после сигнала.
+
+В Go последовательность обычно такая:
+
+```go
+ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+defer stop()
+go srv.ListenAndServe()
+
+<-ctx.Done()
+ready.Store(false)          // readiness начинает отвечать 503
+time.Sleep(5 * time.Second) // ждём, пока нас уберут из балансировки
+shutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+defer cancel()
+srv.Shutdown(shutdownCtx)   // перестать принимать, дождаться текущих запросов
+```
+
+Сумма паузы и времени на доделку должна укладываться в `terminationGracePeriodSeconds`. Не уложились — SIGKILL, код выхода 137.
+
+Если процесс в контейнере запущен через shell (`sh -c ./app`), сигнал получит shell, а не приложение. Используйте exec-форму `ENTRYPOINT ["/app"]`.

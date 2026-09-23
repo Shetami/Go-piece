@@ -1,0 +1,13 @@
+---
+title: DaemonSet
+short: 'Контроллер, который держит ровно один под на каждом подходящем узле. Появился узел — появился под. Так запускают агентов: сбор логов и метрик, сетевые плагины, драйверы дисков.'
+aliases: [DaemonSet, daemonset, ds, node agent, агент узла]
+category: сущность
+related: [taints-tolerations, kubelet, k8s-deployment]
+---
+
+Приложениям DaemonSet почти никогда не нужен: число реплик должно определяться нагрузкой, а не числом узлов. Его место — инфраструктура: fluent-bit, node-exporter, CNI-плагины (Cilium, Calico), CSI-драйверы, kube-proxy.
+
+Чтобы агент работал и на особых узлах (с taint-ами для GPU, для control plane), ему добавляют соответствующие tolerations. Ограничить набор узлов можно через `nodeSelector` или affinity.
+
+Поды DaemonSet обновляются плавно, по одному узлу за раз (`maxUnavailable: 1` по умолчанию).

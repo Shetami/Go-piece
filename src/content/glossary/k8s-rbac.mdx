@@ -1,0 +1,15 @@
+---
+title: RBAC
+short: 'Права в кластере: Role перечисляет разрешённые действия над ресурсами, RoleBinding выдаёт роль пользователю, группе или ServiceAccount. Всё, что не разрешено, запрещено.'
+aliases: [RBAC, Role, ClusterRole, RoleBinding, ClusterRoleBinding, ServiceAccount, service account, kubectl auth can-i, права доступа]
+category: механизм
+related: [kube-apiserver, k8s-namespace, k8s-secret]
+---
+
+Правило в роли — это глаголы (`get`, `list`, `watch`, `create`, `update`, `patch`, `delete`) над ресурсами (`pods`, `deployments`, `secrets`) в API-группах. `Role` и `RoleBinding` действуют в namespace, `ClusterRole` и `ClusterRoleBinding` — на весь кластер.
+
+Люди приходят в кластер через внешнюю аутентификацию (OIDC, облачный IAM). Программы внутри кластера — через **ServiceAccount**: kubelet монтирует в под короткоживущий токен, и `client-go` с `rest.InClusterConfig()` подхватывает его сам.
+
+Проверить права: `kubectl auth can-i list pods --as=system:serviceaccount:prod:api -n prod`.
+
+Приложению, которое не ходит в API Kubernetes, права не нужны вовсе. Хорошая практика — `automountServiceAccountToken: false`: украденный из взломанного пода токен ничего не даст.

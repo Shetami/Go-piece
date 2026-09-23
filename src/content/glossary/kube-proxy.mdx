@@ -1,0 +1,16 @@
+---
+title: kube-proxy
+short: 'Программирует на каждом узле правила ядра (iptables, IPVS или nftables), которые подменяют виртуальный адрес Service на адрес живого пода. Сам трафик через себя не пропускает.'
+aliases: [kube-proxy, iptables, IPVS, nftables, ClusterIP routing, conntrack]
+category: сущность
+related: [k8s-service, endpoint-slice, load-balancer]
+---
+
+Несмотря на название, kube-proxy не прокси. Он следит за [Service](/glossary/k8s-service/)-ами и [EndpointSlice](/glossary/endpoint-slice/)-ами и переписывает правила ядра. Пакет на ClusterIP ловит ядро и меняет адрес назначения на IP случайного пода (DNAT). Выбор делается один раз на TCP-соединение, дальше conntrack помнит, куда оно ушло.
+
+Отсюда два следствия:
+
+- **балансировка по соединениям, а не по запросам.** Долгое соединение HTTP/2 или gRPC все свои запросы отправит в один под;
+- **ClusterIP не пингуется.** За ним нет интерфейса, правила срабатывают только на порты Service.
+
+Некоторые CNI (Cilium) заменяют kube-proxy своей реализацией на eBPF — принцип тот же, быстрее на больших кластерах.

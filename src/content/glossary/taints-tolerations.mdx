@@ -1,0 +1,19 @@
+---
+title: Taints и tolerations
+short: 'Taint на узле отталкивает поды; toleration в поде разрешает ему игнорировать конкретный taint. Так держат узлы под особые задачи — GPU, базы, системные компоненты.'
+aliases: [taint, taints, toleration, tolerations, NoSchedule, NoExecute, PreferNoSchedule, not-ready taint]
+category: настройка
+related: [node-affinity, kube-scheduler, k8s-daemonset]
+---
+
+`kubectl taint nodes gpu-1 gpu=true:NoSchedule` — на этот узел не попадут поды без toleration `gpu=true`.
+
+Эффекты:
+
+- `NoSchedule` — новые поды без toleration не планируются, уже работающие остаются;
+- `PreferNoSchedule` — стараться не планировать;
+- `NoExecute` — ещё и выселить работающие поды без toleration (можно дать им отсрочку `tolerationSeconds`).
+
+Toleration только **разрешает** под на узле, но не отправляет его туда. Чтобы GPU-задачи ехали именно на GPU-узлы, нужны оба механизма: taint не пускает чужих, [affinity](/glossary/node-affinity/) тянет своих.
+
+Kubernetes сам ставит taint-ы на проблемные узлы: `node.kubernetes.io/not-ready` и `unreachable` с `NoExecute`. По умолчанию поды терпят их 300 секунд — поэтому с умершего узла поды уезжают только через пять минут.

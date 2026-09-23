@@ -1,0 +1,21 @@
+---
+title: Go в контейнере
+short: 'Рантайм Go должен знать лимиты контейнера: GOMAXPROCS — сколько потоков выполняют код, GOMEMLIMIT — к какой памяти подтягивать сборку мусора. С Go 1.25 GOMAXPROCS учитывает лимит CPU сам.'
+aliases: [GOMAXPROCS в контейнере, GOMEMLIMIT в контейнере, automaxprocs, automemlimit, cgroup-aware GOMAXPROCS]
+category: настройка
+related: [gomaxprocs, gomemlimit, cpu-throttling, oom-killed, resource-requests-limits]
+---
+
+**GOMAXPROCS.** До Go 1.25 рантайм брал число ядер узла. На узле с 64 ядрами и лимитом 2 CPU получалось 64 P, 64 потока исполняли код одновременно, квота кончалась за пару миллисекунд, и начинался [троттлинг](/glossary/cpu-throttling/). Лечили пакетом `go.uber.org/automaxprocs`. С Go 1.25 рантайм читает лимит из cgroup сам и следит за его изменением. Requests по CPU он не учитывает — только limit. Нет лимита — GOMAXPROCS равен числу ядер.
+
+**GOMEMLIMIT.** Рантайм о лимите памяти не знает до сих пор. Ставьте его вручную на 80–90% лимита контейнера — остаток уйдёт на стеки, не-кучевую память и запас:
+
+```yaml
+resources:
+  limits: {memory: 512Mi}
+env:
+  - name: GOMEMLIMIT
+    value: "460MiB"
+```
+
+Или вычисляйте при старте пакетом `github.com/KimMachineGun/automemlimit`. Мягкий лимит не спасает от утечки: если живых данных больше лимита, сборщик будет работать непрерывно, а потом придёт OOMKilled. Но от «куча выросла вдвое между сборками» спасает.

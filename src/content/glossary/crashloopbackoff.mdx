@@ -1,0 +1,23 @@
+---
+title: CrashLoopBackOff
+short: 'Контейнер раз за разом падает после старта, и kubelet перезапускает его со всё большей паузой: 10 с, 20 с, 40 с… до 5 минут. Причину ищут в логах предыдущего запуска.'
+aliases: [CrashLoopBackOff, crash loop, back-off restarting failed container, restartCount, exit code, код выхода]
+category: состояние
+related: [liveness-probe, oom-killed, k8s-pod]
+---
+
+Это не ошибка, а состояние ожидания между перезапусками. Сама ошибка — в том, почему контейнер завершился.
+
+Где смотреть:
+
+- `kubectl logs <под> --previous` — вывод упавшего запуска. Без `--previous` увидите текущий, который может быть пустым;
+- `kubectl describe pod <под>` — блок `Last State: Terminated` с `Reason` и `Exit Code`.
+
+Коды выхода:
+
+- **1, 2** — приложение вышло само: `log.Fatal`, паника (`panic` в Go даёт код 2), не нашло конфигурацию;
+- **137** — убито SIGKILL: чаще всего [OOMKilled](/glossary/oom-killed/), либо не уложилось в период мягкой остановки, либо убито liveness-пробой;
+- **143** — завершилось по SIGTERM;
+- **0** при `restartPolicy: Always` — процесс просто закончился, а Deployment ждёт, что он будет работать вечно.
+
+Если под падает из-за liveness, в событиях будет `Liveness probe failed` перед `Killing`.

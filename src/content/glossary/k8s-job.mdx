@@ -1,0 +1,17 @@
+---
+title: Job и CronJob
+short: 'Job запускает поды, пока нужное число из них не завершится успешно: миграция, пересчёт, выгрузка. CronJob создаёт Job-ы по расписанию.'
+aliases: [Job, job, CronJob, cronjob, backoffLimit, activeDeadlineSeconds, concurrencyPolicy, ttlSecondsAfterFinished, completions, parallelism]
+category: сущность
+related: [k8s-pod, k8s-init-container]
+---
+
+Под Job-а должен завершиться с кодом 0. Упал — Job создаёт новый, до `backoffLimit` раз (по умолчанию 6). `activeDeadlineSeconds` ограничивает общее время, `ttlSecondsAfterFinished` удаляет завершённый Job, чтобы они не копились.
+
+У CronJob важны:
+
+- `concurrencyPolicy` — что делать, если прошлый запуск ещё идёт: `Allow` (запустить параллельно), `Forbid` (пропустить), `Replace` (убить старый);
+- `startingDeadlineSeconds` — сколько можно опоздать, если контроллер не успел вовремя;
+- `timeZone` — расписание в нужном часовом поясе, иначе — время контроллера, обычно UTC.
+
+Kubernetes не гарантирует ровно один запуск: при сбоях Job может выполниться дважды или под может быть перезапущен посреди работы. Задача должна быть [идемпотентной](/glossary/idempotency-key/).

@@ -1,0 +1,21 @@
+---
+title: PersistentVolume и PVC
+short: 'PVC — заявка пода на диск: «нужно 20 Gi, режим ReadWriteOnce». PersistentVolume — сам диск. StorageClass описывает, как создать диск под заявку автоматически.'
+aliases: [PVC, PV, PersistentVolumeClaim, PersistentVolume, StorageClass, ReadWriteOnce, ReadWriteMany, CSI, emptyDir, hostPath, том, volume]
+category: сущность
+related: [k8s-statefulset, k8s-configmap]
+---
+
+Цепочка: под ссылается на PVC → PVC связан с PV → PV — это настоящий диск (облачный том, NFS, локальный SSD). При динамическом выделении PV создаёт CSI-драйвер по `StorageClass`, как только появился PVC.
+
+Режимы доступа:
+
+- **ReadWriteOnce** — диск подключён к одному узлу. Облачные блочные тома (EBS, Persistent Disk) почти всегда такие;
+- **ReadWriteMany** — много узлов одновременно. Нужна файловая система по сети: NFS, EFS, CephFS;
+- **ReadWriteOncePod** — строго один под.
+
+Облачный диск живёт в одной зоне доступности. Под с таким PVC можно поставить только в эту зону, и при падении зоны под не переедет. Для баз это решают репликацией на уровне приложения, а не диска.
+
+Временные тома: `emptyDir` живёт, пока жив под (кэши, временные файлы), `hostPath` — каталог узла (почти никогда не нужен приложениям и опасен).
+
+`reclaimPolicy: Delete` удаляет диск вместе с PVC. Для ценных данных ставят `Retain`.

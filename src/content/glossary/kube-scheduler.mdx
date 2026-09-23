@@ -1,0 +1,18 @@
+---
+title: Планировщик Kubernetes
+short: 'Выбирает узел для каждого нового пода: отбрасывает неподходящие узлы, оставшиеся оценивает и записывает выбор в под. Смотрит на requests, а не на реальную загрузку.'
+aliases: [kube-scheduler, scheduler, планировщик, nodeName, scheduling, Pending, Insufficient cpu]
+category: сущность
+related: [resource-requests-limits, taints-tolerations, node-affinity, k8s-pod]
+---
+
+Работа планировщика — два шага.
+
+1. **Фильтрация.** Отбросить узлы, куда под не влезет: не хватает свободных [requests](/glossary/resource-requests-limits/) по CPU или памяти, есть [taint](/glossary/taints-tolerations/) без подходящего toleration, не выполнено обязательное [правило размещения](/glossary/node-affinity/), не тот том.
+2. **Оценка.** Оставшиеся узлы получают баллы: где свободнее, где образ уже скачан, как разложатся реплики по зонам. Под достаётся узлу с лучшим баллом.
+
+Выбор — это просто поле `spec.nodeName` в поде. Дальше [kubelet](/glossary/kubelet/) нужного узла видит под и запускает его.
+
+Если подходящего узла нет, под остаётся `Pending`, а в `kubectl describe pod` появляется событие вроде `0/5 nodes are available: 3 Insufficient cpu, 2 node(s) had untolerated taint`.
+
+Важно: планировщик складывает requests, а не смотрит на реальное потребление. Узел, загруженный на 10%, может быть «полным», если поды заказали много и используют мало.

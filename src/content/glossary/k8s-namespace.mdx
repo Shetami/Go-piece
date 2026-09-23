@@ -1,0 +1,20 @@
+---
+title: Namespace
+short: 'Папка для объектов кластера: имена уникальны внутри namespace, права, квоты и сетевые политики задаются на него. Изоляции сети сам по себе не даёт.'
+aliases: [namespace, ns, пространство имён, ResourceQuota, LimitRange, kube-system, default]
+category: сущность
+related: [k8s-rbac, network-policy, resource-requests-limits]
+---
+
+Namespace — логическое деление: команда, окружение, приложение. На него навешивают:
+
+- **права** — RoleBinding выдаёт роль только внутри namespace;
+- **квоты** — `ResourceQuota` ограничивает суммарные requests, limits, число подов;
+- **значения по умолчанию** — `LimitRange` проставляет requests и limits контейнерам, где их забыли;
+- **сетевые политики** — но только если их написать.
+
+Без NetworkPolicy под из одного namespace свободно ходит в любой другой: `http://api.payments:8080`.
+
+Не все объекты живут в namespace: узлы, PersistentVolume, StorageClass, ClusterRole — объекты уровня кластера.
+
+Системные компоненты живут в `kube-system`. Не кладите туда своё.

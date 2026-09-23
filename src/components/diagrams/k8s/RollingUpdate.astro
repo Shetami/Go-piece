@@ -1,0 +1,49 @@
+---
+/**
+ * Плавная выкатка с replicas=4, maxSurge=1, maxUnavailable=0: по шагам.
+ * v1 — старые поды, v2 — новые; pending — новый под, ещё не прошедший readiness.
+ */
+type Cell = 'v1' | 'v2' | 'pending' | 'stop'
+const rows: { label: string; cells: Cell[] }[] = [
+  { label: 'старт', cells: ['v1', 'v1', 'v1', 'v1'] },
+  { label: 'шаг 1', cells: ['v1', 'v1', 'v1', 'v1', 'pending'] },
+  { label: 'шаг 2', cells: ['stop', 'v1', 'v1', 'v1', 'v2'] },
+  { label: 'шаг 3', cells: ['v1', 'v1', 'v1', 'v2', 'pending'] },
+  { label: '…', cells: [] },
+  { label: 'конец', cells: ['v2', 'v2', 'v2', 'v2'] },
+]
+const cls = { v1: 'box-2', v2: 'cell-on', pending: 'cell-pending', stop: 'risk' }
+const txt = { v1: 'v1', v2: 'v2', pending: 'v2 ?', stop: 'v1 ✕' }
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 300" role="img" aria-labelledby="k8r-t">
+      <title id="k8r-t">Выкатка с maxSurge 1 и maxUnavailable 0: сначала поднимается новый под, и только после его готовности убирается старый</title>
+      {
+        rows.map((r, i) => (
+          <g>
+            <text x="40" y={40 + i * 44} class="t-bold t-small">{r.label}</text>
+            {r.cells.map((c, j) => (
+              <g>
+                <rect x={110 + j * 76} y={22 + i * 44} width="66" height="28" rx="6" class={cls[c]}></rect>
+                <text x={143 + j * 76} y={40 + i * 44} text-anchor="middle" class="t-small">{txt[c]}</text>
+              </g>
+            ))}
+          </g>
+        ))
+      }
+      <text x="520" y="84" class="t-small">новый под создан,</text>
+      <text x="520" y="98" class="t-muted t-small">ждём readiness-пробу</text>
+      <text x="520" y="128" class="t-small">проба прошла → один старый</text>
+      <text x="520" y="142" class="t-muted t-small">получает SIGTERM</text>
+      <text x="520" y="172" class="t-small">и снова: плюс один, минус один</text>
+      <text x="520" y="260" class="t-ok t-small">готовых подов всегда ≥ 4</text>
+    </svg>
+  </div>
+  <figcaption>
+    replicas 4, maxSurge 1, maxUnavailable 0. Deployment никогда не опускается ниже четырёх готовых подов:
+    старый убирается только тогда, когда новый прошёл readiness-пробу. Если новая версия не проходит пробу,
+    выкатка просто остановится на шаге 1 — со старыми подами в строю.
+  </figcaption>
+</figure>

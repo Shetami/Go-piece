@@ -1,0 +1,284 @@
+---
+title: 'Отладка: когда под не работает'
+description: Порядок действий, который находит причину почти любой проблемы с подом, что означает каждый статус от Pending до Terminating, как отлаживать сервис, до которого не доходят запросы, как залезть внутрь контейнера без оболочки, снять pprof с Go-сервиса в кластере — и полный манифест сервиса, собранный из всего курса.
+order: 8
+minutes: 40
+tags: [kubernetes, kubectl, debugging, pprof, go]
+updated: 2026-09-23
+---
+
+В Kubernetes много движущихся частей, и когда что-то не работает, поначалу непонятно, куда смотреть. Хорошая новость: почти всегда кластер сам говорит, что не так. Нужно только знать, где он это говорит. Эта лекция — практическая: порядок действий, словарь статусов и несколько приёмов, которые пригодятся Go-разработчику.
+
+## Порядок действий
+
+Почти любую проблему с подом находят одной и той же последовательностью — от общего к частному:
+
+```sh
+# 1. Что вообще происходит: статус, перезапуски, узел
+kubectl get pods -n prod -l app=api -o wide
+
+# 2. Подробности и — главное — события внизу вывода
+kubectl describe pod -n prod api-7d9c8b6f5-x2kqp
+
+# 3. Что говорит само приложение. --previous — вывод прошлого, упавшего запуска
+kubectl logs -n prod api-7d9c8b6f5-x2kqp --previous
+
+# 4. События всего namespace по времени — если непонятно, с чего началось
+kubectl get events -n prod --sort-by=.lastTimestamp
+```
+
+Самое недооценённое — **события** в конце `kubectl describe`. Туда пишут все участники: планировщик — почему не нашёл узел, kubelet — почему не скачал образ, почему убил контейнер, почему проба провалилась. В девяти случаях из десяти причина написана там открытым текстом.
+
+Две оговорки. События хранятся недолго — по умолчанию час, — так что вчерашнюю аварию по ним не расследовать. И `kubectl logs` показывает только то, что приложение написало в stdout и stderr: если сервис пишет логи в файл, здесь будет пусто.
+
+## Словарь статусов
+
+Колонка STATUS в `kubectl get pods` — самая быстрая подсказка. Вот что означает каждое значение и куда смотреть дальше.
+
+| статус | что значит | где причина |
+| --- | --- | --- |
+| `Pending` | под не назначен на узел | событие `FailedScheduling`: не хватает requests, taint, правило размещения, том |
+| `ContainerCreating` дольше минуты | узел готовит под | события: не подключается том, не создаётся сеть, не найден Secret или ConfigMap |
+| `Init:0/2`, `Init:CrashLoopBackOff` | не завершились init-контейнеры | `kubectl logs <под> -c <имя init-контейнера>` |
+| `ImagePullBackOff`, `ErrImagePull` | не скачан образ | события: опечатка в имени, нет тега, нет доступа к реестру (`imagePullSecrets`) |
+| `CreateContainerConfigError` | не собрана конфигурация контейнера | события: нет ConfigMap, Secret или ключа в них |
+| `CrashLoopBackOff` | контейнер падает, kubelet ждёт перед рестартом | `logs --previous` и код выхода в `describe` |
+| `OOMKilled` | превышен limit памяти | лекция о ресурсах: GOMEMLIMIT, пик кучи, утечка |
+| `Running`, но READY `0/1` | процесс работает, readiness не проходит | события `Readiness probe failed`, ручка пробы, порт |
+| `Evicted` | узел выселил под из-за нехватки памяти или диска | `describe` пода и узла, requests |
+| `Terminating` дольше минуты | под не может удалиться | finalizer-ы, недоступный узел, долгая остановка процесса |
+
+Коды выхода из `describe` (`Last State: Terminated, Exit Code`) тоже говорят много: **1** — приложение вышло с ошибкой само (`log.Fatal`), **2** — паника Go, **137** — убито SIGKILL (память, liveness или не уложилось в период остановки), **143** — завершилось по SIGTERM.
+
+<Predict
+  question="Под в статусе Running, READY 0/1, RESTARTS 0. В событиях: Readiness probe failed: Get http://10.244.1.17:8080/readyz: connection refused. Что проверить первым делом?"
+  options={[
+    'Увеличить timeoutSeconds у пробы',
+    'На каком адресе и порту слушает сервис: 8080 ли это и не только ли 127.0.0.1',
+    'Добавить liveness-пробу, чтобы под перезапустился',
+  ]}
+  answer={1}
+>
+`connection refused` — это не «медленно отвечает», это «на этом порту никто не слушает». Таймауты тут ни при чём. Частые причины:
+
+- сервис слушает другой порт — например, 8000, а в пробе и `containerPort` написано 8080;
+- сервис слушает `127.0.0.1:8080` вместо `:8080`. Изнутри контейнера всё работает, а kubelet стучится по IP пода — и не достучится. В Go это `http.ListenAndServe("localhost:8080", …)` вместо `":8080"`;
+- ручка `/readyz` висит на отдельном сервере метрик, который ещё не запущен.
+
+Liveness здесь сделала бы только хуже: под начал бы перезапускаться, а причина осталась бы та же.
+</Predict>
+
+## Сервис не отвечает
+
+Отдельный класс проблем — поды работают, а запросы до них не доходят. Проверяйте цепочку по порядку, от пода к клиенту:
+
+```sh
+# 1. Поды готовы?
+kubectl get pods -n prod -l app=api
+
+# 2. Service видит поды? Пустой список — селектор не совпадает с метками или никто не готов
+kubectl get endpointslices -n prod -l kubernetes.io/service-name=api
+
+# 3. Селектор сервиса и метки подов — сравнить глазами
+kubectl get svc api -n prod -o jsonpath='{.spec.selector}'
+kubectl get pods -n prod --show-labels
+
+# 4. Порты: port сервиса, targetPort, containerPort и то, что реально слушает процесс
+kubectl get svc api -n prod -o yaml | grep -A4 ports
+```
+
+Если на этом уровне всё сходится, проверьте изнутри кластера — запустив временный под с сетевыми утилитами:
+
+```sh
+kubectl run -it --rm nettest -n prod --image=nicolaka/netshoot -- bash
+# внутри:
+nslookup api                          # DNS отвечает ClusterIP?
+curl -v http://api/readyz             # сервис отвечает по имени?
+curl -v http://10.244.1.17:8080/readyz  # под отвечает напрямую?
+```
+
+Если напрямую под отвечает, а через сервис — нет, проблема в Service: порты или селектор. Если отвечает из того же namespace, но не из другого — ищите NetworkPolicy. Если отвечает изнутри кластера, но не снаружи — Ingress или Gateway: имя хоста, путь, класс контроллера, TLS-секрет.
+
+<Predict
+  question="Service api: port 80, targetPort 8080. Поды слушают 8080, готовы, EndpointSlice не пустой. Клиент в том же namespace делает GET http://api:8080 и получает таймаут. В чём дело?"
+  options={[
+    'В NetworkPolicy — нужно разрешить порт 8080',
+    'Клиент стучится не в тот порт: у сервиса порт 80, а 8080 — порт контейнера',
+    'kube-proxy на узле клиента сломан',
+  ]}
+  answer={1}
+>
+У Service два порта с разным смыслом. `port` — тот, на котором слушает сам сервис: к нему и нужно обращаться, `http://api` или `http://api:80`. `targetPort` — куда сервис перенаправит запрос в поде. Правила kube-proxy есть только для `ClusterIP:80`; пакет на `ClusterIP:8080` никто не перехватывает, и он уходит в никуда — отсюда таймаут, а не отказ.
+
+Чтобы не путаться, многие делают `port` и `targetPort` одинаковыми или дают порту имя (`targetPort: http`) и обращаются по нему.
+</Predict>
+
+## Внутрь контейнера
+
+`kubectl exec -it <под> -- sh` открывает оболочку внутри контейнера. Но в образе distroless, как мы делали для Go, оболочки нет — и это правильно. Для отладки таких контейнеров есть **эфемерные контейнеры**: временный контейнер с нужными утилитами, который подселяется в работающий под.
+
+```sh
+kubectl debug -it -n prod api-7d9c8b6f5-x2kqp --image=nicolaka/netshoot --target=api
+```
+
+`--target=api` означает «видеть процессы контейнера `api`». Внутри доступны его сеть (тот же `localhost`), список процессов (`ps`), а через `/proc/<pid>/root` — и его файловая система. Под при этом не перезапускается.
+
+Ещё два режима `kubectl debug`, которые выручают:
+
+- **копия пода с другой командой** — когда контейнер падает на старте и зайти в него невозможно: `kubectl debug <под> -it --copy-to=api-debug --container=api --image=busybox -- sh`;
+- **оболочка на узле** — `kubectl debug node/<узел> -it --image=busybox`: корневая файловая система узла будет в `/host`. Для проверки дисков, cgroups и логов kubelet.
+
+## pprof из кластера
+
+Для Go-сервиса самый ценный инструмент отладки — pprof. В кластере его не нужно открывать наружу: достаточно пробросить порт с ноутбука в под.
+
+```go
+// Отдельный сервер для отладки: не на основном порту и не через Ingress.
+go func() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	log.Println(http.ListenAndServe(":6060", mux))
+}()
+```
+
+```sh
+kubectl port-forward -n prod pod/api-7d9c8b6f5-x2kqp 6060:6060
+# в другом терминале:
+go tool pprof -http=:8081 http://localhost:6060/debug/pprof/heap
+go tool pprof -http=:8081 "http://localhost:6060/debug/pprof/profile?seconds=30"
+curl -s http://localhost:6060/debug/pprof/goroutine?debug=2 > goroutines.txt
+```
+
+Типичные вопросы, на которые это отвечает: почему растёт память и когда придёт OOMKilled (профиль `heap`), куда уходит процессор при троттлинге (`profile`), не утекают ли горутины (`goroutine`). Метрики рантайма тоже стоит отдавать постоянно — `go_memstats_*`, `go_goroutines`, `go_gc_duration_seconds` из клиента Prometheus: они покажут проблему до того, как её увидят пользователи.
+
+Обратите внимание: `port-forward` на конкретный под, а не на Service. Через Service вы попадёте в случайный под, а вам нужен именно тот, что ведёт себя странно.
+
+## Под не удаляется
+
+Под висит в `Terminating` минутами. Причины три:
+
+- **процесс долго останавливается** — ждёт, пока истечёт `terminationGracePeriodSeconds`. Посмотрите, что он делает после SIGTERM;
+- **узел недоступен** — kubelet не может подтвердить остановку. Для Deployment это неопасно, для StatefulSet — см. прошлую лекцию;
+- **finalizer** — в `metadata.finalizers` записан контроллер, который должен что-то сделать перед удалением (отключить диск, удалить облачный ресурс) и не делает. Сначала разберитесь, почему он не справляется.
+
+`kubectl delete pod --force --grace-period=0` удаляет объект из API немедленно, не дожидаясь подтверждения. Процесс на недоступном узле при этом может продолжать работать. Для подов StatefulSet это прямой путь к двум процессам на одних данных — пользуйтесь, только понимая, что узел действительно мёртв.
+
+## Всё вместе: манифест Go-сервиса
+
+Вот как выглядит сервис, в котором учтено всё из курса. Это хорошая отправная точка для своего.
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: prod
+  labels: {app: api}
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  strategy:
+    rollingUpdate: {maxSurge: 1, maxUnavailable: 0}   # ёмкость не падает при выкатке
+  selector:
+    matchLabels: {app: api}
+  template:
+    metadata:
+      labels: {app: api}
+      annotations:
+        checksum/config: "{{ хэш api-config — проставляет Helm или Kustomize }}"
+    spec:
+      automountServiceAccountToken: false              # сервису не нужен API Kubernetes
+      terminationGracePeriodSeconds: 45
+      securityContext:
+        runAsNonRoot: true
+      topologySpreadConstraints:                       # реплики — по разным зонам
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector: {matchLabels: {app: api}}
+      containers:
+        - name: api
+          image: registry.example.com/api:1.4.3        # конкретная версия, не latest
+          ports:
+            - {name: http, containerPort: 8080}
+            - {name: debug, containerPort: 6060}
+          envFrom:
+            - configMapRef: {name: api-config}
+          env:
+            - {name: GOMEMLIMIT, value: "460MiB"}        # ~90% лимита памяти
+          volumeMounts:
+            - {name: secrets, mountPath: /etc/api/secrets, readOnly: true}
+          resources:
+            requests: {cpu: 500m, memory: 512Mi}
+            limits:   {memory: 512Mi}                   # по CPU — без лимита
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 5
+            failureThreshold: 2
+          livenessProbe:                                # только «процесс жив», без зависимостей
+            httpGet: {path: /livez, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          lifecycle:
+            preStop:
+              sleep: {seconds: 5}                       # дать балансировке нас забыть
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+      volumes:
+        - name: secrets
+          secret: {secretName: api-secrets}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: api, namespace: prod}
+spec:
+  selector: {app: api}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: api, namespace: prod}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels: {app: api}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: {name: api, namespace: prod}
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: api}
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 60}}
+```
+
+И чек-лист для самого Go-приложения:
+
+- статический бинарник в distroless, `ENTRYPOINT ["/app"]`, запуск не от root;
+- слушает `:8080`, а не `localhost:8080`;
+- `/livez` отвечает 200 всегда, `/readyz` — только когда готов и не останавливается;
+- по SIGTERM: readiness → 503, пауза, `srv.Shutdown`, закрытие ресурсов;
+- логи — JSON в stdout;
+- конфигурация — из окружения и файлов, секреты — файлами;
+- `GOMEMLIMIT` задан, Go 1.25+ или `automaxprocs`;
+- метрики Prometheus и pprof — на отдельном порту, не наружу.
+
+Манифесты такого объёма редко пишут руками для каждого окружения. Обычно их шаблонизируют **Helm** (шаблоны с параметрами, упакованные в чарт) или **Kustomize** (базовые манифесты плюс наложения для каждого окружения, встроен в `kubectl apply -k`), а доставляют в кластер через **GitOps** — Argo CD или Flux: кластер сам подтягивает состояние из git-репозитория. Это та же идея желаемого состояния из первой лекции, поднятая на уровень выше: git описывает, что должно быть в кластере, а контроллер приводит к этому кластер.
+
+## Итог
+
+- Порядок отладки: `get` → `describe` (события!) → `logs --previous` → `get events`. Причина почти всегда написана в событиях.
+- Статус пода подсказывает, где искать: `Pending` — планировщик, `ImagePullBackOff` — реестр, `CrashLoopBackOff` — логи прошлого запуска, `OOMKilled` — память, `0/1 READY` — проба.
+- Сервис не отвечает — проверяйте цепочку: готовые поды → EndpointSlice → селектор и порты → DNS изнутри кластера → NetworkPolicy → Ingress.
+- В контейнер без оболочки заходят эфемерным контейнером `kubectl debug`, а pprof снимают через `kubectl port-forward` на конкретный под.
+- Хороший манифест Go-сервиса — это сумма всего курса: плавная выкатка, честные пробы, мягкая остановка, осмысленные ресурсы, распределение по зонам, PDB и HPA.
+
+Курс на этом закончен. Лучший следующий шаг — поднять кластер в kind, развернуть в нём свой сервис по этому манифесту и сломать его всеми способами из этой лекции по очереди: опечатка в метке, неверный порт, liveness с базой, лимит памяти поменьше, `minAvailable` равный числу реплик. Каждую поломку найти по порядку действий выше. После этого Kubernetes перестанет казаться чёрным ящиком.

@@ -1,0 +1,16 @@
+---
+title: StatefulSet
+short: 'Контроллер для подов с идентичностью: у каждого постоянное имя (db-0, db-1), свой постоянный диск и свой DNS-адрес. Создаёт и удаляет поды по порядку.'
+aliases: [StatefulSet, statefulset, sts, volumeClaimTemplates, ordinal, OrderedReady]
+category: сущность
+related: [headless-service, persistent-volume-claim, k8s-deployment]
+---
+
+Поды Deployment взаимозаменяемы: имена случайные, диск общий или временный. Поды StatefulSet — нет:
+
+- **имя постоянно.** `db-0` после пересоздания снова `db-0`, пусть и на другом узле и с другим IP;
+- **диск постоянный.** По `volumeClaimTemplates` на каждый под создаётся свой [PVC](/glossary/persistent-volume-claim/), и пересозданный `db-0` получает тот же диск;
+- **адрес постоянный.** Через [headless Service](/glossary/headless-service/): `db-0.db.prod.svc.cluster.local`;
+- **порядок.** По умолчанию поды создаются по одному — `db-1` только после готовности `db-0`, — удаляются в обратном порядке, обновляются с последнего номера к первому.
+
+StatefulSet не делает из приложения кластер: он не знает, кто ведущий, не настраивает репликацию и не переключает. Это работа самого приложения или оператора (CloudNativePG, Strimzi для Kafka). Удаление StatefulSet не удаляет его PVC — данные переживают даже ошибочное удаление.
