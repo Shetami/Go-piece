@@ -1,0 +1,97 @@
+---
+import { getCollection } from 'astro:content'
+import BaseLayout from '../../layouts/BaseLayout.astro'
+import { COURSES } from '../../data/courses.ts'
+import { quizFor, quizStorageKey } from '../../lib/quizzes.ts'
+
+/*
+ * Сводка тестов «Проверь себя». Сами тесты живут в конце лекций; здесь —
+ * список и лучший результат по каждому, который остров сохранил в localStorage.
+ */
+const lectures = (await getCollection('lectures', (e) => !e.data.draft))
+  .sort((a, b) => a.data.order - b.data.order)
+  .flatMap((l) => {
+    const quiz = quizFor(l.id)
+    return quiz ? [{ lecture: l, count: quiz.questions.length }] : []
+  })
+
+const total = lectures.reduce((s, l) => s + l.count, 0)
+
+/** 1 вопрос, 2 вопроса, 5 вопросов — число тут любое, в отличие от острова с его 6–10. */
+function plural(n: number, one: string, few: string, many: string): string {
+  const d = n % 10
+  const dd = n % 100
+  if (d === 1 && dd !== 11) return one
+  if (d >= 2 && d <= 4 && (dd < 12 || dd > 14)) return few
+  return many
+}
+---
+
+<BaseLayout
+  title="Тесты"
+  description="Короткие тесты «Проверь себя» по каждой лекции: вопросы с одним и несколькими ответами, верно или нет, порядок событий — с разбором каждого ответа."
+>
+  <h1 class="text-3xl font-bold tracking-tight mb-2">Тесты</h1>
+  <p class="text-muted mb-4 max-w-2xl">
+    В конце каждой лекции — блок «Проверь себя»: {lectures.length} {plural(lectures.length, 'тест', 'теста', 'тестов')},{' '}
+    {total} {plural(total, 'вопрос', 'вопроса', 'вопросов')}. Ответ проверяется сразу и
+    объясняется. Лучший результат запоминается в этом браузере и виден здесь.
+  </p>
+  <p class="text-sm text-muted mb-10" id="quiz-overall" hidden></p>
+
+  {
+    COURSES.map((course) => {
+      const items = lectures.filter((l) => l.lecture.id.startsWith(`${course.id}/`))
+      if (items.length === 0) return null
+      return (
+        <section class="mb-10 max-w-3xl">
+          <h2 class="text-xl font-bold mb-4">{course.title}</h2>
+          <ul class="grid gap-2">
+            {items.map(({ lecture, count }) => (
+              <li>
+                <a
+                  href={`/lectures/${lecture.id}/#quiz`}
+                  class="flex items-center gap-4 rounded-xl border border-line bg-surface px-4 py-3 hover:border-muted"
+                >
+                  <span class="flex-1">
+                    <span class="block font-semibold text-ink">{lecture.data.title}</span>
+                    <span class="block text-sm text-muted">{count} {plural(count, 'вопрос', 'вопроса', 'вопросов')}</span>
+                  </span>
+                  <span class="quiz-result text-sm text-muted whitespace-nowrap" data-key={quizStorageKey(lecture.id)}>
+                    не пройден
+                  </span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )
+    })
+  }
+</BaseLayout>
+
+<script>
+  let passed = 0
+  let perfect = 0
+  const badges = document.querySelectorAll<HTMLElement>('.quiz-result')
+  for (const badge of badges) {
+    try {
+      const raw = localStorage.getItem(badge.dataset.key ?? '')
+      if (!raw) continue
+      const { best, total } = JSON.parse(raw) as { best: number; total: number }
+      badge.textContent = `${best} из ${total}`
+      badge.classList.remove('text-muted')
+      badge.style.color = best === total ? 'var(--run)' : 'var(--ink)'
+      badge.style.fontWeight = '600'
+      passed++
+      if (best === total) perfect++
+    } catch {
+      // Нет доступа к хранилищу — оставляем «не пройден».
+    }
+  }
+  const overall = document.getElementById('quiz-overall')
+  if (overall && passed > 0) {
+    overall.textContent = `Пройдено ${passed} из ${badges.length}, без ошибок — ${perfect}.`
+    overall.hidden = false
+  }
+</script>

@@ -5,6 +5,8 @@ import { getCollection } from 'astro:content'
 import BaseLayout from './BaseLayout.astro'
 import { COURSES } from '../data/courses.ts'
 import { termIdsIn } from '../lib/terms.ts'
+import { quizFor, quizStorageKey } from '../lib/quizzes.ts'
+import Quiz from '../components/quiz/Quiz.tsx'
 
 interface Props {
   entry: CollectionEntry<'lectures'>
@@ -27,6 +29,8 @@ const glossary = await getCollection('glossary')
 const termIds = termIdsIn(entry.body)
 const terms = termIds.map((id) => glossary.find((g) => g.id === id)).filter((g) => g !== undefined)
 
+const quiz = quizFor(entry.id)
+
 const toc = headings.filter((h) => h.depth === 2)
 ---
 
@@ -48,6 +52,19 @@ const toc = headings.filter((h) => h.depth === 2)
       <div class="prose prose-lg dark:prose-invert">
         <slot />
       </div>
+
+      {
+        quiz && (
+          <section id="quiz" class="mt-16 pt-8 border-t border-line" data-pagefind-ignore>
+            <h2 class="text-xl font-bold mb-1">Проверь себя</h2>
+            <p class="text-sm text-muted mb-5">
+              Ответ на каждый вопрос проверяется сразу, с разбором. Лучший результат запоминается в этом браузере —
+              сводка по всем лекциям на странице <a href="/quiz/" class="text-accent">«Тесты»</a>.
+            </p>
+            <Quiz client:visible lectureId={entry.id} questions={quiz.questions} storageKey={quizStorageKey(entry.id)} />
+          </section>
+        )
+      }
 
       {
         terms.length > 0 && (
