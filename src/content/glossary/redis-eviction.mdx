@@ -1,0 +1,20 @@
+---
+title: maxmemory и вытеснение
+short: 'Предел памяти Redis и правило, что делать при его достижении: отказывать в записи (noeviction, по умолчанию) или вытеснять ключи по LRU, LFU, TTL или случайно.'
+aliases: [maxmemory, maxmemory-policy, eviction, вытеснение redis, allkeys-lru, allkeys-lfu, volatile-lru, volatile-ttl, noeviction, OOM command not allowed]
+category: настройка
+related: [cache-hit-ratio, cache-aside, redis-persistence]
+---
+
+`maxmemory` — сколько памяти Redis разрешено под данные. На 64-битных системах по умолчанию предела нет: Redis растёт, пока его не убьёт ОС.
+
+`maxmemory-policy` — что делать, когда предел достигнут:
+
+- `noeviction` (по умолчанию) — ничего не вытеснять, команды записи получают `-OOM command not allowed`. Правильно для Redis-хранилища, катастрофа для кэша;
+- `allkeys-lru` / `allkeys-lfu` — вытеснять давно не использованные / редко используемые ключи среди всех. Обычный выбор для кэша;
+- `volatile-lru` / `volatile-lfu` / `volatile-ttl` / `volatile-random` — вытеснять только ключи с TTL. Если таких нет, ведёт себя как `noeviction`;
+- `allkeys-random` — случайные ключи.
+
+LRU в Redis приблизительный: он берёт `maxmemory-samples` (по умолчанию 5) случайных ключей и вытесняет худший из них. Точного списка по времени доступа нет — он стоил бы памяти на каждом ключе.
+
+`maxmemory` ставят с запасом от памяти машины: сверху нужны буферы клиентов и реплик, фрагментация и copy-on-write при сохранении на диск. Смотреть — `INFO memory`: `used_memory` против `used_memory_rss` и `evicted_keys` в `INFO stats`.

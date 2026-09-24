@@ -1,0 +1,60 @@
+---
+/**
+ * Redis Cluster: 16384 слота на три ведущих, ключ → CRC16 → слот → узел, ответ MOVED.
+ * Номера слотов настоящие — посчитаны CRC16 от ключей на схеме.
+ */
+const nodes = [
+  { x: 250, name: 'узел A', range: '0 – 5460', keys: ['user:7 → 2780', '{user:7}:cart → 2780'] },
+  { x: 420, name: 'узел B', range: '5461 – 10922', keys: ['cart:7 → 9546'] },
+  { x: 590, name: 'узел C', range: '10923 – 16383', keys: ['user:42 → 15880'] },
+]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 300" role="img" aria-labelledby="rdc-t">
+      <title id="rdc-t">Redis Cluster делит 16384 слота между ведущими узлами; клиент считает слот ключа и идёт на нужный узел, а если ошибся — получает MOVED с правильным адресом</title>
+      <defs>
+        <marker id="rdc-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+        <marker id="rdc-b" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head-accent"></path>
+        </marker>
+      </defs>
+
+      <rect x="20" y="40" width="160" height="120" rx="8" class="box"></rect>
+      <text x="100" y="62" text-anchor="middle" class="t-bold t-small">ClusterClient</text>
+      <text x="100" y="84" text-anchor="middle" class="t-mono t-small">GET user:42</text>
+      <text x="100" y="104" text-anchor="middle" class="t-muted t-small">CRC16(key) mod 16384</text>
+      <text x="100" y="120" text-anchor="middle" class="t-mono t-small">= 15880</text>
+      <text x="100" y="146" text-anchor="middle" class="t-muted t-small">таблица слот → узел</text>
+
+      {
+        nodes.map((n) => (
+          <g>
+            <rect x={n.x - 75} y="40" width="150" height="120" rx="8" class="lead"></rect>
+            <text x={n.x} y="62" text-anchor="middle" class="t-bold t-small">{n.name}</text>
+            <text x={n.x} y="80" text-anchor="middle" class="t-mono t-small">слоты {n.range}</text>
+            {n.keys.map((k, i) => (
+              <text x={n.x} y={104 + i * 18} text-anchor="middle" class="t-mono t-small">{k}</text>
+            ))}
+            <rect x={n.x - 60} y="200" width="120" height="30" rx="6" class="foll"></rect>
+            <text x={n.x} y="219" text-anchor="middle" class="t-small">реплика {n.name.slice(-1)}</text>
+            <path d={`M${n.x} 160 V196`} class="ln ln-dash" marker-end="url(#rdc-a)"></path>
+          </g>
+        ))
+      }
+      <text x="600" y="186" class="t-muted t-small">асинхронная копия</text>
+
+      <path d="M100 160 V268 H665 V164" class="ln-accent" marker-end="url(#rdc-b)"></path>
+      <text x="382" y="262" text-anchor="middle" class="t-accent t-small">обычно клиент сразу идёт на узел C: слот знает заранее</text>
+      <text x="20" y="292" class="t-muted t-small">Спросили не тот узел — ответ «-MOVED 15880 10.0.0.3:6379»: клиент обновляет таблицу и повторяет запрос. Во время переезда слота бывает -ASK.</text>
+    </svg>
+  </div>
+  <figcaption>
+    Ключ попадает в слот по CRC16, слот живёт ровно на одном ведущем. Команда над несколькими ключами работает, только
+    если все они в одном слоте. Для этого есть хэш-теги: у ключа <code>{'{user:7}:cart'}</code> слот считается только по
+    части в фигурных скобках, поэтому он живёт рядом с <code>user:7</code>.
+  </figcaption>
+</figure>

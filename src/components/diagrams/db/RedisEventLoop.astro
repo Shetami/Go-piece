@@ -1,0 +1,73 @@
+---
+/**
+ * Redis: много соединений, один поток исполнения. Долгая команда задерживает всех.
+ */
+const clients = [52, 100, 148, 196]
+const Y = 150
+const cmds = [
+  { x: 330, w: 44, label: 'GET a', cls: 'cell-on' },
+  { x: 378, w: 44, label: 'INCR n', cls: 'cell-on' },
+  { x: 426, w: 206, label: 'KEYS *  — 800 мс', cls: 'risk' },
+  { x: 636, w: 44, label: 'GET b', cls: 'cell-pending' },
+  { x: 684, w: 44, label: 'SET c', cls: 'cell-pending' },
+]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 280" role="img" aria-labelledby="rdel-t">
+      <title id="rdel-t">Соединения клиентов сходятся в один цикл событий Redis; команды исполняются строго по одной, и долгая команда KEYS задерживает все следующие</title>
+      <defs>
+        <marker id="rdel-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+
+      <text x="20" y="30" class="t-muted">сервисы на Go</text>
+      {
+        clients.map((y, i) => (
+          <g>
+            <rect x="20" y={y} width="110" height="34" rx="6" class="box"></rect>
+            <text x="75" y={y + 21} text-anchor="middle" class="t-small">соединение {i + 1}</text>
+            <path d={`M130 ${y + 17} H176`} class="ln" marker-end="url(#rdel-a)"></path>
+          </g>
+        ))
+      }
+
+      <rect x="180" y="44" width="110" height="194" rx="8" class="box-2"></rect>
+      <text x="235" y="66" text-anchor="middle" class="t-bold t-small">epoll</text>
+      <text x="235" y="84" text-anchor="middle" class="t-muted t-small">какие сокеты</text>
+      <text x="235" y="98" text-anchor="middle" class="t-muted t-small">готовы к чтению</text>
+      <text x="235" y="200" text-anchor="middle" class="t-muted t-small">io-threads могут</text>
+      <text x="235" y="214" text-anchor="middle" class="t-muted t-small">читать и писать</text>
+      <text x="235" y="228" text-anchor="middle" class="t-muted t-small">сокеты — не более</text>
+      <path d={`M290 ${Y} H324`} class="ln" marker-end="url(#rdel-a)"></path>
+
+      <rect x="330" y="30" width="398" height="54" rx="8" class="lead"></rect>
+      <text x="529" y="52" text-anchor="middle" class="t-bold t-small">память: словарь «ключ → значение»</text>
+      <text x="529" y="70" text-anchor="middle" class="t-muted t-small">без блокировок: его трогает только один поток</text>
+
+      <text x="330" y={Y - 26} class="t-muted t-small">один поток: команды строго по очереди, время →</text>
+      {
+        cmds.map((c) => (
+          <g>
+            <rect x={c.x} y={Y - 16} width={c.w} height="32" rx="4" class={c.cls}></rect>
+            <text x={c.x + c.w / 2} y={Y + 4} text-anchor="middle" class="t-mono t-small">{c.label}</text>
+          </g>
+        ))
+      }
+      <path d={`M330 ${Y - 16} V${Y - 20}`} class="ln-thin"></path>
+      <text x="352" y={Y + 34} text-anchor="middle" class="t-muted t-small">~1 мкс</text>
+      <text x="529" y={Y + 34} text-anchor="middle" class="t-bad t-small">O(N) по миллиону ключей</text>
+      <text x="682" y={Y + 34} text-anchor="middle" class="t-muted t-small">ждут своей очереди</text>
+      <path d="M636 196 H728" class="ln ln-dash"></path>
+      <text x="682" y="214" text-anchor="middle" class="t-muted t-small">+800 мс задержки</text>
+      <text x="682" y="228" text-anchor="middle" class="t-muted t-small">у каждого клиента</text>
+    </svg>
+  </div>
+  <figcaption>
+    Тысячи соединений, но исполняет команды один поток. Отсюда и скорость — никаких блокировок на данных, — и атомарность
+    каждой команды: пока она идёт, никто другой ничего не видит и не меняет. Обратная сторона: одна медленная команда
+    останавливает Redis для всех клиентов сразу.
+  </figcaption>
+</figure>

@@ -1,0 +1,58 @@
+---
+/**
+ * Блокировка в Redis с TTL и пауза держателя: два владельца сразу и как это ловит токен ограждения.
+ */
+const T = (s: number) => 150 + s * 36
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 290" role="img" aria-labelledby="rdl-t">
+      <title id="rdl-t">Клиент A берёт блокировку на 10 секунд и засыпает на паузе; блокировка истекает, её берёт B; A просыпается и пишет, считая себя владельцем. Хранилище с токеном ограждения отклоняет запись A</title>
+      <defs>
+        <marker id="rdl-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+
+      {[0, 5, 10, 15].map((s) => (
+        <g>
+          <path d={`M${T(s)} 30 V214`} class="ln-life"></path>
+          <text x={T(s)} y="24" text-anchor="middle" class="t-muted t-small">{s} с</text>
+        </g>
+      ))}
+
+      <text x="20" y="62" class="t-bold">клиент A</text>
+      <rect x={T(0)} y="46" width={T(1) - T(0)} height="26" rx="4" class="cell-on"></rect>
+      <text x={T(0.5)} y="63" text-anchor="middle" class="t-small">работа</text>
+      <rect x={T(1)} y="46" width={T(13) - T(1)} height="26" rx="4" class="idle"></rect>
+      <text x={T(7)} y="63" text-anchor="middle" class="t-muted t-small">пауза: GC, своп, зависшая сеть, остановленная ВМ</text>
+      <rect x={T(13)} y="46" width={T(14) - T(13)} height="26" rx="4" class="risk"></rect>
+      <text x={T(13.5)} y="63" text-anchor="middle" class="t-small">запись</text>
+
+      <text x="20" y="112" class="t-bold">Redis</text>
+      <rect x={T(0)} y="96" width={T(10) - T(0)} height="26" rx="4" class="box-2"></rect>
+      <text x={T(5)} y="113" text-anchor="middle" class="t-mono t-small">lock = A · PX 10000 · токен 33</text>
+      <rect x={T(10)} y="96" width={T(16) - T(10)} height="26" rx="4" class="box-2"></rect>
+      <text x={T(13)} y="113" text-anchor="middle" class="t-mono t-small">lock = B · токен 34</text>
+
+      <text x="20" y="162" class="t-bold">клиент B</text>
+      <rect x={T(10)} y="146" width={T(12) - T(10)} height="26" rx="4" class="cell-on"></rect>
+      <text x={T(11)} y="163" text-anchor="middle" class="t-small">запись</text>
+
+      <text x="20" y="206" class="t-bold">хранилище</text>
+      <path d={`M${T(11)} 172 V192`} class="ln" marker-end="url(#rdl-a)"></path>
+      <path d={`M${T(13.5)} 72 V192`} class="ln" marker-end="url(#rdl-a)"></path>
+      <text x={T(11)} y="210" text-anchor="middle" class="t-ok t-small">34 ок</text>
+      <text x={T(13.5)} y="210" text-anchor="middle" class="t-bad t-small">33 &lt; 34 — отказ</text>
+
+      <text x="20" y="250" class="t-muted t-small">Без токена хранилище приняло бы обе записи: A уверен, что блокировка его, — он не знает, что проспал 12 секунд.</text>
+      <text x="20" y="270" class="t-muted t-small">Токен — растущее число, выданное вместе с блокировкой. Проверяет его хранилище, а не Redis.</text>
+    </svg>
+  </div>
+  <figcaption>
+    Блокировка с TTL — это аренда: она истекает, даже если владелец жив и уверен, что всё ещё держит её. Никакая
+    проверка «блокировка ещё моя?» перед записью не спасает — пауза может случиться сразу после проверки. Защищает
+    только ограждение на стороне ресурса.
+  </figcaption>
+</figure>

@@ -1,0 +1,61 @@
+---
+/**
+ * RDB и AOF на одной шкале: что остаётся на диске, если процесс падает в момент «крах».
+ */
+const X0 = 120
+const crash = 640
+const secs = [180, 260, 340, 420, 500, 580]
+const writes = [150, 172, 205, 231, 268, 290, 318, 352, 377, 398, 436, 470, 489, 522, 551, 574, 601, 619, 633]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 320" role="img" aria-labelledby="rdp-t">
+      <title id="rdp-t">RDB теряет всё, что записано после начала последнего снимка; AOF с appendfsync everysec теряет не больше одной-двух секунд записей</title>
+      <defs>
+        <marker id="rdp-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+
+      <path d={`M${crash} 26 V296`} class="ln-life"></path>
+      <text x={crash} y="20" text-anchor="middle" class="t-bad t-small">крах</text>
+
+      <text x="20" y="62" class="t-bold">RDB</text>
+      <text x="20" y="78" class="t-muted t-small">снимок</text>
+      <path d={`M${X0} 60 H${crash}`} class="ln"></path>
+      <text x={X0} y="48" class="t-muted t-small">основной процесс: принимает запись</text>
+      <path d="M200 60 C210 90, 214 100, 226 104" class="ln" marker-end="url(#rdp-a)"></path>
+      <text x="200" y="130" class="t-muted t-small">fork</text>
+      <rect x="230" y="92" width="190" height="24" rx="4" class="box-2"></rect>
+      <text x="325" y="108" text-anchor="middle" class="t-small">дочерний пишет dump.rdb</text>
+      <text x="236" y="132" class="t-muted t-small">копирует только изменяемые страницы (COW)</text>
+      <rect x="200" y="140" width={crash - 200} height="16" rx="3" class="risk"></rect>
+      <text x={(200 + crash) / 2} y="152" text-anchor="middle" class="t-bad t-small">потеряно всё, что записано после fork</text>
+
+      <text x="20" y="206" class="t-bold">AOF</text>
+      <text x="20" y="222" class="t-muted t-small">everysec</text>
+      <path d={`M${X0} 204 H${crash}`} class="ln"></path>
+      <text x={X0} y="186" class="t-muted t-small">каждая запись дописывается в журнал (буфер ОС)</text>
+      {writes.map((x) => <path d={`M${x} 198 V210`} class="ln-thin"></path>)}
+      {
+        secs.map((x) => (
+          <g>
+            <path d={`M${x} 214 V232`} class="ln-accent"></path>
+            <text x={x} y="246" text-anchor="middle" class="t-accent t-small">fsync</text>
+          </g>
+        ))
+      }
+      <rect x="580" y="256" width={crash - 580} height="16" rx="3" class="risk"></rect>
+      <text x="572" y="268" text-anchor="end" class="t-bad t-small">потеряно ≤ 1–2 с</text>
+
+      <text x="20" y="300" class="t-muted t-small">appendfsync always — fsync на каждую запись: не теряет ничего, но пишет со скоростью диска.</text>
+    </svg>
+  </div>
+  <figcaption>
+    RDB — снимок памяти раз в несколько минут: компактный, быстро загружается, но теряет всё после начала последнего
+    снимка. AOF — журнал команд: сбрасывается на диск раз в секунду и теряет меньше. На практике включают оба. Дочерний
+    процесс после fork делит память с родителем, и каждая страница, которую родитель меняет во время снимка, копируется —
+    под запись нужен запас памяти.
+  </figcaption>
+</figure>
