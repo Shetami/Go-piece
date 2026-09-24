@@ -158,6 +158,35 @@ describe('укладка графа кучи', () => {
     )
   })
 
+  test('ссылка между мусорными блоками не проходит сквозь чужие узлы', () => {
+    // Раньше мусор лежал одной строкой по номерам, и ссылка из блока в середине
+    // кучи в блок с краю тянулась вдоль строки через всех соседей: независимые
+    // цепочки сливались на глаз в одну. Теперь цепочка мусора идёт сверху вниз.
+    let checked = 0
+    for (const sc of GC_SCENARIOS) {
+      for (const snap of run(sc).history) {
+        const g = buildGraph(snap.world)
+        const at = new Map(g.nodes.map((n) => [n.id, n]))
+        for (const e of g.edges) {
+          if (e.from === null) continue
+          const a = at.get(e.from)!
+          const b = at.get(e.to)!
+          if (a.depth >= 0 || b.depth >= 0) continue
+          checked++
+          if (Math.abs(a.y - b.y) > 0.5) continue
+          const lo = Math.min(a.x, b.x)
+          const hi = Math.max(a.x, b.x)
+          const through = g.nodes.find((n) => Math.abs(n.y - a.y) < 0.5 && n.x > lo + 0.5 && n.x < hi - 0.5)
+          assert.ok(
+            !through,
+            `${sc.id} тик ${snap.world.tick}: ссылка #${a.id} → #${b.id} идёт сквозь #${through?.id}`,
+          )
+        }
+      }
+    }
+    assert.ok(checked > 100, `мусорных ссылок почти не было: ${checked}`)
+  })
+
   test('рёбра приходят в узел по линии центров, а не в край', () => {
     for (const sc of GC_SCENARIOS) {
       const sim = run(sc)

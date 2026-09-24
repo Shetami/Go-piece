@@ -26,6 +26,9 @@ const SUBROW_H = 26
 const PAD_X = 16
 const PAD_Y = 14
 export const MIN_GAP = 26
+/** Шаг между уровнями внутри кучки мусора и зазор между полосами кучек. */
+const GARBAGE_LEVEL_H = 38
+const GARBAGE_BAND_GAP = 18
 /** Больше этого числа объектов в графе не рисуем: получится каша, а не схема. */
 export const MAX_NODES = 120
 
@@ -92,6 +95,36 @@ export interface HeapGraph {
 }
 
 /**
+ * Развести отсортированный ряд так, чтобы соседи стояли не ближе MIN_GAP,
+ * а каждый узел — как можно ближе к желаемому месту.
+ *
+ * Убираем обязательный зазор из задачи: после сдвига на i*MIN_GAP условие
+ * «не ближе зазора» превращается в «не убывает», а это изотоническая
+ * регрессия. Её точное решение даёт pool adjacent violators — и оно
+ * минимизирует суммарный квадрат отклонения от желаемых мест.
+ *
+ * На практике это значит вот что: два потомка одного родителя расходятся
+ * симметрично вокруг него, а не сдвигают вправо всех соседей по уровню.
+ */
+function spread(desired: number[]): number[] {
+  const shifted = desired.map((v, i) => v - i * MIN_GAP)
+  const blocks: { sum: number; count: number; mean: number }[] = []
+  for (const v of shifted) {
+    let b = { sum: v, count: 1, mean: v }
+    while (blocks.length > 0 && blocks[blocks.length - 1]!.mean > b.mean) {
+      const prev = blocks.pop()!
+      const sum = prev.sum + b.sum
+      const count = prev.count + b.count
+      b = { sum, count, mean: sum / count }
+    }
+    blocks.push(b)
+  }
+  const xs: number[] = []
+  for (const b of blocks) for (let i = 0; i < b.count; i++) xs.push(b.mean + xs.length * MIN_GAP)
+  return xs
+}
+
+/**
  * Разложить уровень, стараясь поставить каждый узел под его родителями.
  *
  * `desired[i]` — куда узел тянется: под единственного родителя, под середину
@@ -110,27 +143,7 @@ function tidy(desired: number[], width: number, top: number): { points: { x: num
   const hi = width - PAD_X - NODE_R
   if ((n - 1) * MIN_GAP > hi - lo) return null
 
-  // Убираем обязательный зазор из задачи: после сдвига на i*MIN_GAP условие
-  // «не ближе зазора» превращается в «не убывает», а это изотоническая
-  // регрессия. Её точное решение даёт pool adjacent violators — и оно
-  // минимизирует суммарный квадрат отклонения от желаемых мест.
-  //
-  // На практике это значит вот что: два потомка одного родителя расходятся
-  // симметрично вокруг него, а не сдвигают вправо всех соседей по уровню.
-  const shifted = desired.map((v, i) => v - i * MIN_GAP)
-  const blocks: { sum: number; count: number; mean: number }[] = []
-  for (const v of shifted) {
-    let b = { sum: v, count: 1, mean: v }
-    while (blocks.length > 0 && blocks[blocks.length - 1]!.mean > b.mean) {
-      const prev = blocks.pop()!
-      const sum = prev.sum + b.sum
-      const count = prev.count + b.count
-      b = { sum, count, mean: sum / count }
-    }
-    blocks.push(b)
-  }
-  const xs: number[] = []
-  for (const b of blocks) for (let i = 0; i < b.count; i++) xs.push(b.mean + xs.length * MIN_GAP)
+  const xs = spread(desired)
 
   // Вправить ряд в поле целиком — сначала сдвигом, потом, если не хватило, зажимом.
   const over = xs[n - 1]! - hi
@@ -164,6 +177,137 @@ function place(count: number, width: number, top: number): { points: { x: number
     points.push({ x: PAD_X + step * (idx + 0.5), y: top + row * SUBROW_H })
   }
   return { points, rows: Math.ceil(count / perRow) }
+}
+
+/**
+ * Разложить мусор: каждая связная кучка — своим маленьким деревом.
+ *
+ * Класть мусор одной строкой по номерам блоков нельзя. Ссылка между блоками
+ * одной строки рисуется вдоль самой строки и проходит сквозь всех, кто стоит
+ * между ними, — и несколько независимых цепочек сливаются на глаз в одну
+ * длинную. Стоит программе переиспользовать освобождённый блок из середины
+ * кучи, как его цепочка протягивается через весь ряд.
+ *
+ * Поэтому мусор раскладывается так же, как достижимое: цепочка идёт сверху
+ * вниз, а разные кучки стоят рядом, но отдельно, и переносятся на новую полосу,
+ * когда не влезают по ширине.
+ */
+function layoutGarbage(
+  ids: number[],
+  childrenOf: (id: number) => number[],
+  width: number,
+  top: number,
+): { pos: Map<number, { x: number; y: number }>; bottom: number } {
+  const pos = new Map<number, { x: number; y: number }>()
+  if (ids.length === 0) return { pos, bottom: top }
+  const inSet = new Set(ids)
+  const kids = new Map(ids.map((id) => [id, [...new Set(childrenOf(id).filter((k) => inSet.has(k) && k !== id))]]))
+  const parents = new Map<number, number[]>(ids.map((id) => [id, []]))
+  for (const id of ids) for (const k of kids.get(id)!) parents.get(k)!.push(id)
+
+  // Связные кучки без учёта направления ссылок.
+  const comp = new Map<number, number>()
+  const comps: number[][] = []
+  for (const start of [...ids].sort((a, b) => a - b)) {
+    if (comp.has(start)) continue
+    const members: number[] = []
+    const stack = [start]
+    comp.set(start, comps.length)
+    while (stack.length > 0) {
+      const id = stack.pop()!
+      members.push(id)
+      for (const nb of [...kids.get(id)!, ...parents.get(id)!]) {
+        if (comp.has(nb)) continue
+        comp.set(nb, comps.length)
+        stack.push(nb)
+      }
+    }
+    comps.push(members.sort((a, b) => a - b))
+  }
+
+  /** Раскладка одной кучки в собственных координатах: x от нуля, уровни от нуля. */
+  const shapes = comps.map((members) => {
+    const level = new Map<number, number>()
+    // Уровни — обход в ширину от тех, на кого внутри кучки никто не ссылается.
+    // У кольца таких нет: тогда начинаем с младшего непосещённого блока.
+    let front = members.filter((id) => parents.get(id)!.length === 0)
+    let base = 0
+    while (level.size < members.length) {
+      if (front.length === 0) front = [members.find((id) => !level.has(id))!]
+      let d = base
+      while (front.length > 0) {
+        const next: number[] = []
+        for (const id of front) {
+          if (level.has(id)) continue
+          level.set(id, d)
+          for (const k of kids.get(id)!) if (!level.has(k)) next.push(k)
+        }
+        front = next
+        d++
+      }
+      base = Math.max(...level.values()) + 1
+    }
+
+    const x = new Map<number, number>()
+    const depth = Math.max(...level.values()) + 1
+    for (let l = 0; l < depth; l++) {
+      const row = members.filter((id) => level.get(id) === l)
+      if (row.length === 0) continue
+      const anchor = (id: number): number | null => {
+        const xs = parents
+          .get(id)!
+          .map((p) => x.get(p))
+          .filter((v): v is number => v !== undefined)
+        return xs.length === 0 ? null : xs.reduce((a, b) => a + b, 0) / xs.length
+      }
+      const want = new Map(row.map((id) => [id, anchor(id)]))
+      row.sort((a, b) => (want.get(a) ?? Number.MAX_SAFE_INTEGER) - (want.get(b) ?? Number.MAX_SAFE_INTEGER) || a - b)
+      // Без родителя на верхних уровнях — правее всего, что уже поставлено.
+      let free = x.size === 0 ? 0 : Math.max(...x.values()) + MIN_GAP
+      const desired = row.map((id) => {
+        const v = want.get(id)
+        if (v !== null && v !== undefined) return v
+        free += MIN_GAP
+        return free - MIN_GAP
+      })
+      spread(desired).forEach((v, i) => x.set(row[i]!, v))
+    }
+    const minX = Math.min(...x.values())
+    for (const [id, v] of x) x.set(id, v - minX)
+    return { members, level, x, w: Math.max(...x.values()), depth }
+  })
+
+  // Упаковка кучек в полосы слева направо, каждая полоса — по центру.
+  const lo = PAD_X + NODE_R
+  const usable = width - 2 * lo
+  const gap = MIN_GAP * 1.5
+  let bandTop = top
+  let i = 0
+  while (i < shapes.length) {
+    const band: typeof shapes = []
+    let bandW = -gap
+    while (i < shapes.length) {
+      const s = shapes[i]!
+      const w = Math.min(s.w, usable)
+      if (band.length > 0 && bandW + gap + w > usable) break
+      band.push(s)
+      bandW += gap + w
+      i++
+    }
+    let left = lo + (usable - bandW) / 2
+    let depth = 1
+    for (const s of band) {
+      // Кучка шире поля бывает только в вырожденном случае — тогда сжимаем.
+      const k = s.w > usable ? usable / s.w : 1
+      for (const id of s.members) {
+        pos.set(id, { x: left + s.x.get(id)! * k, y: bandTop + s.level.get(id)! * GARBAGE_LEVEL_H })
+      }
+      left += Math.min(s.w, usable) + gap
+      depth = Math.max(depth, s.depth)
+    }
+    bandTop += depth * GARBAGE_LEVEL_H + GARBAGE_BAND_GAP
+  }
+  return { pos, bottom: bandTop - GARBAGE_LEVEL_H - GARBAGE_BAND_GAP }
 }
 
 /**
@@ -323,10 +467,14 @@ export function buildGraph(w: GcWorld, width = 1000): HeapGraph {
 
   const garbageY = shownGarbage.length > 0 || hidden > 0 ? y - ROW_H / 2 + 8 : null
   if (shownGarbage.length > 0) {
-    const ids = shownGarbage.map((c) => c.id).sort((a, b) => a - b)
-    const { points, rows } = place(ids.length, width, y + 14)
-    ids.forEach((id, i) => pos.set(id, points[i]!))
-    y += 14 + ROW_H + (rows - 1) * SUBROW_H
+    const laid = layoutGarbage(
+      shownGarbage.map((c) => c.id),
+      (id) => w.cells[id]!.slots.filter((s): s is number => s !== null && !!w.cells[s]?.used),
+      width,
+      y + 14,
+    )
+    for (const [id, p] of laid.pos) pos.set(id, p)
+    y = laid.bottom + ROW_H
   } else if (hidden > 0) {
     y += 40
   }
