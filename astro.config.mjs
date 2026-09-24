@@ -3,6 +3,7 @@ import { defineConfig } from 'astro/config'
 import mdx from '@astrojs/mdx'
 import react from '@astrojs/react'
 import vercel from '@astrojs/vercel'
+import node from '@astrojs/node'
 import tailwindcss from '@tailwindcss/vite'
 
 /**
@@ -14,6 +15,13 @@ import tailwindcss from '@tailwindcss/vite'
 const isBuild = process.argv[2] === 'build' || process.env.npm_lifecycle_event === 'build'
 
 /**
+ * Куда собираем. По умолчанию — Vercel. С `DEPLOY_TARGET=node` получается
+ * самостоятельный Node-сервер в dist/ (dist/server/entry.mjs + dist/client) —
+ * его запускает Docker-образ.
+ */
+const target = process.env.DEPLOY_TARGET === 'node' ? 'node' : 'vercel'
+
+/**
  * Сайт остаётся статическим: все страницы собираются заранее. Адаптер нужен
  * ровно ради двух маршрутов в src/pages/api — они помечены `prerender = false`
  * и живут на сервере, потому что компилировать Go в браузере нечем.
@@ -21,7 +29,7 @@ const isBuild = process.argv[2] === 'build' || process.env.npm_lifecycle_event =
 export default defineConfig({
   site: 'https://go-piece.vercel.app',
   trailingSlash: 'ignore',
-  adapter: vercel(),
+  adapter: target === 'node' ? node({ mode: 'standalone' }) : vercel(),
   integrations: [mdx(), react()],
   vite: {
     plugins: [tailwindcss()],

@@ -31,6 +31,15 @@ pnpm demo:saga dual-write publish=outbox  # и для обмена событи�
 
 Нужен Node 20+ (в `mise.toml` закреплены Node 24 и pnpm 10).
 
+### Docker
+
+```sh
+docker compose up -d --build   # http://localhost:8080
+PORT=3000 docker compose up -d # другой порт на хосте
+```
+
+Образ собирается с `DEPLOY_TARGET=node` (`pnpm build:node`): вместо раскладки для Vercel получается обычный Node-сервер `dist/server/entry.mjs`, который отдаёт и статику с поиском, и маршруты `/api/*`. Без переменной сборка по-прежнему идёт под Vercel.
+
 ## Устройство
 
 ```

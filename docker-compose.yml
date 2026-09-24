@@ -1,0 +1,7 @@
+services:
+  web:
+    build: .
+    image: go-piece:latest
+    ports:
+      - "${PORT:-8080}:4321"
+    restart: unless-stopped
