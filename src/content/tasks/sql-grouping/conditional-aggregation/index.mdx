@@ -1,0 +1,42 @@
+---
+title: "Сводка по клиенту в одну строку"
+description: "Условная агрегация: несколько счётчиков по разным условиям за один проход."
+kind: implement
+topic: sql-grouping
+level: medium
+order: 40
+ordered: true
+---
+
+Для каждого клиента — одна строка со сводкой по его заказам:
+
+- `customer`;
+- `orders` — всего заказов;
+- `paid` — оплаченных (`status = 'paid'`);
+- `cancelled` — отменённых;
+- `paid_amount` — сумма оплаченных, `0`, если оплаченных нет.
+
+Порядок: по `customer`.
+
+<Reveal>
+
+```sql
+SELECT customer,
+       count(*)                                     AS orders,
+       count(*) FILTER (WHERE status = 'paid')      AS paid,
+       count(*) FILTER (WHERE status = 'cancelled') AS cancelled,
+       coalesce(sum(amount) FILTER (WHERE status = 'paid'), 0) AS paid_amount
+FROM orders
+GROUP BY customer
+ORDER BY customer;
+```
+
+**Один проход вместо четырёх подзапросов.** Каждый агрегат со своим
+`FILTER` видит только подходящие строки группы. В других СУБД то же пишут
+через `CASE`: `sum(CASE WHEN status = 'paid' THEN 1 ELSE 0 END)`.
+
+**Ловушка с `sum`.** У Бори и Гоши нет оплаченных заказов, и `sum(...)
+FILTER` возвращает `NULL`, а не `0`: сумма пустого набора в SQL — `NULL`.
+`count` в той же ситуации даёт `0`. Отсюда `coalesce`.
+
+</Reveal>

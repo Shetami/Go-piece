@@ -23,8 +23,9 @@ const target = process.env.DEPLOY_TARGET === 'node' ? 'node' : 'vercel'
 
 /**
  * Сайт остаётся статическим: все страницы собираются заранее. Адаптер нужен
- * ровно ради двух маршрутов в src/pages/api — они помечены `prerender = false`
- * и живут на сервере, потому что компилировать Go в браузере нечем.
+ * ровно ради маршрутов в src/pages/api — они помечены `prerender = false`
+ * и живут на сервере, потому что компилировать Go в браузере нечем. SQL-задачам
+ * сервер не нужен: Postgres для них работает прямо в браузере.
  */
 export default defineConfig({
   site: 'https://go-piece.vercel.app',
@@ -34,5 +35,10 @@ export default defineConfig({
   vite: {
     plugins: [tailwindcss()],
     cacheDir: isBuild ? 'node_modules/.vite-build' : 'node_modules/.vite',
+    // PGlite (Postgres для SQL-задач) сам находит свои .wasm и .data рядом с
+    // модулем через import.meta.url; пребандл это ломает, поэтому его не трогаем.
+    optimizeDeps: { exclude: ['@electric-sql/pglite'] },
+    // Воркер с Postgres импортирует модули — нужен ES-формат, а не iife.
+    worker: { format: 'es' },
   },
 })

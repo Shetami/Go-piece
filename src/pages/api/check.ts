@@ -4,6 +4,7 @@ import { BadRequest, handleError, json, readJson, requireCode, requireString, to
 import { compile, format, hasMain, type CompileResult } from '../../lib/playground.ts'
 import { taskCode } from '../../lib/task-files.ts'
 import { taskCheck, taskExpect } from '../../lib/task-secrets.ts'
+import { taskLang } from '../../data/practice.ts'
 import { normalize, sameOutput, type CheckRequest, type CheckResult, type OutputChunk, type Verdict } from '../../components/practice/protocol.ts'
 
 export const prerender = false
@@ -30,6 +31,12 @@ export const POST: APIRoute = async ({ request }) => {
     const tasks = await getCollection('tasks')
     const task = tasks.find((t) => t.id === id)
     if (!task) throw new BadRequest(`нет такой задачи: ${id}`, 404)
+
+    // SQL-задачи проверяются в браузере, где живёт их Postgres. Сюда приходят
+    // только «найди баг» — номеру строки всё равно, на каком он языке.
+    if (taskLang(task.data.topic) === 'sql' && task.data.kind !== 'bug') {
+      throw new BadRequest('SQL-задачи этого типа проверяются в браузере')
+    }
 
     switch (task.data.kind) {
       case 'output':

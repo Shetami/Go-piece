@@ -1,0 +1,47 @@
+---
+title: "Дубликаты адресов"
+description: "Найти адреса, под которыми зарегистрировано несколько пользователей. Регистр букв не важен."
+kind: implement
+topic: sql-grouping
+level: medium
+order: 20
+ordered: true
+related: [expression-index]
+lecture: databases/indexes
+---
+
+Перед тем как повесить на `email` уникальный индекс, надо найти дубликаты.
+Адреса, отличающиеся только регистром букв, считаются одним адресом.
+
+- колонки: `email` (в нижнем регистре), `users` — сколько раз он встречается;
+- только адреса, которые встречаются больше одного раза;
+- порядок: по `email`.
+
+<Reveal>
+
+```sql
+SELECT lower(email) AS email, count(*) AS users
+FROM users
+GROUP BY lower(email)
+HAVING count(*) > 1
+ORDER BY email;
+```
+
+**Группировать надо по выражению**, а не по колонке: `GROUP BY email` увидит
+три разных Ани. `vera@example.com` и `Vera@example.org` — разные адреса,
+домен тоже часть адреса.
+
+**Что спросят следом — как не допустить дубликатов впредь:**
+
+```sql
+CREATE UNIQUE INDEX users_email_lower ON users (lower(email));
+```
+
+Индекс по выражению: уникальность проверяется на `lower(email)`. Чтобы
+поиск по почте пользовался этим индексом, в запросе нужно то же выражение:
+`WHERE lower(email) = lower($1)`. Альтернатива — тип `citext`.
+
+**Как удалить дубликаты, оставив самый ранний** — `row_number()` в
+разделе по `lower(email)`; см. задачи об оконных функциях.
+
+</Reveal>

@@ -31,7 +31,8 @@ const taskCount = (await getCollection('tasks', (t) => !t.data.draft)).length
     <p class="text-muted mb-4">
       Задачи по Go в том виде, в каком их задают на собеседованиях: что выведет программа, найди баг, почини,
       реализуй. Код пишется прямо на странице, а компилирует и запускает его настоящий Go — с настоящими
-      сообщениями компилятора, <code class="font-mono text-sm">go vet</code> и дедлоками.
+      сообщениями компилятора, <code class="font-mono text-sm">go vet</code> и дедлоками. Рядом — задачи на SQL:
+      запросы выполняет настоящий PostgreSQL прямо в браузере.
     </p>
     <a href="/practice/" class="text-accent font-medium">Все задачи →</a>
   </section>

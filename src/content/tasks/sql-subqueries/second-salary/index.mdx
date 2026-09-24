@@ -1,0 +1,45 @@
+---
+title: "Вторая по величине зарплата"
+description: "Один из самых частых вопросов по SQL. С подвохом — максимум у двоих."
+kind: implement
+topic: sql-subqueries
+level: medium
+order: 20
+---
+
+Найдите вторую по величине зарплату в компании. Одинаковые суммы считаются
+одной: если максимальная зарплата у двоих, второе место — следующая сумма.
+
+- одна колонка `second_salary`, одна строка;
+- если второй суммы нет (все получают одинаково), — `NULL`.
+
+<Reveal>
+
+```sql
+SELECT max(salary) AS second_salary
+FROM employees
+WHERE salary < (SELECT max(salary) FROM employees);
+```
+
+**Ловушка — `ORDER BY salary DESC LIMIT 1 OFFSET 1`.** Максимум 300 у Анны
+и Вики, и вторая строка сортировки — снова 300. Нужны разные значения:
+
+```sql
+SELECT DISTINCT salary FROM employees
+ORDER BY salary DESC
+LIMIT 1 OFFSET 1;
+```
+
+Но если второй суммы нет, этот вариант вернёт **ноль строк**, а не `NULL`.
+Вариант с `max` возвращает строку всегда: агрегат по пустому набору — `NULL`.
+
+**Обобщение на N-ю зарплату** — `dense_rank()`:
+
+```sql
+SELECT max(salary) FROM (
+  SELECT salary, dense_rank() OVER (ORDER BY salary DESC) AS r
+  FROM employees
+) t WHERE r = 2;
+```
+
+</Reveal>

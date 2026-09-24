@@ -14,6 +14,7 @@
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { bracketMatching, foldGutter, foldKeymap, indentOnInput, syntaxHighlighting, HighlightStyle } from '@codemirror/language'
 import { go } from '@codemirror/lang-go'
+import { PostgreSQL, sql } from '@codemirror/lang-sql'
 import { setDiagnostics, type Diagnostic } from '@codemirror/lint'
 import { Compartment, EditorState, StateEffect, StateField, type Extension, type Text } from '@codemirror/state'
 import {
@@ -191,6 +192,23 @@ export function goDiagnostics(text: string, doc: Text, severity: 'error' | 'warn
   return out
 }
 
+/**
+ * Ошибка Postgres в редакторе. Postgres сообщает позицию в символах с единицы;
+ * подчёркиваем слово, на которое она указывает, — обычно это и есть виновник:
+ * неизвестная колонка, лишняя запятая, опечатка в ключевом слове.
+ */
+export function sqlDiagnostic(message: string, position: number | undefined, doc: Text): Diagnostic[] {
+  if (doc.length === 0) return []
+  if (position === undefined) {
+    const first = doc.line(1)
+    return [{ from: first.from, to: first.to, severity: 'error', message }]
+  }
+  const from = Math.min(Math.max(0, position - 1), doc.length)
+  const line = doc.lineAt(from)
+  const word = doc.sliceString(from, line.to).match(/^[\p{L}\p{N}_."]+/u)?.[0].length ?? 1
+  return [{ from, to: Math.min(from + word, line.to), severity: 'error', message }]
+}
+
 /** Показать (или стереть, если список пуст) сообщения Go в редакторе. */
 export function showDiagnostics(view: EditorView, diagnostics: Diagnostic[]): void {
   view.dispatch(setDiagnostics(view.state, diagnostics))
@@ -207,6 +225,8 @@ export interface EditorOptions {
   /** Задачам «найди баг» нужна колонка выбора строки. */
   onPick?: (line: number) => void
   readOnly: boolean
+  /** Грамматика подсветки. По умолчанию Go. */
+  language?: 'go' | 'sql'
 }
 
 export function editorExtensions(opts: EditorOptions): Extension[] {
@@ -221,7 +241,7 @@ export function editorExtensions(opts: EditorOptions): Extension[] {
     history(),
     indentOnInput(),
     bracketMatching(),
-    go(),
+    opts.language === 'sql' ? sql({ dialect: PostgreSQL }) : go(),
     syntaxHighlighting(goHighlight),
     pickedLineField,
     theme,
@@ -248,6 +268,7 @@ export function editorExtensions(opts: EditorOptions): Extension[] {
         },
       },
       // Tab отдан отступу: в Go отступы — табы, и это не предмет для спора.
+      // В SQL тоже удобнее, чем прыжок фокуса прочь из редактора.
       indentWithTab,
       ...defaultKeymap,
       ...historyKeymap,

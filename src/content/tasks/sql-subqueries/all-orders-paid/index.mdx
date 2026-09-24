@@ -1,0 +1,57 @@
+---
+title: "Все заказы оплачены"
+description: "Квантор «для всех» в SQL. Ловушки — клиент без заказов и статус NULL."
+kind: implement
+topic: sql-subqueries
+level: medium
+order: 60
+ordered: true
+---
+
+Найдите клиентов, у которых **все** заказы оплачены (`status = 'paid'`).
+Клиенты без единого заказа в ответ не входят.
+
+Статус может быть пуст, если банк ещё не подтвердил оплату, — такой заказ
+оплаченным не считается.
+
+- колонка: `name`;
+- порядок: по `name`.
+
+<Reveal>
+
+```sql
+SELECT c.name
+FROM customers c
+WHERE EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id)
+  AND NOT EXISTS (
+    SELECT 1 FROM orders o
+    WHERE o.customer_id = c.id
+      AND o.status IS DISTINCT FROM 'paid'
+  )
+ORDER BY c.name;
+```
+
+**«Все оплачены» = «нет ни одного неоплаченного».** В SQL нет квантора «для
+всех», поэтому его переворачивают в `NOT EXISTS` с отрицанием условия.
+
+**Ловушка 1 — пустое множество.** У Веры нет заказов, и «нет ни одного
+неоплаченного» для неё истинно. Отсюда отдельный `EXISTS`.
+
+**Ловушка 2 — `NULL`.** Условие `o.status <> 'paid'` для `NULL` даёт
+`UNKNOWN`, неподтверждённый заказ Гоши не найдётся, и Гоша попадёт в ответ.
+`IS DISTINCT FROM` считает `NULL` отличным от `'paid'`.
+
+**Через группировку** — тоже классика:
+
+```sql
+SELECT c.name
+FROM customers c
+JOIN orders o ON o.customer_id = c.id
+GROUP BY c.id, c.name
+HAVING bool_and(o.status IS NOT DISTINCT FROM 'paid')
+ORDER BY c.name;
+```
+
+или `HAVING count(*) = count(*) FILTER (WHERE o.status = 'paid')`.
+
+</Reveal>

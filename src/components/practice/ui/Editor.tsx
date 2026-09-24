@@ -29,10 +29,12 @@ interface Props {
   onPick?: (line: number) => void
   pickedLine?: number
   readOnly: boolean
+  /** Грамматика подсветки; задаётся один раз при создании редактора. */
+  language?: 'go' | 'sql'
   ref?: Ref<EditorHandle>
 }
 
-export default function Editor({ code, onChange, onRun, onFormat, onPick, pickedLine, readOnly, ref }: Props) {
+export default function Editor({ code, onChange, onRun, onFormat, onPick, pickedLine, readOnly, language = 'go', ref }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
 
@@ -51,6 +53,7 @@ export default function Editor({ code, onChange, onRun, onFormat, onPick, picked
         onFormat: () => handlers.current.onFormat(),
         onPick: onPick ? (line) => handlers.current.onPick?.(line) : undefined,
         readOnly,
+        language,
       }),
     })
 

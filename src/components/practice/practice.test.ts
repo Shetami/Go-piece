@@ -4,7 +4,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { TASK_KINDS, TASK_LEVELS, TASK_TOPICS } from '../../data/practice.ts'
+import { TASK_KINDS, TASK_LEVELS, TASK_TOPICS, type TaskTopicId, taskLang } from '../../data/practice.ts'
 
 /**
  * Проверки целостности задач.
@@ -17,6 +17,8 @@ import { TASK_KINDS, TASK_LEVELS, TASK_TOPICS } from '../../data/practice.ts'
  *
  * Здесь нет и не может быть прогона кода на Go: тесты не ходят в сеть.
  * Что задачи действительно решаются, проверено запросами к /api/check руками.
+ * SQL-задачи — другое дело: их Postgres работает локально, и sql.test.ts
+ * прогоняет каждую по-настоящему.
  */
 
 const tasksDir = fileURLToPath(new URL('../../content/tasks/', import.meta.url))
@@ -76,6 +78,17 @@ function collect(): Task[] {
 
 const TASKS = collect()
 
+/** Язык задачи задаёт тема. Неизвестную тему ловит отдельный тест — здесь считаем её Go. */
+function langOf(task: Task): 'go' | 'sql' {
+  const known = TASK_TOPICS.some((t) => t.id === task.front.topic)
+  return known ? taskLang(task.front.topic as TaskTopicId) : 'go'
+}
+
+/** Имя файла заготовки с поправкой на язык: starter.go или starter.sql. */
+function codeFile(task: Task, base: 'starter' | 'solution'): string {
+  return `${base}.${langOf(task)}`
+}
+
 test('задачи вообще есть', () => {
   assert.ok(TASKS.length > 0, 'в src/content/tasks ни одной задачи')
 })
@@ -97,12 +110,27 @@ test('фронтматтер не разваливает YAML', () => {
 
 test('у каждой задачи есть заготовка и эталон', () => {
   for (const task of TASKS) {
-    assert.ok(task.files.has('starter.go'), `${task.id}: нет starter.go`)
-    assert.ok(task.files.has('solution.go'), `${task.id}: нет solution.go`)
+    for (const name of [codeFile(task, 'starter'), codeFile(task, 'solution')]) {
+      assert.ok(task.files.has(name), `${task.id}: нет ${name}`)
+    }
+    if (langOf(task) === 'sql') {
+      assert.ok(task.files.has('schema.sql'), `${task.id}: нет schema.sql`)
+      // Файлы чужого языка рядом — почти наверняка задача лежит не в той теме.
+      assert.ok(![...task.files].some((f) => f.endsWith('.go')), `${task.id}: .go-файлы в SQL-задаче`)
+      continue
+    }
     for (const name of ['starter.go', 'solution.go']) {
       const source = readFileSync(join(task.dir, name), 'utf8')
       assert.match(source, /^package main\b/m, `${task.id}/${name}: не package main`)
     }
+  }
+})
+
+test('ordered имеет смысл только у SQL-задач', () => {
+  for (const task of TASKS) {
+    if (task.front.ordered === undefined) continue
+    assert.equal(langOf(task), 'sql', `${task.id}: ordered только для SQL`)
+    assert.match(task.front.ordered, /^(true|false)$/, `${task.id}: ordered — true или false`)
   }
 })
 
@@ -120,7 +148,8 @@ test('kind, topic и level взяты из справочника', () => {
 })
 
 test('у задач «реализуй» есть скрытые тесты, и в заготовке нет main', () => {
-  for (const task of TASKS.filter((t) => t.front.kind === 'implement')) {
+  // У SQL-задач скрытых тестов нет: ответ сверяется с результатом solution.sql.
+  for (const task of TASKS.filter((t) => t.front.kind === 'implement' && langOf(t) === 'go')) {
     assert.ok(task.files.has('check.go'), `${task.id}: нет check.go`)
 
     const check = readFileSync(join(task.dir, 'check.go'), 'utf8')
@@ -135,7 +164,7 @@ test('у задач «реализуй» есть скрытые тесты, и 
 })
 
 test('у задач «почини» есть непустой эталонный вывод', () => {
-  for (const task of TASKS.filter((t) => t.front.kind === 'fix')) {
+  for (const task of TASKS.filter((t) => t.front.kind === 'fix' && langOf(t) === 'go')) {
     assert.ok(task.files.has('expect.txt'), `${task.id}: нет expect.txt`)
     const expected = readFileSync(join(task.dir, 'expect.txt'), 'utf8')
     assert.notEqual(expected.trim(), '', `${task.id}/expect.txt: пустой`)
@@ -151,8 +180,9 @@ test('bugLine есть только у «найди баг» и указывае
     }
     assert.ok(raw, `${task.id}: для kind: bug нужен bugLine`)
     const line = Number(raw)
-    const lines = readFileSync(join(task.dir, 'starter.go'), 'utf8').split('\n')
-    assert.ok(Number.isInteger(line) && line >= 1 && line <= lines.length, `${task.id}: bugLine=${raw} вне starter.go`)
+    const starter = codeFile(task, 'starter')
+    const lines = readFileSync(join(task.dir, starter), 'utf8').split('\n')
+    assert.ok(Number.isInteger(line) && line >= 1 && line <= lines.length, `${task.id}: bugLine=${raw} вне ${starter}`)
     assert.notEqual(lines[line - 1]?.trim(), '', `${task.id}: bugLine указывает на пустую строку`)
   }
 })

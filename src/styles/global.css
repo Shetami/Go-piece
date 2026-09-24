@@ -5194,6 +5194,58 @@ body {
   padding: 0 0.25rem;
 }
 
+/* ─── SQL-задачи: схема под редактором и таблица результата ─────────────── */
+
+.sql-schema {
+  margin-top: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.sql-schema summary {
+  cursor: pointer;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.sql-schema pre {
+  margin: 0;
+  padding: 0.75rem;
+  border-top: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  max-height: 22rem;
+  overflow: auto;
+  color: var(--ink);
+}
+.sql-table-wrap {
+  overflow-x: auto;
+}
+.sql-table {
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  min-width: 100%;
+}
+.sql-table th,
+.sql-table td {
+  border: 1px solid var(--line);
+  padding: 0.2rem 0.6rem;
+  text-align: left;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.sql-table th {
+  background: var(--surface-2);
+  font-weight: 600;
+}
+.sql-table td.sql-null {
+  color: var(--muted);
+  font-style: italic;
+}
+
 /* ─────────────────────── «Проверь себя» в конце лекции ─────────────────────── */
 
 .quiz-head {

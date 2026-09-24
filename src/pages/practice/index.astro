@@ -1,7 +1,7 @@
 ---
 import { getCollection } from 'astro:content'
 import BaseLayout from '../../layouts/BaseLayout.astro'
-import { TASK_KINDS, TASK_LEVELS, TASK_TOPICS, taskLevel } from '../../data/practice.ts'
+import { TASK_KINDS, TASK_LANGS, TASK_LEVELS, TASK_TOPICS, taskLang, taskLevel } from '../../data/practice.ts'
 
 /*
  * Порядок: темы — как они перечислены в TASK_TOPICS (список составлен от
@@ -22,20 +22,23 @@ const tasks = (await getCollection('tasks', (t) => !t.data.draft)).sort((a, b) =
 // обещает несуществующее и раздражает больше, чем её отсутствие.
 const usedKinds = new Set(tasks.map((t) => t.data.kind))
 const usedTopics = new Set(tasks.map((t) => t.data.topic))
+const usedLangs = new Set(tasks.map((t) => taskLang(t.data.topic)))
+const langs = TASK_LANGS.filter((l) => usedLangs.has(l.id))
 const kinds = TASK_KINDS.filter((k) => usedKinds.has(k.id))
 const topics = TASK_TOPICS.filter((t) => usedTopics.has(t.id))
 ---
 
 <BaseLayout
   title="Практика"
-  description="Задачи по Go в том виде, в каком их задают на собеседованиях: что выведет программа, найди баг, почини, реализуй. Код пишется в редакторе и исполняется настоящим компилятором."
+  description="Задачи по Go и SQL в том виде, в каком их задают на собеседованиях: что выведет программа или вернёт запрос, найди баг, почини, реализуй. Код исполняется настоящим компилятором Go и настоящим PostgreSQL."
 >
   <h1 class="text-3xl font-bold tracking-tight mb-2">Практика</h1>
   <p class="text-muted mb-8 max-w-2xl">
     Задачи разложены по двум осям: <b class="text-ink font-medium">как спрашивают</b> и <b class="text-ink font-medium"
       >о чём спрашивают</b
     >. Первая ось важнее, чем кажется: одну и ту же тему спрашивают четырьмя разными способами, и готовиться к ним надо
-    по-разному. Код вы пишете в редакторе на странице, а компилирует и запускает его настоящий Go.
+    по-разному. Код вы пишете в редакторе на странице, а исполняет его настоящий Go — или, для задач на SQL, настоящий
+    PostgreSQL прямо в браузере.
   </p>
 
   <div class="mb-8 grid gap-4 max-w-4xl" data-pagefind-ignore>
@@ -51,6 +54,11 @@ const topics = TASK_TOPICS.filter((t) => usedTopics.has(t.id))
 
   <div class="flex flex-wrap gap-6 mb-6 text-sm" data-pagefind-ignore>
     <div class="flex flex-wrap items-center gap-2">
+      <span class="text-muted">Язык:</span>
+      <button type="button" class="pr-filter is-on" data-filter="lang" data-value="">все</button>
+      {langs.map((l) => <button type="button" class="pr-filter" data-filter="lang" data-value={l.id}>{l.title}</button>)}
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
       <span class="text-muted">Формат:</span>
       <button type="button" class="pr-filter is-on" data-filter="kind" data-value="">все</button>
       {kinds.map((k) => <button type="button" class="pr-filter" data-filter="kind" data-value={k.id}>{k.title}</button>)}
@@ -65,7 +73,7 @@ const topics = TASK_TOPICS.filter((t) => usedTopics.has(t.id))
   <ul class="grid gap-4 max-w-4xl" id="pr-list">
     {
       tasks.map((task) => (
-        <li data-kind={task.data.kind} data-topic={task.data.topic}>
+        <li data-kind={task.data.kind} data-topic={task.data.topic} data-lang={taskLang(task.data.topic)}>
           <a href={`/practice/${task.id}/`} class="block rounded-xl border border-line bg-surface p-5 hover:border-muted">
             <span class="flex flex-wrap items-center gap-2 mb-2">
               <span class="pr-badge pr-badge-kind">{TASK_KINDS.find((k) => k.id === task.data.kind)?.title}</span>
@@ -96,12 +104,13 @@ const topics = TASK_TOPICS.filter((t) => usedTopics.has(t.id))
    */
   const list = document.getElementById('pr-list')
   const empty = document.getElementById('pr-empty')
-  const picked: Record<string, string> = { kind: '', topic: '' }
+  const picked: Record<string, string> = { lang: '', kind: '', topic: '' }
 
   function apply() {
     let shown = 0
     for (const li of list?.querySelectorAll<HTMLElement>('li') ?? []) {
       const ok =
+        (picked.lang === '' || li.dataset.lang === picked.lang) &&
         (picked.kind === '' || li.dataset.kind === picked.kind) &&
         (picked.topic === '' || li.dataset.topic === picked.topic)
       li.hidden = !ok
@@ -126,7 +135,7 @@ const topics = TASK_TOPICS.filter((t) => usedTopics.has(t.id))
 
   // Ссылка с фильтром (её ставит страница задачи) должна открываться уже отфильтрованной.
   const params = new URLSearchParams(location.search)
-  for (const group of ['kind', 'topic']) {
+  for (const group of ['lang', 'kind', 'topic']) {
     const value = params.get(group)
     if (!value) continue
     document.querySelector<HTMLButtonElement>(`.pr-filter[data-filter="${group}"][data-value="${value}"]`)?.click()

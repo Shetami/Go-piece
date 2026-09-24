@@ -1,0 +1,44 @@
+---
+title: "last_value возвращает текущую строку"
+description: "Самая свежая цена по тикеру через last_value — а в колонке та же цена, что в строке."
+kind: fix
+topic: sql-window
+level: hard
+order: 40
+ordered: true
+---
+
+Рядом с каждой ценой хотели показать самую свежую цену того же тикера.
+`last_value` выдаёт в каждой строке её собственную цену.
+
+Почините. Ожидается у всех строк AAA `latest_price` = 9.80, у BBB — 52.25.
+
+<Reveal>
+
+**`last_value` берёт последнюю строку рамки, а рамка кончается на текущей
+строке.** С `ORDER BY` в окне рамка по умолчанию — от начала раздела до
+текущей строки (и её ровесников). Последняя строка такой рамки — сама
+текущая.
+
+**Расширить рамку до конца раздела:**
+
+```sql
+last_value(price) OVER (
+  PARTITION BY ticker
+  ORDER BY day
+  ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+)
+```
+
+**Проще — перевернуть сортировку и взять первую:**
+
+```sql
+first_value(price) OVER (PARTITION BY ticker ORDER BY day DESC)
+```
+
+`first_value` рамка по умолчанию не мешает: первая строка в ней всегда есть.
+
+Та же ловушка у `nth_value`. А вот `lag`, `lead`, `row_number`, `rank` на
+рамку не смотрят вовсе — они работают со всем разделом.
+
+</Reveal>

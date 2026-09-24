@@ -9,13 +9,20 @@
  * острову утащить этот модуль на клиент, и открытым станет всё, что в нём есть.
  */
 
-const starters = import.meta.glob('../content/tasks/**/starter.go', {
+const starters = import.meta.glob('../content/tasks/**/starter.{go,sql}', {
   query: '?raw',
   import: 'default',
   eager: true,
 }) as Record<string, string>
 
-const solutions = import.meta.glob('../content/tasks/**/solution.go', {
+const solutions = import.meta.glob('../content/tasks/**/solution.{go,sql}', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>
+
+/** Схема и данные SQL-задачи: заливаются в Postgres перед первым запросом. */
+const schemas = import.meta.glob('../content/tasks/**/schema.sql', {
   query: '?raw',
   import: 'default',
   eager: true,
@@ -36,8 +43,9 @@ function byTaskId(files: Record<string, string>, name: string): Map<string, stri
   return out
 }
 
-const STARTERS = byTaskId(starters, 'starter.go')
-const SOLUTIONS = byTaskId(solutions, 'solution.go')
+const STARTERS = new Map([...byTaskId(starters, 'starter.go'), ...byTaskId(starters, 'starter.sql')])
+const SOLUTIONS = new Map([...byTaskId(solutions, 'solution.go'), ...byTaskId(solutions, 'solution.sql')])
+const SCHEMAS = byTaskId(schemas, 'schema.sql')
 
 export interface TaskCode {
   starter: string
@@ -50,10 +58,17 @@ export interface TaskCode {
  */
 export function taskCode(id: string): TaskCode {
   const starter = STARTERS.get(id)
-  if (starter === undefined) throw new Error(`задача ${id}: нет starter.go`)
+  if (starter === undefined) throw new Error(`задача ${id}: нет starter.go или starter.sql`)
   const solution = SOLUTIONS.get(id)
-  if (solution === undefined) throw new Error(`задача ${id}: нет solution.go`)
+  if (solution === undefined) throw new Error(`задача ${id}: нет solution.go или solution.sql`)
   return { starter, solution }
+}
+
+/** Схема SQL-задачи. Для SQL её отсутствие — такая же ошибка сборки, как отсутствие заготовки. */
+export function taskSchema(id: string): string {
+  const schema = SCHEMAS.get(id)
+  if (schema === undefined) throw new Error(`задача ${id}: нет schema.sql`)
+  return schema
 }
 
 /** Все задачи, у которых есть код, — для проверки целостности в тестах. */

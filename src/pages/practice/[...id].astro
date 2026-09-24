@@ -5,8 +5,9 @@ import Term from '../../components/content/Term.astro'
 import Callout from '../../components/content/Callout.astro'
 import Reveal from '../../components/content/Reveal.astro'
 import TaskRunner from '../../components/practice/ui/TaskRunner.tsx'
-import { taskCode } from '../../lib/task-files.ts'
-import { taskKind, taskLevel, taskTopic } from '../../data/practice.ts'
+import SqlRunner from '../../components/practice/ui/SqlRunner.tsx'
+import { taskCode, taskSchema } from '../../lib/task-files.ts'
+import { taskKind, taskLang, taskLevel, taskTopic } from '../../data/practice.ts'
 
 export async function getStaticPaths() {
   const tasks = await getCollection('tasks', (t) => !t.data.draft)
@@ -14,12 +15,14 @@ export async function getStaticPaths() {
 }
 
 const { entry } = Astro.props
-const { title, description, kind, topic, level, related, lecture } = entry.data
+const { title, description, kind, topic, level, related, lecture, ordered } = entry.data
 const { Content } = await render(entry)
 
 // Заготовка и эталон читаются на сборке и уезжают в остров пропсами.
 // Скрытые тесты и эталонный вывод сюда не попадают — они только у /api/check.
 const { starter, solution } = taskCode(entry.id)
+const lang = taskLang(topic)
+const schema = lang === 'sql' ? taskSchema(entry.id) : ''
 
 const kindInfo = taskKind(kind)
 const topicInfo = taskTopic(topic)
@@ -62,18 +65,45 @@ const next = idx >= 0 ? siblings[idx + 1] : undefined
       </div>
 
       <div data-pagefind-ignore>
-        <TaskRunner
-          client:load
-          taskId={entry.id}
-          kind={kind}
-          prompt={kindInfo.prompt}
-          starter={starter}
-          solution={solution}
-        />
-        <p class="text-xs text-muted mt-3">
-          Код компилирует и исполняет песочница <a href="https://go.dev/play/" class="text-accent">go.dev</a>: настоящий
-          компилятор, настоящий рантайм. Часы там поддельные — <code>time.Sleep</code> не стоит ничего, а сеть и файлы недоступны.
-        </p>
+        {
+          lang === 'sql' ? (
+            <>
+              <SqlRunner
+                client:load
+                taskId={entry.id}
+                kind={kind}
+                prompt={kindInfo.promptSql}
+                starter={starter}
+                solution={solution}
+                schema={schema}
+                ordered={ordered}
+              />
+              <p class="text-xs text-muted mt-3">
+                Запрос выполняет настоящий PostgreSQL, собранный в WebAssembly (<a
+                  href="https://pglite.dev/"
+                  class="text-accent">PGlite</a
+                >), — прямо в браузере, без сервера. Каждый прогон идёт в транзакции и откатывается, так что данные задачи не
+                испортить.
+              </p>
+            </>
+          ) : (
+            <>
+              <TaskRunner
+                client:load
+                taskId={entry.id}
+                kind={kind}
+                prompt={kindInfo.prompt}
+                starter={starter}
+                solution={solution}
+              />
+              <p class="text-xs text-muted mt-3">
+                Код компилирует и исполняет песочница <a href="https://go.dev/play/" class="text-accent">go.dev</a>: настоящий
+                компилятор, настоящий рантайм. Часы там поддельные — <code>time.Sleep</code> не стоит ничего, а сеть и файлы
+                недоступны.
+              </p>
+            </>
+          )
+        }
       </div>
     </div>
 

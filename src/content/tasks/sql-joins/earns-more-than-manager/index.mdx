@@ -1,0 +1,38 @@
+---
+title: "Зарплата выше, чем у начальника"
+description: "Классика — соединение таблицы с самой собой."
+kind: implement
+topic: sql-joins
+level: easy
+order: 40
+ordered: true
+---
+
+В таблице `employees` у каждого сотрудника есть ссылка на руководителя —
+`manager_id`. Найдите тех, кто получает **строго больше** своего
+непосредственного руководителя.
+
+- колонки: `name`, `salary`, `manager_name`, `manager_salary`;
+- порядок: по `name`.
+
+<Reveal>
+
+```sql
+SELECT e.name, e.salary, m.name AS manager_name, m.salary AS manager_salary
+FROM employees e
+JOIN employees m ON m.id = e.manager_id
+WHERE e.salary > m.salary
+ORDER BY e.name;
+```
+
+**Самосоединение** — та же таблица под двумя псевдонимами: `e` — сотрудник,
+`m` — его руководитель. Без псевдонимов Postgres не поймёт, о какой копии
+речь.
+
+**`INNER JOIN` сам отсекает директора**: у Анны `manager_id` пуст, пары для
+неё нет. Здесь это ровно то, что нужно.
+
+**Граница.** Глеб получает столько же, сколько Борис, — «больше» не значит
+«не меньше». Проверка `>=` добавила бы его в ответ.
+
+</Reveal>

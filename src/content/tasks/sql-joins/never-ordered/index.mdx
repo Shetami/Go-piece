@@ -1,0 +1,45 @@
+---
+title: "Товары, которые никто не заказывал"
+description: "Анти-соединение. В позициях заказа бывает пустой product_id, и это ломает самое очевидное решение."
+kind: implement
+topic: sql-joins
+level: easy
+order: 30
+ordered: true
+---
+
+Найдите товары, которые ни разу не попадали в заказы.
+
+- колонки: `id`, `name`;
+- порядок: по `id`.
+
+Обратите внимание на позиции «под заказ» — у них `product_id` пуст.
+
+<Reveal>
+
+```sql
+SELECT p.id, p.name
+FROM products p
+WHERE NOT EXISTS (
+  SELECT 1 FROM order_items i WHERE i.product_id = p.id
+)
+ORDER BY p.id;
+```
+
+**Три способа написать анти-соединение:**
+
+1. `NOT EXISTS` — как выше. Работает всегда.
+2. `LEFT JOIN order_items i ON i.product_id = p.id WHERE i.product_id IS NULL`
+   — тоже работает (плюс `DISTINCT` не нужен: у ненайденных строка одна).
+3. `WHERE id NOT IN (SELECT product_id FROM order_items)` — **вернёт пустоту**.
+
+**Почему `NOT IN` ломается.** `x NOT IN (1, 2, NULL)` раскрывается в
+`x <> 1 AND x <> 2 AND x <> NULL`. Последнее — `UNKNOWN`, и всё выражение
+никогда не бывает `TRUE`. Одна пустая позиция в заказах — и запрос молча
+перестаёт что-либо находить.
+
+**Правило:** `NOT IN` с подзапросом — только если колонка `NOT NULL`, а лучше
+никогда. Postgres к тому же умеет превращать `NOT EXISTS` в hash anti join,
+а `NOT IN` по подзапросу — не всегда.
+
+</Reveal>

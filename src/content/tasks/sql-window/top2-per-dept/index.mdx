@@ -1,0 +1,45 @@
+---
+title: "Двое лучших в каждом отделе"
+description: "Top-N в каждой группе — ROW_NUMBER в разделе по отделу."
+kind: implement
+topic: sql-window
+level: medium
+order: 10
+ordered: true
+---
+
+Для каждого отдела — по два сотрудника с самой высокой зарплатой.
+
+- при равной зарплате выше тот, чьё имя раньше по алфавиту — поэтому в
+  каждом отделе ровно двое (или меньше, если людей меньше);
+- колонки: `dept`, `name`, `salary`;
+- порядок: по `dept`, затем по `salary` по убыванию, затем по `name`.
+
+<Reveal>
+
+```sql
+SELECT dept, name, salary
+FROM (
+  SELECT dept, name, salary,
+         row_number() OVER (PARTITION BY dept ORDER BY salary DESC, name) AS rn
+  FROM employees
+) ranked
+WHERE rn <= 2
+ORDER BY dept, salary DESC, name;
+```
+
+**`LIMIT` ограничивает весь результат, а не группу.** Нужна нумерация внутри
+каждого отдела — `PARTITION BY dept`, — и отбор по номеру.
+
+**Оконную функцию нельзя поставить в `WHERE`**: окна считаются после
+`WHERE` и `GROUP BY`. Поэтому нужен подзапрос или CTE.
+
+**Какую функцию брать.** `row_number` — ровно N строк, ничьи разбиваются
+вторым ключом сортировки. `rank` или `dense_rank` с `<= 2` вернули бы в
+Бэкенде троих: Бориса и Вику с одинаковыми 250. Что правильно — зависит от
+того, как бизнес понимает «двое лучших».
+
+**В Postgres есть ещё `DISTINCT ON`** — но только для top-1:
+`SELECT DISTINCT ON (dept) ... ORDER BY dept, salary DESC`.
+
+</Reveal>
