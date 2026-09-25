@@ -1,0 +1,49 @@
+---
+title: Ошибка с названием операции
+description: Свой тип-обёртка для ошибок — текст, Unwrap для errors.Is и errors.As и конструктор, который не превращает nil в ненулевую ошибку.
+kind: implement
+topic: errors
+level: easy
+order: 170
+---
+
+Допишите `Error`, добавьте `Unwrap` и напишите `Wrap`.
+
+Что проверяют скрытые тесты:
+
+- `Wrap("save", errDisk).Error()` → `"save: диск полон"`;
+- `Wrap("save", nil)` → настоящий `nil`;
+- `errors.Is` находит исходную ошибку через две обёртки `OpError` и одну
+  от `fmt.Errorf`;
+- `errors.As` достаёт `*OpError`.
+
+<Reveal>
+
+```go
+func (e *OpError) Error() string { return e.Op + ": " + e.Err.Error() }
+func (e *OpError) Unwrap() error { return e.Err }
+
+func Wrap(op string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &OpError{Op: op, Err: err}
+}
+```
+
+**`Unwrap` — это всё, что нужно для цепочки.** `errors.Is` и `errors.As`
+вызывают его у каждого звена. Без него обёртка обрывает цепочку, и
+сентинел под ней становится невидим.
+
+**Проверка на `nil` в конструкторе обязательна.** Без неё `Wrap(op, nil)`
+вернул бы ошибку там, где ошибки не было, — и `Error()` у неё упал бы на
+`e.Err.Error()`.
+
+**Возвращать надо литерал `nil`.** Если завести `var e *OpError` и
+вернуть его — вызывающий получит интерфейс с типом `*OpError` и
+`nil`-значением, а `err != nil` будет истинным.
+
+Так устроены `*os.PathError`, `*net.OpError` и `*url.Error` в стандартной
+библиотеке.
+
+</Reveal>

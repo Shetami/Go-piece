@@ -1,0 +1,49 @@
+---
+title: Контекст, отменённый ещё до запроса
+description: Хелпер создаёт контекст с таймаутом в секунду и аккуратно откладывает cancel. Запрос, которому нужно 10 мс, всё равно кончается ошибкой. Почините.
+kind: fix
+topic: context
+level: easy
+order: 120
+related: [context-cancellation]
+---
+
+`requestCtx` создаёт контекст с таймаутом и, как учат, откладывает
+`cancel`. Запросу нужно 10 мс из отведённой секунды. Программа печатает:
+
+```
+запрос: context canceled
+```
+
+Почините. Ожидаемый вывод:
+
+```
+запрос: <nil>
+```
+
+<Reveal>
+
+**`defer cancel()` выполняется при выходе из `requestCtx`** — то есть
+раньше, чем контекст хоть кто-то использовал. Наружу уходит уже
+отменённый контекст, и `query` сразу видит `ctx.Done()`.
+
+Правило «сразу после `WithTimeout` пишите `defer cancel()`» верно для
+функции, которая *сама пользуется* контекстом до конца. Функция, которая
+контекст создаёт и отдаёт, должна отдать и `cancel`.
+
+**Как правильно:**
+
+```go
+func requestCtx(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(parent, time.Second)
+}
+
+ctx, cancel := requestCtx(context.Background())
+defer cancel()
+```
+
+**Почему бы не выбросить `cancel` совсем.** `go vet` на это ругается
+(`lostcancel`), и не зря: без `cancel` таймер и связь с родителем живут
+до истечения таймаута, даже если работа давно закончилась.
+
+</Reveal>

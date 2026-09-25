@@ -1,0 +1,8 @@
+1. go 5
+2. java 5
+3. python 5
+4. ruby 5
+5. kotlin 3
+6. rust 3
+7. zig 3
+8. c 1

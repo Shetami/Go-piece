@@ -1,0 +1,73 @@
+---
+title: Обобщённый список с итератором
+description: Односвязный список для любого типа с PushBack за O(1) и итератором для range-over-func. И что делать, когда цикл сделал break.
+kind: implement
+topic: generics
+level: medium
+order: 140
+---
+
+Допишите `List[T]`: поля, `PushBack`, `Len` и `All`.
+
+Что проверяют скрытые тесты:
+
+- нулевой `List` готов к работе; `PushBack` трёх строк и обход через
+  `for v := range l.All()` дают их по порядку;
+- пустой список не выдаёт ничего;
+- `break` в цикле по `All()` работает — итератор не зовёт `yield` после
+  отказа (иначе рантайм паникует);
+- `slices.Sorted(l.All())` работает — итератор стандартный;
+- 200 000 вставок — быстро.
+
+<Reveal>
+
+```go
+type node[T any] struct {
+	val  T
+	next *node[T]
+}
+
+type List[T any] struct {
+	head, tail *node[T]
+	n          int
+}
+
+func (l *List[T]) PushBack(v T) {
+	nd := &node[T]{val: v}
+	if l.tail == nil {
+		l.head = nd
+	} else {
+		l.tail.next = nd
+	}
+	l.tail = nd
+	l.n++
+}
+
+func (l *List[T]) All() iter.Seq[T] {
+	return func(yield func(T) bool) {
+		for nd := l.head; nd != nil; nd = nd.next {
+			if !yield(nd.val) {
+				return
+			}
+		}
+	}
+}
+```
+
+**Указатель на хвост** даёт вставку в конец за `O(1)`. Без него каждый
+`PushBack` шёл бы от головы до конца, и 200 000 вставок стоили бы
+двадцать миллиардов шагов.
+
+**Нулевое значение работает само:** `head` и `tail` — `nil`, `n` — 0.
+Конструктор не нужен.
+
+**`iter.Seq[T]` (Go 1.23) — это `func(yield func(T) bool)`.** Тело цикла
+`range` становится функцией `yield`. Она возвращает `false`, если в теле
+случился `break` или `return`, — и тогда итератор обязан остановиться.
+Позвать `yield` ещё раз — паника рантайма.
+
+**Стандартный тип итератора** открывает всю библиотеку: `slices.Collect`,
+`slices.Sorted`, `maps.Collect` и прочие работают с вашим списком без
+единой строчки кода.
+
+</Reveal>

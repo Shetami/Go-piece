@@ -1,0 +1,60 @@
+---
+title: Запись лога без выделений памяти
+description: Дописать key=value в готовый буфер так, чтобы при достаточной вместимости не выделялось ни байта. Семейство strconv.Append и проверка через AllocsPerRun.
+kind: implement
+topic: runtime
+level: medium
+order: 110
+related: [escape-analysis, pprof-alloc]
+lecture: go-runtime/memory
+---
+
+Напишите тело `AppendKV`. Так устроены быстрые логгеры: каждая запись
+дописывается в переиспользуемый буфер, и на горячем пути нет ни одного
+выделения памяти.
+
+Что проверяют скрытые тесты:
+
+- числа, в том числе отрицательные, строки в кавычках с экранированием,
+  `true`, неизвестный тип → `?`;
+- функция дописывает к тому, что уже есть в `dst`;
+- при буфере на 256 байт — **ноль** выделений памяти на вызов для каждого
+  из трёх типов (`testing.AllocsPerRun`).
+
+<Reveal>
+
+```go
+func AppendKV(dst []byte, key string, val any) []byte {
+	dst = append(dst, key...)
+	dst = append(dst, '=')
+	switch v := val.(type) {
+	case int:
+		return strconv.AppendInt(dst, int64(v), 10)
+	case string:
+		return strconv.AppendQuote(dst, v)
+	case bool:
+		return strconv.AppendBool(dst, v)
+	default:
+		return append(dst, '?')
+	}
+}
+```
+
+**Откуда обычно берутся выделения.** `fmt.Sprintf("%s=%d", k, v)` —
+строка-результат плюс упаковка аргументов в `any`. `strconv.Itoa(v)` —
+новая строка, которую потом копируют в буфер. `append(dst, s...)` сам по
+себе не выделяет, пока хватает вместимости.
+
+**`strconv.AppendInt`, `AppendQuote`, `AppendBool`** форматируют прямо в
+переданный слайс. Это та же работа, что у `Itoa` и `Quote`, но без
+промежуточной строки.
+
+**`append(dst, key...)`** — строку можно дописать к `[]byte` напрямую, без
+`[]byte(key)`.
+
+**А как же `val any`?** Упаковка в интерфейс происходит у вызывающего, и в
+тесте переменная уже лежит в `any` — в замер это не попадает. В настоящем
+логгере от `any` уходят типизированными полями: `slog.Int`,
+`slog.String`, `zap.Int`.
+
+</Reveal>

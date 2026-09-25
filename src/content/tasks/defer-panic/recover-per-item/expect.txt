@@ -1,0 +1,4 @@
+5 → 20
+сбой на 0 - runtime error: integer divide by zero
+20 → 5
+конец
