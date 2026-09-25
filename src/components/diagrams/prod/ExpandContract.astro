@@ -1,0 +1,45 @@
+---
+/**
+ * Переименование колонки через расширение и сжатие: шесть шагов, на каждом
+ * соседние версии кода совместимы со схемой.
+ */
+const steps = [
+  { t: '1. расширить', schema: 'name + full_name', code: 'пишет name', risk: false },
+  { t: '2. писать в обе', schema: 'name + full_name', code: 'пишет в обе', risk: false },
+  { t: '3. заполнить', schema: 'name + full_name', code: 'бэкфилл старых', risk: false },
+  { t: '4. читать новое', schema: 'name + full_name', code: 'читает full_name', risk: false },
+  { t: '5. не писать', schema: 'name + full_name', code: 'только full_name', risk: false },
+  { t: '6. сжать', schema: 'только full_name', code: 'только full_name', risk: true },
+]
+const X = (i: number) => 20 + i * 122
+const W = 116
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 250" role="img" aria-labelledby="prec-t">
+      <title id="prec-t">Шесть шагов переименования колонки name в full_name: добавить новую колонку, писать в обе, заполнить старые строки, читать новую, перестать писать в старую, удалить старую. Каждый шаг — отдельная выкатка</title>
+      <text x="20" y="22" class="t-muted t-small">каждый шаг — отдельная выкатка; между шагами можно остановиться и откатиться на один назад</text>
+      {steps.map((s, i) => (
+        <g>
+          <rect x={X(i)} y="36" width={W} height="30" rx="6" class={s.risk ? 'risk' : 'box'}></rect>
+          <text x={X(i) + W / 2} y="56" text-anchor="middle" class="t-small t-bold">{s.t}</text>
+          <rect x={X(i)} y="80" width={W} height="44" rx="6" class="box-2"></rect>
+          <text x={X(i) + W / 2} y="97" text-anchor="middle" class="t-muted t-small">схема</text>
+          <text x={X(i) + W / 2} y="114" text-anchor="middle" class="t-mono t-small">{s.schema}</text>
+          <rect x={X(i)} y="134" width={W} height="44" rx="6" class="cell-on"></rect>
+          <text x={X(i) + W / 2} y="151" text-anchor="middle" class="t-muted t-small">код</text>
+          <text x={X(i) + W / 2} y="168" text-anchor="middle" class="t-small">{s.code}</text>
+        </g>
+      ))}
+      <path d={`M${X(0)} 196 H${X(4) + W}`} class="ln-accent"></path>
+      <text x={X(0)} y="214" class="t-accent t-small">откат кода безопасен на любом шаге: старая колонка на месте и заполнена</text>
+      <path d={`M${X(5)} 196 H${X(5) + W}`} class="ln"></path>
+      <text x={X(5)} y="232" class="t-bad t-small">отсюда пути назад нет</text>
+    </svg>
+  </div>
+  <figcaption>
+    Одно действие — «переименовать колонку» — превращается в шесть выкаток. Зато ни на одном шаге старая и новая
+    версии кода, работающие одновременно во время выкатки, не видят схему, которую не понимают.
+  </figcaption>
+</figure>

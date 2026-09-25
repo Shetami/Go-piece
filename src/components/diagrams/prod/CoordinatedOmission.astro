@@ -1,0 +1,59 @@
+---
+/**
+ * Скоординированный пропуск: генератор нагрузки, ждущий ответа перед следующим
+ * запросом, во время остановки сервиса отправляет один запрос вместо двухсот.
+ */
+const T = (s: number) => 150 + s * 140
+const ticks = Array.from({ length: 41 }, (_, i) => i * 0.1)
+const inStall = (s: number) => s >= 1 && s < 3
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 290" role="img" aria-labelledby="prco-t">
+      <title id="prco-t">Сервис останавливается на две секунды. Генератор, ждущий ответа, за это время отправляет один запрос и записывает одно медленное измерение. Пользователи продолжают приходить, и двести их запросов ждут от нуля до двух секунд</title>
+      <defs>
+        <marker id="prco-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+
+      {[0, 1, 2, 3, 4].map((s) => (
+        <g>
+          <path d={`M${T(s)} 30 V214`} class="ln-life"></path>
+          <text x={T(s)} y="24" text-anchor="middle" class="t-muted t-small">{s} с</text>
+        </g>
+      ))}
+
+      <text x="20" y="54" class="t-bold">сервис</text>
+      <rect x={T(0)} y="42" width={T(1) - T(0)} height="20" rx="4" class="cell-on"></rect>
+      <rect x={T(1)} y="42" width={T(3) - T(1)} height="20" rx="4" class="risk"></rect>
+      <text x={T(2)} y="57" text-anchor="middle" class="t-small">пауза 2 с</text>
+      <rect x={T(3)} y="42" width={T(4) - T(3)} height="20" rx="4" class="cell-on"></rect>
+
+      <text x="20" y="106" class="t-bold">генератор</text>
+      <text x="20" y="122" class="t-muted t-small">ждёт ответа</text>
+      {ticks.filter((s) => !inStall(s)).map((s) => (
+        <path d={`M${T(s)} 96 V114`} class="ln-thin"></path>
+      ))}
+      <path d={`M${T(1)} 105 H${T(3) - 4}`} class="ln" marker-end="url(#prco-a)"></path>
+      <text x={T(2)} y="96" text-anchor="middle" class="t-small">один запрос ждёт 2 с</text>
+      <text x={T(2)} y="132" text-anchor="middle" class="t-muted t-small">записано: 1 медленный из ~200</text>
+
+      <text x="20" y="176" class="t-bold">пользователи</text>
+      <text x="20" y="192" class="t-muted t-small">приходят сами</text>
+      {ticks.map((s) => (
+        <path d={`M${T(s)} 166 V184`} class={inStall(s) ? 'ln-accent' : 'ln-thin'}></path>
+      ))}
+      <text x={T(2)} y="204" text-anchor="middle" class="t-accent t-small">200 запросов ждут от 0 до 2 с (каждая черта — 10 запросов)</text>
+
+      <text x="20" y="246" class="t-muted t-small">За 100 секунд при 100 запросах в секунду: генератор покажет p99 ≈ 1 мс и один выброс.</text>
+      <text x="20" y="266" class="t-muted t-small">На самом деле 200 запросов из 10 000 ждали паузу — p99 около секунды.</text>
+    </svg>
+  </div>
+  <figcaption>
+    Генератор, который отправляет следующий запрос только после ответа на предыдущий, во время остановки сервиса
+    тоже останавливается — и не измеряет ровно то время, когда всё плохо. Настоящие пользователи ответа не ждут: они
+    просто приходят.
+  </figcaption>
+</figure>

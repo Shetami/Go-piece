@@ -1,0 +1,53 @@
+---
+/**
+ * Очередь блокировок в PostgreSQL: ALTER TABLE ждёт долгий SELECT,
+ * а все новые запросы к таблице встают в очередь за ALTER.
+ */
+const T = (s: number) => 200 + s * 9
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 320" role="img" aria-labelledby="prlq-t">
+      <title id="prlq-t">Отчёт держит блокировку чтения таблицы 50 секунд. На 10-й секунде миграция просит исключительную блокировку и встаёт в очередь. Все запросы, пришедшие после неё, даже простые SELECT, ждут за миграцией, пока не закончится отчёт</title>
+
+      {[0, 10, 20, 30, 40, 50].map((s) => (
+        <g>
+          <path d={`M${T(s)} 30 V230`} class="ln-life"></path>
+          <text x={T(s)} y="24" text-anchor="middle" class="t-muted t-small">{s} с</text>
+        </g>
+      ))}
+
+      <text x="20" y="56" class="t-bold">отчёт</text>
+      <text x="20" y="72" class="t-muted t-small t-mono">ACCESS SHARE</text>
+      <rect x={T(0)} y="44" width={T(50) - T(0)} height="24" rx="4" class="cell-on"></rect>
+      <text x={T(25)} y="60" text-anchor="middle" class="t-small">SELECT … долгий запрос аналитика</text>
+
+      <text x="20" y="106" class="t-bold">миграция</text>
+      <text x="20" y="122" class="t-muted t-small t-mono">ACCESS EXCLUSIVE</text>
+      <rect x={T(10)} y="94" width={T(50) - T(10)} height="24" rx="4" class="idle"></rect>
+      <text x={T(30)} y="110" text-anchor="middle" class="t-muted t-small">ALTER TABLE ждёт отчёт</text>
+      <rect x={T(50)} y="94" width="14" height="24" rx="3" class="cell-on"></rect>
+
+      <text x="20" y="156" class="t-bold">запросы API</text>
+      <text x="20" y="172" class="t-muted t-small t-mono">ACCESS SHARE</text>
+      {[1, 4, 7].map((s) => (
+        <rect x={T(s)} y="146" width="10" height="20" rx="3" class="cell-on"></rect>
+      ))}
+      <rect x={T(10)} y="144" width={T(50) - T(10)} height="24" rx="4" class="risk"></rect>
+      <text x={T(30)} y="160" text-anchor="middle" class="t-small">все ждут за миграцией — сайт стоит</text>
+
+      <text x="20" y="206" class="t-bold">c lock_timeout</text>
+      <text x="20" y="222" class="t-muted t-small t-mono">= 3s</text>
+      <rect x={T(10)} y="196" width={T(13) - T(10)} height="24" rx="4" class="idle"></rect>
+      <text x={T(13) + 6} y="212" class="t-small">миграция сдаётся, запросы идут дальше, повтор позже</text>
+
+      <text x="20" y="266" class="t-muted t-small">Сама операция — добавить колонку — занимает миллисекунды. Опасна не она, а ожидание её блокировки:</text>
+      <text x="20" y="284" class="t-muted t-small">запрос исключительной блокировки в очереди блокирует всех, кто пришёл после него, даже тех, кто совместим с текущим держателем.</text>
+    </svg>
+  </div>
+  <figcaption>
+    До 10-й секунды отчёт и запросы API прекрасно уживаются: обе блокировки — на чтение. Всё ломает миграция,
+    вставшая между ними в очередь. Без lock_timeout она будет ждать сколько угодно, и всё это время таблица недоступна.
+  </figcaption>
+</figure>

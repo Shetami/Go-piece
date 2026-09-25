@@ -1,0 +1,55 @@
+---
+/**
+ * Гонка простаивающего соединения: балансировщик закрывает его по idle-таймауту
+ * в тот же момент, когда клиент берёт его из пула и отправляет запрос.
+ */
+const T = (s: number) => 150 + s * 6.4
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 300" role="img" aria-labelledby="prir-t">
+      <title id="prir-t">Клиент держит соединение в пуле до 90 секунд, балансировщик закрывает простаивающие через 60. На 60-й секунде клиент отправляет запрос в соединение, которое балансировщик уже закрывает, и получает сброс соединения</title>
+      <defs>
+        <marker id="prir-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+
+      {[0, 30, 60, 90].map((s) => (
+        <g>
+          <path d={`M${T(s)} 30 V200`} class="ln-life"></path>
+          <text x={T(s)} y="24" text-anchor="middle" class="t-muted t-small">{s} с</text>
+        </g>
+      ))}
+
+      <text x="20" y="62" class="t-bold">клиент Go</text>
+      <text x="20" y="78" class="t-muted t-small">idle 90 с</text>
+      <rect x={T(0)} y="50" width={T(60) - T(0)} height="24" rx="4" class="idle"></rect>
+      <text x={T(30)} y="66" text-anchor="middle" class="t-muted t-small">соединение ждёт в пуле</text>
+      <rect x={T(60)} y="50" width={T(90) - T(60)} height="24" rx="4" class="box-2"></rect>
+      <text x={T(75)} y="66" text-anchor="middle" class="t-small">ещё «живое» для клиента</text>
+
+      <text x="20" y="162" class="t-bold">балансировщик</text>
+      <text x="20" y="178" class="t-muted t-small">idle 60 с</text>
+      <rect x={T(0)} y="150" width={T(60) - T(0)} height="24" rx="4" class="idle"></rect>
+      <text x={T(30)} y="166" text-anchor="middle" class="t-muted t-small">простой</text>
+      <rect x={T(60)} y="150" width="40" height="24" rx="4" class="risk"></rect>
+      <text x={T(60) + 46} y="166" class="t-small">закрывает</text>
+
+      <path d={`M${T(60) - 6} 76 L${T(60) - 6} 146`} class="ln" marker-end="url(#prir-a)"></path>
+      <text x={T(60) - 12} y="104" text-anchor="end" class="t-small">запрос</text>
+      <path d={`M${T(60) + 10} 148 L${T(60) + 10} 78`} class="ln ln-dash" marker-end="url(#prir-a)"></path>
+      <text x={T(60) + 16} y="118" class="t-small">FIN</text>
+      <text x={T(60) - 12} y="134" text-anchor="end" class="t-bad t-small">ответ на запрос — RST: connection reset by peer</text>
+
+      <text x="20" y="236" class="t-muted t-small">Кто закрывает первым, тот и прав. Клиент узнаёт о закрытии, только когда уже отправил запрос в это соединение.</text>
+      <text x="20" y="256" class="t-muted t-small">Правило: idle-таймаут того, кто переиспользует соединение, должен быть меньше, чем у того, кто его закрывает.</text>
+      <text x="20" y="276" class="t-muted t-small">Здесь это значит: у клиента меньше 60 с — или у балансировщика больше 90.</text>
+    </svg>
+  </div>
+  <figcaption>
+    Ошибка случается редко — только когда запрос попадает ровно в момент закрытия, — поэтому её годами списывают на
+    «сеть моргнула». Признак — одиночные EOF и connection reset на сервисе с редкими запросами к зависимости.
+  </figcaption>
+</figure>

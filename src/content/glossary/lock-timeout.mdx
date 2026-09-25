@@ -1,0 +1,28 @@
+---
+title: lock_timeout
+short: 'Настройка PostgreSQL: сколько запрос готов ждать блокировку, прежде чем сдаться с ошибкой. Обязательна для миграций, чтобы ждущий ALTER TABLE не останавливал все запросы к таблице.'
+aliases: [lock_timeout, statement_timeout, idle_in_transaction_session_timeout, transaction_timeout, 55P03, lock not available]
+category: настройка
+related: [lock-queue, idle-in-transaction]
+---
+
+У PostgreSQL несколько пределов времени, и у каждого своя задача:
+
+| Настройка | Что ограничивает |
+| --- | --- |
+| `lock_timeout` | ожидание одной блокировки |
+| `statement_timeout` | выполнение одного запроса целиком |
+| `idle_in_transaction_session_timeout` | простой внутри открытой транзакции |
+| `transaction_timeout` (с 17-й версии) | всю транзакцию |
+
+Для миграций главная — `lock_timeout`. Миграция, которая ждёт `ACCESS EXCLUSIVE`, [блокирует всех за собой](/glossary/lock-queue/). С `SET lock_timeout = '3s'` она сдаётся с ошибкой `55P03 lock not available`, очередь рассасывается, а миграцию повторяют через несколько секунд:
+
+```sql
+SET lock_timeout = '3s';
+SET statement_timeout = '30s';
+ALTER TABLE orders ADD COLUMN note text;
+```
+
+Инструменты миграций обычно не ставят эти настройки сами — их нужно прописать в каждой миграции или в роли, от имени которой миграции выполняются: `ALTER ROLE migrator SET lock_timeout = '3s'`.
+
+Для роли приложения разумно задать `statement_timeout` и `idle_in_transaction_session_timeout` — это страховка от забытой транзакции и запроса, который по ошибке читает всю таблицу.

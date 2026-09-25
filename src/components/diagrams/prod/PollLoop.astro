@@ -1,0 +1,56 @@
+---
+/**
+ * Цикл ребалансов из-за медленной обработки пакета: потребитель не успевает
+ * за max.poll.interval.ms, выбывает, пакет уходит другому и всё повторяется.
+ */
+const nodes = [
+  { x: 295, y: 24, t: 'взял 500 сообщений', s: 'max.poll.records' },
+  { x: 540, y: 128, t: 'обработка 6 минут', s: 'предел — 5 минут' },
+  { x: 295, y: 232, t: 'выбыл из группы', s: 'ребаланс, стоят все' },
+  { x: 50, y: 128, t: 'пакет — другому', s: 'оффсет не закоммичен' },
+]
+const W = 180
+const Hn = 54
+const fixes = [
+  { x: 560, y: 34, t: 'меньше пакет', s: 'max.poll.records' },
+  { x: 560, y: 262, t: 'коммит по ходу', s: 'не в конце пакета' },
+  { x: 20, y: 34, t: 'предел по времени', s: 'на каждое сообщение' },
+  { x: 20, y: 262, t: 'идемпотентность', s: 'повтор без вреда' },
+]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 300" role="img" aria-labelledby="prpl-t">
+      <title id="prpl-t">Потребитель берёт пакет из 500 сообщений, обрабатывает его дольше предела, выбывает из группы, пакет достаётся другому потребителю без закоммиченного оффсета, и цикл повторяется</title>
+      <defs>
+        <marker id="prpl-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+      <path d="M475 64 Q570 74 610 122" class="ln" marker-end="url(#prpl-a)"></path>
+      <path d="M630 186 Q610 248 479 258" class="ln" marker-end="url(#prpl-a)"></path>
+      <path d="M295 262 Q150 258 140 186" class="ln" marker-end="url(#prpl-a)"></path>
+      <path d="M150 126 Q170 58 291 52" class="ln" marker-end="url(#prpl-a)"></path>
+      {nodes.map((n, i) => (
+        <g>
+          <rect x={n.x} y={n.y} width={W} height={Hn} rx="8" class={i === 2 ? 'risk' : 'box'}></rect>
+          <text x={n.x + W / 2} y={n.y + 23} text-anchor="middle" class="t-bold">{n.t}</text>
+          <text x={n.x + W / 2} y={n.y + 41} text-anchor="middle" class="t-muted t-small">{n.s}</text>
+        </g>
+      ))}
+      <text x="380" y="160" text-anchor="middle" class="t-muted t-small">лаг растёт, работа делается</text>
+      <text x="380" y="176" text-anchor="middle" class="t-muted t-small">по кругу, а в коде нет ни одной ошибки</text>
+      {fixes.map((f) => (
+        <g>
+          <text x={f.x} y={f.y} class="t-ok t-small">✂ {f.t}</text>
+          <text x={f.x} y={f.y + 14} class="t-muted t-small">{f.s}</text>
+        </g>
+      ))}
+    </svg>
+  </div>
+  <figcaption>
+    Каждый потребитель честно работает и честно не успевает. Цикл запускает одна медленная зависимость или пачка
+    тяжёлых сообщений, а держится он сам: обработанное не закоммичено и достаётся следующему.
+  </figcaption>
+</figure>

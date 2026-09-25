@@ -1,0 +1,23 @@
+---
+title: Очередь блокировок
+short: 'В PostgreSQL запрос блокировки, который не может быть выдан, встаёт в очередь и блокирует всех, кто пришёл после него. Быстрый ALTER TABLE, ждущий долгий SELECT, останавливает все запросы к таблице.'
+aliases: [lock queue, ACCESS EXCLUSIVE, AccessExclusiveLock, pg_locks, pg_blocking_pids, блокировка таблицы, миграция положила прод]
+category: механизм
+related: [lock-timeout, row-lock, idle-in-transaction]
+---
+
+Любой запрос к таблице берёт блокировку уровня таблицы. `SELECT` — самую слабую, `ACCESS SHARE`. `INSERT`, `UPDATE`, `DELETE` — `ROW EXCLUSIVE`. Они совместимы друг с другом, поэтому обычная нагрузка их не замечает.
+
+Большинство `ALTER TABLE`, `DROP`, `TRUNCATE`, `VACUUM FULL` берут `ACCESS EXCLUSIVE` — несовместимую ни с чем, даже с `SELECT`. Пока её держат, таблица недоступна.
+
+Главная ловушка — в очереди. Если блокировку нельзя выдать сразу, запрос встаёт в очередь. Следующие запросы проверяют совместимость не только с держателями, но и с теми, кто ждёт раньше них. Поэтому `ALTER TABLE`, который ждёт долгий отчёт, блокирует все новые `SELECT` — хотя с самим отчётом они совместимы. Операция на миллисекунды превращается в минуты простоя.
+
+Защита — [lock_timeout](/glossary/lock-timeout/) на миграциях: лучше миграция, которая сдалась и повторится, чем таблица, недоступная всё время ожидания.
+
+Посмотреть, кто кого ждёт:
+
+```sql
+SELECT pid, pg_blocking_pids(pid) AS blocked_by, wait_event_type, state, query
+FROM pg_stat_activity
+WHERE cardinality(pg_blocking_pids(pid)) > 0;
+```

@@ -1,0 +1,21 @@
+---
+title: Таймауты HTTP-клиента
+short: 'У http.DefaultClient нет общего таймаута: зависший сервер держит горутину вызывающего вечно. Предел на весь запрос задают Client.Timeout или дедлайн context.'
+aliases: [http.Client.Timeout, ResponseHeaderTimeout, TLSHandshakeTimeout, DefaultClient, DefaultTransport, IdleConnTimeout]
+category: настройка
+related: [request-deadline, context-cancellation, response-body-close]
+---
+
+Запрос из Go проходит фазы: соединение, TLS, отправка, ожидание ответа, чтение тела. У каждой фазы свой предел:
+
+| Настройка | Что ограничивает | В `DefaultTransport` |
+| --- | --- | --- |
+| `net.Dialer.Timeout` | установку TCP-соединения | 30 с |
+| `TLSHandshakeTimeout` | TLS-рукопожатие | 10 с |
+| `ResponseHeaderTimeout` | ожидание заголовков ответа после отправки | нет |
+| `IdleConnTimeout` | сколько простаивающее соединение живёт в пуле | 90 с |
+| `Client.Timeout` | весь запрос, **включая чтение тела** | нет (`DefaultClient`) |
+
+Главное: у `http.DefaultClient` и `http.Get` общего предела нет. Сервер, который принял соединение и замолчал, держит горутину вызывающего сколько угодно. Поэтому свой клиент с `Timeout` — или `http.NewRequestWithContext` с дедлайном — обязателен в любом сервисе.
+
+Дедлайн контекста лучше `Client.Timeout` тем, что едет по цепочке: если у входящего запроса осталось 300 мс, исходящий не будет ждать 5 секунд.

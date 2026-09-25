@@ -1,0 +1,51 @@
+---
+/**
+ * Фазы одного HTTP-запроса из Go и какой таймаут какую фазу покрывает.
+ */
+const phases = [
+  { x: 190, w: 96, t: 'DNS + TCP', s: '1 круг' },
+  { x: 286, w: 96, t: 'TLS', s: '1–2 круга' },
+  { x: 382, w: 96, t: 'запрос', s: 'заголовки, тело' },
+  { x: 478, w: 130, t: 'ждём ответа', s: 'работает сервер' },
+  { x: 608, w: 130, t: 'читаем тело', s: 'io.ReadAll' },
+]
+const bars = [
+  { y: 112, x1: 190, x2: 286, t: 'Dialer.Timeout', d: '30 с' },
+  { y: 140, x1: 286, x2: 382, t: 'TLSHandshakeTimeout', d: '10 с' },
+  { y: 168, x1: 478, x2: 608, t: 'ResponseHeaderTimeout', d: 'нет' },
+  { y: 206, x1: 190, x2: 738, t: 'Client.Timeout', d: 'нет', accent: true },
+  { y: 234, x1: 190, x2: 738, t: 'дедлайн context', d: '', accent: true },
+]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 290" role="img" aria-labelledby="prht-t">
+      <title id="prht-t">Фазы HTTP-запроса: соединение, TLS, отправка, ожидание ответа и чтение тела. Таймауты транспорта покрывают только первые фазы, Client.Timeout и дедлайн контекста — весь запрос</title>
+      <text x="20" y="54" class="t-bold">фаза</text>
+      {phases.map((p) => (
+        <g>
+          <rect x={p.x} y="34" width={p.w - 4} height="42" rx="6" class="box"></rect>
+          <text x={p.x + (p.w - 4) / 2} y="53" text-anchor="middle" class="t-small t-bold">{p.t}</text>
+          <text x={p.x + (p.w - 4) / 2} y="68" text-anchor="middle" class="t-muted t-small">{p.s}</text>
+        </g>
+      ))}
+      <path d="M20 90 H738" class="ln-thin"></path>
+      <path d="M20 186 H738" class="ln-thin"></path>
+      {bars.map((b) => (
+        <g>
+          <text x="20" y={b.y + 2} class="t-mono t-small">{b.t}</text>
+          <rect x={b.x1} y={b.y - 11} width={b.x2 - b.x1 - 4} height="18" rx="4" class={b.accent ? 'cell-on' : 'box-2'}></rect>
+          {b.d && <text x={b.x1 + (b.x2 - b.x1 - 4) / 2} y={b.y + 2} text-anchor="middle" class="t-small">{b.d}</text>}
+        </g>
+      ))}
+      <text x="190" y="250" dy="12" class="t-muted t-small">дедлайн едет дальше по цепочке вызовов</text>
+      <text x="20" y="280" class="t-muted t-small">Верхняя группа — транспорт, нижняя — весь запрос. В полосах — умолчания DefaultTransport и DefaultClient; «нет» — ждать бесконечно.</text>
+    </svg>
+  </div>
+  <figcaption>
+    Таймауты транспорта защищают только от медленного соединения. Если сервер принял запрос и завис — или отдаёт тело
+    по байту в секунду, — остановить это может только общий предел: Client.Timeout или дедлайн контекста. У клиента по
+    умолчанию нет ни того, ни другого.
+  </figcaption>
+</figure>
