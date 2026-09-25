@@ -1,0 +1,49 @@
+---
+/**
+ * Одна трасса как «водопад» спанов: gateway → orders → (postgres, payments → stripe),
+ * orders → Kafka → notifier. Сверху — заголовок traceparent, который несёт контекст.
+ */
+const X0 = 190
+const scale = 0.52 // px на мс
+const spans = [
+  { d: 0, name: 'gateway: POST /orders', s: 0, e: 1000, cls: 'box-2' },
+  { d: 1, name: 'orders: POST /orders', s: 20, e: 980, cls: 'box' },
+  { d: 2, name: 'postgres: INSERT orders', s: 40, e: 90, cls: 'box' },
+  { d: 2, name: 'payments: POST /charge', s: 110, e: 940, cls: 'box' },
+  { d: 3, name: 'stripe: create charge', s: 130, e: 920, cls: 'risk' },
+  { d: 2, name: 'kafka: send order.created', s: 950, e: 965, cls: 'box' },
+  { d: 3, name: 'notifier: handle (ссылка)', s: 1010, e: 1080, cls: 'cell-pending' },
+]
+const rowY = (i: number) => 64 + i * 30
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 800 310" role="img" aria-labelledby="obtw-t">
+      <title id="obtw-t">Трасса запроса на создание заказа. Шлюз вызывает сервис заказов, тот пишет в PostgreSQL, вызывает сервис платежей, который ждёт внешний платёжный сервис почти 800 миллисекунд, и отправляет событие в Kafka. Обработчик события в сервисе уведомлений — отдельный спан, связанный с трассой. Видно, что почти всё время запроса — ожидание платёжного провайдера</title>
+
+      {[0, 250, 500, 750, 1000].map((ms) => (
+        <g>
+          <path d={`M${X0 + ms * scale} 44 V270`} class="ln-life"></path>
+          <text x={X0 + ms * scale} y="38" text-anchor="middle" class="t-muted t-small">{ms} мс</text>
+        </g>
+      ))}
+
+      {spans.map((sp, i) => (
+        <g>
+          <text x={16 + sp.d * 12} y={rowY(i) + 15} class="t-small">{sp.name}</text>
+          <rect x={X0 + sp.s * scale} y={rowY(i)} width={Math.max((sp.e - sp.s) * scale, 4)} height="20" rx="3" class={sp.cls}></rect>
+          <text x={X0 + sp.e * scale + 6} y={rowY(i) + 15} class="t-muted t-small t-mono">{sp.e - sp.s} мс</text>
+        </g>
+      ))}
+
+      <text x="16" y="20" class="t-mono t-small">traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01</text>
+      <text x="16" y="292" class="t-muted t-small">Каждый сервис передаёт traceparent дальше: в заголовках HTTP, метаданных gRPC и сообщений Kafka.</text>
+    </svg>
+  </div>
+  <figcaption>
+    Трасса — дерево спанов с общим ID. По ширине полос сразу видно, где ушло время: 790 из 1000 мс — ожидание внешнего
+    провайдера, а база и Kafka ни при чём. Обработка события в другом сервисе идёт уже после ответа клиенту, поэтому её
+    удобнее показывать отдельной трассой со ссылкой на эту.
+  </figcaption>
+</figure>

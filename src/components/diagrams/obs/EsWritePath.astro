@@ -1,0 +1,66 @@
+---
+/**
+ * Запись в шард Elasticsearch: буфер индексации и translog → refresh (виден поиску) →
+ * flush (коммит Lucene на диск) → слияние сегментов.
+ */
+const small = [360, 400, 440, 480]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 290" role="img" aria-labelledby="obew-t">
+      <title id="obew-t">Документ попадает в буфер индексации в памяти и в журнал translog на диске. Раз в секунду refresh превращает буфер в новый сегмент, и документ становится виден поиску. Flush сбрасывает сегменты на диск коммитом Lucene и обрезает translog. Фоновое слияние склеивает мелкие сегменты в крупные и вычищает удалённые документы</title>
+      <defs>
+        <marker id="obew-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+
+      <rect x="20" y="70" width="90" height="44" rx="6" class="box"></rect>
+      <text x="65" y="97" text-anchor="middle" class="t-bold">документ</text>
+
+      <rect x="150" y="30" width="160" height="54" rx="8" class="box-2"></rect>
+      <text x="230" y="52" text-anchor="middle" class="t-bold">буфер индексации</text>
+      <text x="230" y="70" text-anchor="middle" class="t-muted t-small">память, поиску не виден</text>
+
+      <rect x="150" y="104" width="160" height="54" rx="8" class="box"></rect>
+      <text x="230" y="126" text-anchor="middle" class="t-bold">translog</text>
+      <text x="230" y="144" text-anchor="middle" class="t-muted t-small">диск, fsync до ответа</text>
+
+      <path d="M112 86 L146 62" class="ln" marker-end="url(#obew-a)"></path>
+      <path d="M112 98 L146 126" class="ln" marker-end="url(#obew-a)"></path>
+
+      <rect x="360" y="30" width="170" height="54" rx="8" class="cell-on"></rect>
+      <text x="445" y="52" text-anchor="middle" class="t-bold">новый сегмент</text>
+      <text x="445" y="70" text-anchor="middle" class="t-muted t-small">в кэше ОС — уже ищется</text>
+      <path d="M312 57 H356" class="ln-accent" marker-end="url(#obew-a)"></path>
+      <text x="334" y="22" text-anchor="middle" class="t-accent t-small">refresh ~1 с</text>
+
+      <rect x="580" y="30" width="160" height="54" rx="8" class="box-2"></rect>
+      <text x="660" y="52" text-anchor="middle" class="t-bold">сегменты на диске</text>
+      <text x="660" y="70" text-anchor="middle" class="t-muted t-small">коммит Lucene, fsync</text>
+      <path d="M532 57 H576" class="ln" marker-end="url(#obew-a)"></path>
+      <text x="554" y="22" text-anchor="middle" class="t-small">flush</text>
+
+      <path d="M660 86 C660 150, 420 150, 314 134" class="ln ln-dash" marker-end="url(#obew-a)"></path>
+      <text x="470" y="160" class="t-muted t-small">после flush translog обрезается</text>
+
+      {small.map((x) => (
+        <rect x={x} y="206" width="32" height="30" rx="4" class="box"></rect>
+      ))}
+      <path d="M520 221 H566" class="ln" marker-end="url(#obew-a)"></path>
+      <rect x="572" y="200" width="168" height="42" rx="6" class="box-2"></rect>
+      <text x="656" y="226" text-anchor="middle" class="t-small">один крупный сегмент</text>
+      <text x="360" y="196" class="t-bold">merge</text>
+      <text x="360" y="262" class="t-muted t-small">мелкие сливаются, удалённые документы вычищаются</text>
+      <text x="20" y="200" class="t-muted t-small">сегменты неизменяемы:</text>
+      <text x="20" y="216" class="t-muted t-small">изменение — это удаление</text>
+      <text x="20" y="232" class="t-muted t-small">и новая запись</text>
+    </svg>
+  </div>
+  <figcaption>
+    Документ становится виден поиску не в момент записи, а после ближайшего refresh — отсюда «почти реальное время».
+    Сохранность при падении обеспечивает translog: сегменты в кэше ОС ещё не на диске, но всё, что в них есть, можно
+    восстановить из журнала.
+  </figcaption>
+</figure>

@@ -1,0 +1,93 @@
+---
+/**
+ * Две схемы масштабирования метрик. Слева Thanos: Prometheus остаётся, блоки уезжают
+ * в объектное хранилище, querier собирает ответ веером. Справа remote write: сборщики
+ * отправляют точки в распределённое хранилище (Mimir, VictoriaMetrics).
+ */
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 320" role="img" aria-labelledby="obsa-t">
+      <title id="obsa-t">Слева: в Thanos каждый Prometheus работает как раньше, sidecar выгружает его двухчасовые блоки в объектное хранилище, store gateway читает оттуда историю, querier опрашивает всех веером и склеивает дубли реплик, compactor уплотняет и прореживает старые данные. Справа: при remote write сборщики в кластерах отправляют точки в distributor, тот раскладывает каждый ряд на три ingester, а старые данные уходят в объектное хранилище</title>
+      <defs>
+        <marker id="obsa-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+
+      <text x="20" y="20" class="t-bold">Thanos: блоки уезжают в хранилище</text>
+
+      <rect x="100" y="34" width="180" height="50" rx="8" class="box-2"></rect>
+      <text x="190" y="55" text-anchor="middle" class="t-bold">querier</text>
+      <text x="190" y="72" text-anchor="middle" class="t-muted t-small">веер + дедупликация реплик</text>
+
+      <rect x="20" y="126" width="105" height="56" rx="8" class="box"></rect>
+      <text x="72" y="148" text-anchor="middle" class="t-small">Prometheus A</text>
+      <text x="72" y="166" text-anchor="middle" class="t-muted t-small">+ sidecar</text>
+      <rect x="135" y="126" width="105" height="56" rx="8" class="box"></rect>
+      <text x="187" y="148" text-anchor="middle" class="t-small">Prometheus B</text>
+      <text x="187" y="166" text-anchor="middle" class="t-muted t-small">+ sidecar</text>
+      <rect x="250" y="126" width="110" height="56" rx="8" class="box"></rect>
+      <text x="305" y="148" text-anchor="middle" class="t-small">store</text>
+      <text x="305" y="166" text-anchor="middle" class="t-small">gateway</text>
+
+      <path d="M150 86 L80 122" class="ln" marker-end="url(#obsa-a)"></path>
+      <path d="M190 86 L188 122" class="ln" marker-end="url(#obsa-a)"></path>
+      <path d="M230 86 L298 122" class="ln" marker-end="url(#obsa-a)"></path>
+      <text x="20" y="302" class="t-muted t-small">A и B — реплики, различаются меткой replica</text>
+
+      <rect x="40" y="236" width="210" height="44" rx="8" class="box-2"></rect>
+      <text x="145" y="263" text-anchor="middle" class="t-bold">объектное хранилище</text>
+      <rect x="270" y="236" width="90" height="44" rx="8" class="box"></rect>
+      <text x="315" y="256" text-anchor="middle" class="t-small">compactor</text>
+      <text x="315" y="272" text-anchor="middle" class="t-muted t-small">прореживание</text>
+
+      <path d="M72 184 L100 232" class="ln-accent" marker-end="url(#obsa-a)"></path>
+      <path d="M187 184 L170 232" class="ln-accent" marker-end="url(#obsa-a)"></path>
+      <text x="106" y="222" class="t-accent t-small">блоки 2 ч</text>
+      <path d="M232 234 L290 186" class="ln ln-dash" marker-end="url(#obsa-a)"></path>
+      <path d="M252 258 H266" class="ln" marker-end="url(#obsa-a)" marker-start="url(#obsa-a)"></path>
+
+      <path d="M380 20 V300" class="ln-life"></path>
+
+      <text x="400" y="20" class="t-bold">remote write: точки уезжают сразу</text>
+
+      <rect x="400" y="34" width="160" height="56" rx="8" class="box"></rect>
+      <text x="480" y="56" text-anchor="middle" class="t-small">сборщики в кластерах</text>
+      <text x="480" y="74" text-anchor="middle" class="t-muted t-small">Prometheus agent, vmagent</text>
+
+      <rect x="590" y="34" width="150" height="56" rx="8" class="box-2"></rect>
+      <text x="665" y="56" text-anchor="middle" class="t-bold">distributor</text>
+      <text x="665" y="74" text-anchor="middle" class="t-muted t-small">vminsert</text>
+      <path d="M562 62 H586" class="ln-accent" marker-end="url(#obsa-a)"></path>
+
+      {[0, 1, 2].map((i) => (
+        <rect x={596 + i * 48} y="128" width="42" height="42" rx="6" class="box"></rect>
+      ))}
+      <text x="665" y="190" text-anchor="middle" class="t-small">ingesters / vmstorage</text>
+      <text x="665" y="206" text-anchor="middle" class="t-muted t-small">каждый ряд — на 3 узла</text>
+      <path d="M640 92 L617 124" class="ln" marker-end="url(#obsa-a)"></path>
+      <path d="M665 92 V124" class="ln" marker-end="url(#obsa-a)"></path>
+      <path d="M690 92 L713 124" class="ln" marker-end="url(#obsa-a)"></path>
+
+      <rect x="590" y="236" width="150" height="44" rx="8" class="box-2"></rect>
+      <text x="665" y="256" text-anchor="middle" class="t-small">объектное хранилище</text>
+      <text x="665" y="272" text-anchor="middle" class="t-muted t-small">Mimir; у VM — свои диски</text>
+      <path d="M665 212 V232" class="ln" marker-end="url(#obsa-a)"></path>
+
+      <rect x="400" y="150" width="160" height="56" rx="8" class="box-2"></rect>
+      <text x="480" y="172" text-anchor="middle" class="t-bold">querier</text>
+      <text x="480" y="190" text-anchor="middle" class="t-muted t-small">vmselect</text>
+      <path d="M562 170 L592 152" class="ln" marker-end="url(#obsa-a)"></path>
+      <path d="M562 192 L592 250" class="ln ln-dash" marker-end="url(#obsa-a)"></path>
+      <text x="400" y="236" class="t-muted t-small">свежее — из ingesters,</text>
+      <text x="400" y="252" class="t-muted t-small">старое — из хранилища</text>
+    </svg>
+  </div>
+  <figcaption>
+    Thanos достраивает к обычным Prometheus глобальный запрос и дешёвое долгое хранение, но сами Prometheus остаются
+    ограничены своей машиной. Remote write выносит хранение целиком: в кластерах остаются лёгкие сборщики, а
+    хранилище масштабируется горизонтально и реплицирует каждый ряд.
+  </figcaption>
+</figure>

@@ -1,0 +1,26 @@
+---
+title: Remote write
+short: 'Протокол, по которому Prometheus или агент отправляет каждую собранную точку во внешнее хранилище. Точки читаются из WAL, и если хранилище лежит дольше, чем живёт WAL — пару часов, — отставшие данные теряются.'
+aliases: [remote_write, remote write, agent mode, --agent, vmagent, Grafana Alloy, OTLP metrics, queue_config]
+category: механизм
+related: [prometheus-tsdb, long-term-metrics-storage, relabeling]
+---
+
+```yaml
+remote_write:
+  - url: https://mimir.example.com/api/v1/push
+    queue_config: { max_shards: 50, capacity: 10000 }
+    write_relabel_configs:
+      - source_labels: [__name__]
+        regex: "job:.*|up"
+        action: keep
+```
+
+Отправитель читает WAL и шлёт точки пачками в параллельных потоках (shards), добавляя их, когда отставание растёт. Отдельной очереди на диске нет: WAL обрезается при сбросе head в блок, и всё, что отправитель к этому моменту не прочитал, в удалённое хранилище уже не попадёт.
+
+За чем следить:
+
+- отставание: `prometheus_remote_storage_highest_timestamp_in_seconds` минус `prometheus_remote_storage_queue_highest_sent_timestamp_seconds`;
+- отброшенные и повторённые точки: `prometheus_remote_storage_samples_failed_total`, `..._retried_total`.
+
+**Агентский режим** (`prometheus --agent`) — только сбор и отправка: без запросов, правил и долгого хранения. Ту же роль играют `vmagent`, Grafana Alloy и коллектор OpenTelemetry.

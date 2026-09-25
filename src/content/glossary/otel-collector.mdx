@@ -1,0 +1,27 @@
+---
+title: Коллектор OpenTelemetry
+short: 'Конвейер телеметрии между сервисами и хранилищами: приёмники, обработчики, отправители. Сервисы шлют OTLP на локальный адрес, а куда данные едут дальше, как фильтруются и выбираются — решает конфигурация коллектора.'
+aliases: [OpenTelemetry Collector, otelcol, OTLP, receivers, processors, exporters, tail_sampling, memory_limiter, k8sattributes, spanmetrics, loadbalancing exporter]
+category: инструмент
+related: [trace-sampling, trace-span, remote-write, structured-logging]
+---
+
+```yaml
+receivers:  { otlp: { protocols: { grpc: {} } } }
+processors: { memory_limiter: { check_interval: 1s, limit_percentage: 80 }, batch: {} }
+exporters:  { otlp/tempo: { endpoint: tempo:4317 } }
+service:
+  pipelines:
+    traces: { receivers: [otlp], processors: [memory_limiter, batch], exporters: [otlp/tempo] }
+```
+
+| Часть | Примеры |
+| --- | --- |
+| **приёмники** | OTLP, Prometheus-сбор, файлы логов, Kafka |
+| **обработчики** | `memory_limiter`, `batch`, `k8sattributes`, `tail_sampling`, фильтрация и маскирование атрибутов |
+| **коннекторы** | `spanmetrics`, `servicegraph` — метрики из трасс |
+| **отправители** | OTLP в Tempo и Jaeger, Prometheus remote write, Loki, Elasticsearch |
+
+Обычная схема — два уровня: **агент** на каждом узле (DaemonSet) принимает данные подов и обогащает их метаданными Kubernetes, **шлюз** — масштабируемый сервис для выборки в конце и отправки. Шлюз для tail sampling получает спаны через экспортер `loadbalancing` по хэшу ID трассы.
+
+Главное преимущество — развязка: сменить хранилище, добавить второе, вычистить персональные данные — это правка конфигурации коллектора, а не выкатка всех сервисов. `memory_limiter` ставят первым обработчиком всегда: без него всплеск телеметрии убивает коллектор по OOM.

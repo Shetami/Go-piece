@@ -1,0 +1,27 @@
+---
+title: Правило алерта
+short: 'Запрос PromQL с условием, который Prometheus вычисляет по расписанию. Каждый ряд результата — отдельный алерт; for требует, чтобы условие держалось на каждом вычислении подряд, keep_firing_for не даёт алерту мигать.'
+aliases: [alerting rule, alert, for, keep_firing_for, pending, firing, runbook, annotations, promtool test rules]
+category: настройка
+related: [alertmanager, burn-rate, recording-rule, dead-mans-switch]
+---
+
+```yaml
+- alert: OrdersHighErrorRate
+  expr: job:http_errors:ratio_rate5m{job="orders"} > 0.05
+  for: 5m
+  keep_firing_for: 10m
+  labels: { severity: page, team: orders }
+  annotations:
+    summary: 'orders: {{ $value | humanizePercentage }} ошибок'
+    runbook_url: https://wiki.example.com/runbooks/orders-errors
+```
+
+Жизнь алерта: условие ложно — **inactive**; стало истинным — **pending**; продержалось `for` — **firing**, и алерт уходит в [Alertmanager](/glossary/alertmanager/).
+
+Тонкости:
+
+- **одно ложное вычисление сбрасывает `for`.** Шумный сигнал около порога может не сработать никогда — сглаживают в выражении, а не удлиняют `for`;
+- **нет ряда — нет алерта.** Когда цель мертва, `expr` по её метрикам пуст. Отсутствие данных ловят отдельно: `up == 0`, `absent_over_time`;
+- **метки — это адрес доставки**, аннотации — то, что прочтёт дежурный. Без `runbook_url` алерт будит зря;
+- **правила — код**: `promtool check rules` и `promtool test rules` в CI ловят сломанные селекторы после переименования метрик.

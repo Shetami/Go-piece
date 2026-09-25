@@ -1,0 +1,25 @@
+---
+title: Dead man's switch
+short: 'Алерт, который горит всегда и уходит во внешний сервис. Тот поднимает тревогу, когда алерт перестал приходить: значит, сломался Prometheus, Alertmanager, маршрут или сеть — сам мониторинг о своей смерти не сообщит.'
+aliases: [Watchdog, heartbeat, deadman, мониторинг мониторинга, always firing]
+category: механизм
+related: [alertmanager, alerting-rule, prometheus-scrape]
+---
+
+Алерты вычисляет сам Prometheus. Если он лежит или перезапускается в цикле, условий никто не проверяет, и отсутствие алертов неотличимо от здоровой системы.
+
+```yaml
+- alert: Watchdog
+  expr: vector(1)
+  labels: { severity: none }
+  annotations:
+    summary: 'Цепочка алертов жива'
+```
+
+Alertmanager отправляет `Watchdog` с коротким `repeat_interval` во внешний сервис проверки (облачный или свой, но **вне** этой инфраструктуры). Пропал сигнал на несколько минут — тревога по независимому каналу.
+
+Так проверяется вся цепочка сразу. Дополнительно:
+
+- второй Prometheus следит за первым: `up{job="prometheus"} == 0`;
+- метрики самого Prometheus: неудачные вычисления правил (`prometheus_rule_evaluation_failures_total`), ошибки отправки в Alertmanager (`prometheus_notifications_errors_total`);
+- `absent_over_time` для ключевых метрик — на случай, когда пропал не мониторинг, а данные.

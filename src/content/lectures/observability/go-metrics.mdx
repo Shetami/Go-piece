@@ -1,0 +1,339 @@
+---
+title: 'Метрики из Go-сервиса'
+description: Реестр и почему глобальный — плохая идея, middleware с шаблоном маршрута из ServeMux, метка, которую злоумышленник раздует снаружи, счётчик ошибок, который пропускает первую ошибку, коллектор пула соединений, какие метрики рантайма Go смотреть, exemplars, OpenTelemetry вместо client_golang — и как проверить метрики тестом.
+order: 3
+minutes: 45
+tags: [observability, go, prometheus, client_golang, opentelemetry]
+updated: 2026-09-25
+---
+
+Предыдущие две лекции смотрели на метрики со стороны Prometheus. Теперь — со стороны сервиса: что и как в нём завести, чтобы запросы из прошлой лекции давали правильные ответы. Почти все ловушки здесь — это решения, принятые в первый день, когда метрик ещё мало и всё работает: имя, набор меток, место регистрации. Потом их не поменять без поломки дашбордов.
+
+Стандартная библиотека — `github.com/prometheus/client_golang`. Про альтернативу — OpenTelemetry — в конце лекции.
+
+## Реестр и эндпоинт
+
+Метрики живут в **реестре**: он знает все зарегистрированные метрики и на каждый сбор отдаёт их текущие значения. В `client_golang` есть глобальный реестр по умолчанию, и примеры из README регистрируют всё в нём через `promauto.NewCounter(...)` в переменных пакета. Для сервиса лучше свой:
+
+```go
+reg := prometheus.NewRegistry()
+reg.MustRegister(
+    collectors.NewGoCollector(
+        collectors.WithGoCollectorRuntimeMetrics(collectors.MetricsScheduler, collectors.MetricsGC),
+    ),
+    collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+)
+
+httpMetrics := metrics.NewHTTP(reg)
+orderSvc := orders.NewService(db, reg)
+```
+
+Зачем:
+
+- **явные зависимости** — компонент получает `prometheus.Registerer` параметром и не лезет в глобальное состояние;
+- **тесты** — повторная регистрация метрики с тем же именем паникует. С глобальным реестром два теста, создающие сервис, падают; со своим реестром на тест — нет;
+- **контроль** — видно, что именно отдаёт сервис; библиотеки не добавляют туда свои метрики без спроса.
+
+Отдают метрики на **отдельном порту**, а не рядом с API:
+
+```go
+admin := http.NewServeMux()
+admin.Handle("GET /metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{
+    Registry:          reg,  // метрики самого обработчика: ошибки сбора, число запросов
+    EnableOpenMetrics: true, // нужен для exemplars
+}))
+admin.HandleFunc("GET /healthz", healthz)
+go func() { log.Fatal(http.ListenAndServe(":9090", admin)) }()
+```
+
+Публичный `/metrics` раскрывает внутренности (маршруты, версии, объём заказов) и позволяет кому угодно дёргать сбор — а он не бесплатный. Отдельный порт не публикуют наружу через Ingress, и Prometheus ходит на него напрямую к поду.
+
+## RED для HTTP: middleware
+
+Минимальный набор для каждого сервиса — <Term id="red-use-metrics">RED</Term>: частота, ошибки, длительность. Всё это делает одна middleware:
+
+```go
+type HTTP struct {
+    requests *prometheus.CounterVec
+    duration *prometheus.HistogramVec
+    inflight prometheus.Gauge
+}
+
+func NewHTTP(reg prometheus.Registerer) *HTTP {
+    f := promauto.With(reg)
+    return &HTTP{
+        requests: f.NewCounterVec(prometheus.CounterOpts{
+            Name: "http_requests_total",
+            Help: "Обработанные HTTP-запросы.",
+        }, []string{"method", "route", "code"}),
+        duration: f.NewHistogramVec(prometheus.HistogramOpts{
+            Name:    "http_request_duration_seconds",
+            Help:    "Длительность обработки HTTP-запроса.",
+            Buckets: []float64{.01, .025, .05, .1, .2, .3, .5, 1, 2.5, 5, 10}, // вокруг SLO в 300 мс
+        }, []string{"method", "route"}),
+        inflight: f.NewGauge(prometheus.GaugeOpts{
+            Name: "http_requests_in_flight",
+            Help: "Запросы, которые обрабатываются прямо сейчас.",
+        }),
+    }
+}
+
+func (m *HTTP) Middleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        m.inflight.Inc()
+        defer m.inflight.Dec()
+
+        start := time.Now()
+        rec := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+        next.ServeHTTP(rec, r)
+
+        // Шаблон маршрута, который выбрал ServeMux (Go 1.23+): "GET /orders/{id}".
+        // Не r.URL.Path: у каждого заказа свой путь — и свой ряд.
+        route := r.Pattern
+        if route == "" {
+            route = "unmatched"
+        }
+        method := normalizeMethod(r.Method)
+        m.requests.WithLabelValues(method, route, strconv.Itoa(rec.code)).Inc()
+        m.duration.WithLabelValues(method, route).Observe(time.Since(start).Seconds())
+    })
+}
+
+type statusRecorder struct {
+    http.ResponseWriter
+    code int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+    r.code = code
+    r.ResponseWriter.WriteHeader(code)
+}
+
+// Без Unwrap обёртка спрячет Flush, Hijack и дедлайны от http.ResponseController.
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
+```
+
+Здесь несколько решений, каждое из которых стоит объяснить.
+
+**Маршрут — шаблон, а не путь.** `/orders/123` и `/orders/124` — один маршрут `GET /orders/{id}`. С сырым путём у каждого заказа свой ряд, а сканер уязвимостей, перебирающий миллион путей, создаёт миллион рядов с кодом 404. `ServeMux` записывает выбранный шаблон в `r.Pattern`; в chi то же даёт `chi.RouteContext(r.Context()).RoutePattern()`. Шаблон известен только **после** маршрутизации — поэтому он читается после `next.ServeHTTP`, а middleware оборачивает сам роутер. Если между ними есть middleware, которая делает `r.WithContext(...)`, шаблон запишется в копию запроса, и снаружи его не будет видно.
+
+**Метод нормализуется.** Метод HTTP присылает клиент, и это произвольная строка. Любое значение, которое приходит снаружи, нельзя класть в метку как есть:
+
+```go
+func normalizeMethod(m string) string {
+    switch m {
+    case http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch,
+        http.MethodDelete, http.MethodHead, http.MethodOptions:
+        return m
+    }
+    return "other"
+}
+```
+
+То же касается заголовков, `User-Agent`, параметров запроса, имён клиентов из токена. <Term id="metric-cardinality">Кардинальность</Term>, которую контролирует внешний мир, — это уязвимость: её можно раздуть нарочно и уронить мониторинг.
+
+**Длительность — без кода ответа.** Код в метке гистограммы умножил бы её ряды на число кодов. Длительность ошибок обычно смотрят отдельно, а для SLO хватает доли запросов быстрее порога.
+
+**`inflight` — насыщение.** Число запросов в обработке — это очередь внутри сервиса. Растёт при той же частоте запросов — значит, что-то внутри стало медленнее.
+
+## Счётчик, которого ещё нет
+
+<Predict
+  question="Сервис считает ошибки платежей: `payment_errors_total{provider}` через `WithLabelValues(provider).Inc()` в момент ошибки. Алерт: `increase(payment_errors_total[5m]) > 0`. После выкатки у провайдера случилась ровно одна ошибка. Сработает ли алерт?"
+  options={[
+    'Да: increase покажет 1',
+    'Нет: ряд с этим provider появился только в момент ошибки, со значением 1. Для rate и increase нужно две точки и рост между ними — роста от «ничего» до 1 они не видят',
+    'Да, но с задержкой на интервал сбора',
+  ]}
+  answer={1}
+>
+Вектор `CounterVec` создаёт ряд для набора меток при первом обращении. До первой ошибки ряда нет вовсе, а первая точка, которую увидит Prometheus, уже равна 1. `increase` считает рост между точками внутри окна; первая точка ряда — это начало отсчёта, а не рост. Ошибка номер один пропадает, и алерт сработает только на вторую — если она случится.
+
+То же ломает долю ошибок: пока ряда ошибок нет, `ошибки / все` — пустота, а не ноль.
+
+Лечится инициализацией: при старте сервиса создать все известные комбинации меток — они появятся со значением 0, и первая ошибка станет ростом с 0 до 1:
+
+```go
+for _, p := range []string{"stripe", "adyen", "yookassa"} {
+    m.paymentErrors.WithLabelValues(p) // ряд появится со значением 0
+}
+```
+
+Так же стоит поступать с кодами ответа, которые важны для алертов, — хотя бы с `500` для основных маршрутов.
+</Predict>
+
+## Метрики зависимостей и ресурсов
+
+RED описывает сервис снаружи. Причины обычно внутри: пул соединений, очередь, потребитель Kafka. Для них — USE, и главное в нём — насыщение: кто и сколько ждёт.
+
+Для `database/sql` готовый коллектор уже есть в `client_golang`:
+
+```go
+reg.MustRegister(collectors.NewDBStatsCollector(db, "orders"))
+// go_sql_open_connections, go_sql_in_use_connections,
+// go_sql_wait_count_total, go_sql_wait_duration_seconds_total{db_name="orders"} ...
+```
+
+Для остального пишут свой коллектор. В отличие от gauge, который обновляет фоновая горутина по таймеру, коллектор спрашивает значения **в момент сбора**: не нужна горутина, данные всегда свежие, а если сервис не собирают — работы нет вовсе.
+
+```go
+type poolCollector struct {
+    pool     *pgxpool.Pool
+    acquired *prometheus.Desc
+    max      *prometheus.Desc
+    waits    *prometheus.Desc
+    waitSecs *prometheus.Desc
+}
+
+func newPoolCollector(pool *pgxpool.Pool) *poolCollector {
+    return &poolCollector{
+        pool:     pool,
+        acquired: prometheus.NewDesc("db_pool_acquired_conns", "Соединения, выданные сейчас.", nil, nil),
+        max:      prometheus.NewDesc("db_pool_max_conns", "Размер пула.", nil, nil),
+        waits:    prometheus.NewDesc("db_pool_empty_acquires_total", "Сколько раз пришлось ждать свободного соединения.", nil, nil),
+        waitSecs: prometheus.NewDesc("db_pool_acquire_seconds_total", "Суммарное время получения соединений.", nil, nil),
+    }
+}
+
+func (c *poolCollector) Describe(ch chan<- *prometheus.Desc) { prometheus.DescribeByCollect(c, ch) }
+
+func (c *poolCollector) Collect(ch chan<- prometheus.Metric) {
+    s := c.pool.Stat()
+    ch <- prometheus.MustNewConstMetric(c.acquired, prometheus.GaugeValue, float64(s.AcquiredConns()))
+    ch <- prometheus.MustNewConstMetric(c.max, prometheus.GaugeValue, float64(s.MaxConns()))
+    ch <- prometheus.MustNewConstMetric(c.waits, prometheus.CounterValue, float64(s.EmptyAcquireCount()))
+    ch <- prometheus.MustNewConstMetric(c.waitSecs, prometheus.CounterValue, s.AcquireDuration().Seconds())
+}
+```
+
+Накопительные значения из `Stat()` отдаются как **счётчики**, а не gauge: тогда `rate(db_pool_empty_acquires_total[5m])` — это «сколько раз в секунду запросы ждали соединения», а `rate(db_pool_acquire_seconds_total[5m]) / rate(db_pool_empty_acquires_total[5m])` — грубая оценка того, сколько ждали. Метод `Collect` вызывается на каждом сборе, поэтому он должен быть быстрым и не ходить в сеть.
+
+Что ещё обычно стоит завести:
+
+| Что | Метрика | Зачем |
+| --- | --- | --- |
+| исходящие HTTP-вызовы | RED по `target` и маршруту вызываемого сервиса | видеть зависимость так, как её видит клиент — с сетью и очередью |
+| потребитель Kafka | лаг во времени, длительность обработки, ошибки | лаг в сообщениях не говорит, насколько опоздание заметно |
+| очереди и пулы воркеров | длина очереди, время ожидания, отказы | насыщение видно раньше задержки |
+| кэш | попадания и промахи | падение доли попаданий — будущая нагрузка на базу |
+| бизнес-события | `orders_created_total`, `payments_total{result}` | «200 OK» не значит «заказ создан» |
+
+Бизнес-метрики часто оказываются самыми ценными: падение числа созданных заказов в минуту ловит то, что не видно ни в ошибках, ни в задержке — например, сломанную кнопку на фронтенде.
+
+## Рантайм Go
+
+`GoCollector` и `ProcessCollector` отдают здоровье самого процесса. Из десятков рядов для дежурного важны несколько:
+
+| Метрика | Что показывает |
+| --- | --- |
+| `go_goroutines` | число горутин. Растёт без роста нагрузки — [утечка горутин](/glossary/goroutine-leak/) |
+| `go_sched_latencies_seconds` | сколько горутины ждут в очереди планировщика перед запуском. Хвост растёт — процессора не хватает или его троттлят |
+| `go_gc_duration_seconds` | паузы остановки мира в сборщике мусора |
+| `go_memstats_heap_inuse_bytes` | живая куча. Рядом — `go_gc_gomemlimit_bytes` и `go_gc_gogc_percent` |
+| `rate(process_cpu_seconds_total[5m])` | сколько ядер процесс реально использует — сравнивать с лимитом контейнера |
+| `process_resident_memory_bytes` | память процесса глазами ОС — то, за что придёт OOM killer |
+| `process_open_fds` / `process_max_fds` | файловые дескрипторы: соединения, которые не закрываются |
+
+`go_sched_latencies_seconds` — самая недооценённая из них: она показывает очередь к процессору изнутри Go и растёт при <Term id="cpu-throttling">троттлинге</Term> раньше, чем что-либо ещё. По умолчанию её нет, поэтому в примере с реестром выше включена группа `MetricsScheduler`.
+
+## Exemplars: от метрики к трассе
+
+Гистограмма говорит, что p99 вырос до двух секунд. Какие именно запросы были медленными — не говорит: метки с ID трассы быть не может. <Term id="exemplar">Exemplar</Term> решает это иначе: к наблюдению в бакете прикрепляется ID трассы одного из запросов, которые туда попали. Это не метка — ряд остаётся один, а ID хранится рядом, в небольшом кольцевом буфере.
+
+```go
+func (m *HTTP) observe(ctx context.Context, method, route string, d time.Duration) {
+    obs := m.duration.WithLabelValues(method, route)
+    sc := trace.SpanContextFromContext(ctx)
+    if eo, ok := obs.(prometheus.ExemplarObserver); ok && sc.IsSampled() {
+        eo.ObserveWithExemplar(d.Seconds(), prometheus.Labels{"trace_id": sc.TraceID().String()})
+        return
+    }
+    obs.Observe(d.Seconds())
+}
+```
+
+Exemplars передаются только в формате OpenMetrics (`EnableOpenMetrics: true` в обработчике), а Prometheus хранит их, если включена функция `exemplar-storage`. В Grafana они выглядят как точки поверх графика задержки: клик по точке открывает трассу медленного запроса. Прикреплять стоит только трассы, которые действительно сохранены, — отсюда проверка `IsSampled()`.
+
+## OpenTelemetry вместо client_golang
+
+OpenTelemetry — открытый стандарт для всех трёх сигналов: метрик, логов и трасс. У него свой API для метрик, и данные можно отдавать в Prometheus или отправлять по протоколу OTLP куда угодно.
+
+```go
+import (
+    otelprom "go.opentelemetry.io/otel/exporters/prometheus"
+    "go.opentelemetry.io/otel/attribute"
+    "go.opentelemetry.io/otel/metric"
+    sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+)
+
+exporter, err := otelprom.New(otelprom.WithRegisterer(reg)) // отдаёт в тот же /metrics
+if err != nil {
+    return err
+}
+provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(exporter))
+meter := provider.Meter("orders")
+
+created, err := meter.Int64Counter("orders.created", metric.WithDescription("Созданные заказы."))
+if err != nil {
+    return err
+}
+created.Add(ctx, 1, metric.WithAttributes(attribute.String("channel", "web")))
+// в Prometheus: orders_created_total{channel="web", otel_scope_name="orders", ...}
+```
+
+Инструменты похожи: `Counter`, `UpDownCounter`, `Histogram`, `Gauge`; атрибуты — это метки, и правила кардинальности для них те же. Имена по соглашениям OTel — с точками (`http.server.request.duration`), экспортер переводит их в стиль Prometheus.
+
+Что выбрать:
+
+- **client_golang** — проще, быстрее, самый зрелый. Если в компании Prometheus и трассы не нужны или сделаны отдельно — его достаточно.
+- **OpenTelemetry** — если сервис уже пишет трассы через OTel: один SDK, общий контекст, готовая инструментация библиотек (`otelhttp`, `otelgrpc`), exemplars и атрибуты ресурса (сервис, версия, под) заполняются сами. И если нужно не зависеть от бэкенда.
+
+Смешивать оба в одном сервисе для одних и тех же метрик не стоит: получатся два набора имён для одного и того же.
+
+## Метрики — тоже код
+
+Метрику, которую никто не проверял, легко сломать рефакторингом: переименовали функцию, перенесли `Inc()` не в ту ветку, и алерт тихо перестал работать. В `client_golang` есть пакет `testutil`:
+
+```go
+func TestCreateOrderCountsMetric(t *testing.T) {
+    reg := prometheus.NewRegistry()
+    svc := orders.NewService(fakeDB{}, reg)
+
+    if _, err := svc.Create(context.Background(), orders.Request{Channel: "web"}); err != nil {
+        t.Fatal(err)
+    }
+
+    const want = `
+# HELP orders_created_total Созданные заказы.
+# TYPE orders_created_total counter
+orders_created_total{channel="web"} 1
+`
+    if err := testutil.GatherAndCompare(reg, strings.NewReader(want), "orders_created_total"); err != nil {
+        t.Fatal(err)
+    }
+}
+```
+
+`testutil.ToFloat64` достаёт одно значение, `GatherAndCompare` сверяет вывод целиком, `GatherAndLint` проверяет соглашения об именах (`_total` у счётчиков, единицы, `Help`). Свой реестр на тест здесь и окупается.
+
+<Callout title="Производительность">
+`Inc()` и `Observe()` — атомарные операции, десятки наносекунд. Дороже `WithLabelValues`: он хэширует значения меток и ищет ряд в словаре под блокировкой. В горячем цикле ряд с постоянными метками достают один раз и сохраняют: `ok := m.requests.WithLabelValues("GET", "/orders/{id}", "200")`. Для обычного HTTP-обработчика разница незаметна.
+</Callout>
+
+<Callout title="Четвёртый сигнал — профили">
+Метрика говорит, что процессор вырос, но не говорит, в какой функции. Непрерывное профилирование (Pyroscope, Parca, профилировщики облаков) снимает `pprof` со всех подов каждые несколько секунд и хранит историю. Можно сравнить профиль до и после выкатки и увидеть, какая функция стала есть больше. Для Go это почти бесплатно: `net/http/pprof` уже есть, нужен только сборщик.
+</Callout>
+
+## Итог
+
+- Свой реестр вместо глобального: явные зависимости, тесты без паник, контроль над тем, что отдаётся. `/metrics` — на отдельном порту.
+- Одна middleware даёт [RED](/glossary/red-use-metrics/): счётчик по методу, маршруту и коду, гистограмма по методу и маршруту, gauge запросов в обработке.
+- Маршрут — шаблон из `r.Pattern`, а не путь. Всё, что приходит снаружи, — метод, заголовки, параметры — нормализуется к известному набору: [кардинальность](/glossary/metric-cardinality/) под контролем внешнего мира — уязвимость.
+- Ряд `CounterVec` появляется при первом обращении, и первая ошибка теряется для `increase`. Важные комбинации меток инициализируют нулями при старте.
+- Коллектор отдаёт значения в момент сбора: без горутин и всегда свежие. Накопительные значения — как счётчики.
+- Из рантайма — горутины, `go_sched_latencies_seconds`, паузы GC, куча, реальный процессор против лимита, RSS против лимита памяти.
+- [Exemplars](/glossary/exemplar/) связывают бакет гистограммы с трассой — без метки с ID.
+- OpenTelemetry — если сервис уже пишет трассы через него; client_golang — проще и зрелее. Не смешивать для одних и тех же метрик.
+- Метрики проверяют тестами через `testutil`.
+
+Метрики есть. Следующая лекция — о том, как превратить их в алерты, которые будят только тогда, когда пользователям действительно плохо.

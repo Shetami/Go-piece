@@ -1,0 +1,33 @@
+---
+title: Спан трассы
+short: 'Одна операция в трассе: имя, начало и конец, родитель, атрибуты, события и статус. Имя — шаблон без переменных частей, а ID и подробности — в атрибутах: у спанов кардинальность атрибутов не страшна.'
+aliases: [span, trace, трасса, span kind, атрибуты спана, span events, span links, ссылки, resource, ресурс]
+category: сущность
+related: [trace-context, trace-sampling, otel-collector, exemplar]
+---
+
+**Трасса** — дерево спанов с общим ID трассы. Корень — входящий запрос, дети — вызовы, которые он сделал.
+
+| Поле | Пример |
+| --- | --- |
+| имя | `GET /orders/{id}`, `SELECT orders`, `process order.created` |
+| kind | `SERVER`, `CLIENT`, `PRODUCER`, `CONSUMER`, `INTERNAL` |
+| атрибуты | `http.route`, `http.response.status_code`, `db.system`, `order.id` |
+| события | «повтор №2», исключение со стеком |
+| статус | `Unset`, `Ok`, `Error` с описанием |
+| ссылки | связь с другими трассами — например, для обработки пачки сообщений |
+
+**Ресурс** — атрибуты процесса, общие для всех его спанов: `service.name`, `service.version`, `k8s.pod.name`. Они же должны совпадать с метками в метриках и полями в логах.
+
+В Go:
+
+```go
+ctx, span := tracer.Start(ctx, "reserve stock")
+defer span.End()
+if err != nil {
+    span.RecordError(err)
+    span.SetStatus(codes.Error, "reserve failed")
+}
+```
+
+Спаны добавляют вокруг ввода-вывода и значимых шагов, а не вокруг каждой функции. `ctx` из `Start` передают дальше — иначе дочерние спаны потеряют родителя.

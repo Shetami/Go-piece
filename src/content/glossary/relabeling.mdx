@@ -1,0 +1,24 @@
+---
+title: Relabeling
+short: 'Цепочка правил, которая переписывает метки. relabel_configs работает с целями до сбора — что собирать и с какими метками, metric_relabel_configs — с каждым рядом после сбора: последний шанс выбросить дорогую метрику.'
+aliases: [relabel_configs, metric_relabel_configs, write_relabel_configs, __meta_kubernetes, keep, drop, labeldrop, ServiceMonitor, PodMonitor]
+category: настройка
+related: [prometheus-scrape, metric-cardinality, remote-write]
+---
+
+Правило берёт значения `source_labels`, склеивает их, сравнивает с `regex` и делает `action`:
+
+| action | Что делает |
+| --- | --- |
+| `keep` / `drop` | оставить или выбросить цель (ряд), если совпало |
+| `replace` | записать результат в `target_label` |
+| `labeldrop` / `labelkeep` | убрать или оставить метки по имени |
+| `hashmod` | разложить цели между несколькими Prometheus |
+
+Три места применения:
+
+- **`relabel_configs`** — до сбора, над целями из обнаружения. Служебные метки вида `__meta_kubernetes_pod_label_app` превращают в обычные (`app`, `namespace`, `pod`), лишние цели отбрасывают. Всё, что начинается с `__`, после этого шага исчезает;
+- **`metric_relabel_configs`** — после сбора, над каждым рядом. Здесь выбрасывают метрики, которые никто не смотрит, и метки, которые взрывают [кардинальность](/glossary/metric-cardinality/);
+- **`write_relabel_configs`** — перед [remote write](/glossary/remote-write/): что отправлять в долгосрочное хранилище.
+
+В Prometheus Operator те же правила пишут в `ServiceMonitor` и `PodMonitor` — полях `relabelings` и `metricRelabelings`.

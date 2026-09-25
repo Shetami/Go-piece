@@ -1,0 +1,22 @@
+---
+title: Thanos, Mimir, VictoriaMetrics
+short: 'Хранилища, которые снимают пределы одного Prometheus: глобальный запрос, репликация, годы хранения и десятки миллионов рядов. Thanos достраивает Prometheus, Mimir и VictoriaMetrics принимают remote write.'
+aliases: [Thanos, Mimir, Cortex, VictoriaMetrics, MetricsQL, долгосрочное хранение, downsampling, прореживание, store gateway, sidecar, querier, federation]
+category: инструмент
+related: [remote-write, prometheus-tsdb, series-churn, metric-cardinality]
+---
+
+| | Thanos | Mimir | VictoriaMetrics |
+| --- | --- | --- | --- |
+| Как получает данные | sidecar выгружает блоки Prometheus в S3 | remote write | remote write, свой сборщик `vmagent` |
+| Масштаб записи | ограничен каждым Prometheus | горизонтальный, ряд на 3 ingester | горизонтальный в кластерной версии |
+| История | объектное хранилище | объектное хранилище | свои диски |
+| Язык | PromQL | PromQL | MetricsQL — надмножество |
+| Эксплуатация | средняя | сложная, много компонентов | простая |
+
+Что стоит знать разработчику:
+
+- **дедупликация реплик**: две одинаковые реплики Prometheus различаются меткой `replica`, а слой запросов склеивает их;
+- **`rate` в MetricsQL не экстраполирует** — `increase` целочисленного счётчика в VictoriaMetrics целый, в Prometheus — дробный. Числа в разных источниках немного расходятся;
+- **прореживание**: старые данные хранятся с разрешением 5 минут и 1 час. Окно запроса должно быть больше разрешения, короткие всплески пропадают;
+- **лимиты на арендатора** в Mimir и кластерной VictoriaMetrics: при превышении новые ряды отбрасываются, и новая метрика после выкатки просто не появляется.

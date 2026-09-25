@@ -1,0 +1,27 @@
+---
+title: Exemplar
+short: 'ID трассы одного конкретного запроса, прикреплённый к наблюдению в бакете гистограммы. Не метка — ряд остаётся один. На графике задержки даёт кликнуть в точку и открыть трассу медленного запроса.'
+aliases: [exemplars, ObserveWithExemplar, exemplar-storage, OpenMetrics, метрика → трасса]
+category: механизм
+related: [metric-types, trace-span, metric-cardinality]
+---
+
+Метку `trace_id` на метрику повесить нельзя — каждый запрос создал бы свой ряд. Exemplar хранится рядом с рядом, а не в нём: Prometheus держит для каждого ряда несколько последних примеров в кольцевом буфере.
+
+```go
+obs := duration.WithLabelValues(method, route)
+sc := trace.SpanContextFromContext(ctx)
+if eo, ok := obs.(prometheus.ExemplarObserver); ok && sc.IsSampled() {
+    eo.ObserveWithExemplar(secs, prometheus.Labels{"trace_id": sc.TraceID().String()})
+} else {
+    obs.Observe(secs)
+}
+```
+
+Чтобы это заработало:
+
+- обработчик `/metrics` отдаёт формат OpenMetrics: `promhttp.HandlerOpts{EnableOpenMetrics: true}`;
+- Prometheus запущен с `--enable-feature=exemplar-storage`;
+- в Grafana у источника данных настроена ссылка из exemplar на хранилище трасс.
+
+Прикреплять стоит только трассы, которые сохранены (`IsSampled()`), — иначе клик приведёт в пустоту.
