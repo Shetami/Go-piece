@@ -1,0 +1,68 @@
+---
+/**
+ * Поиск ключа в Swiss table: хэш делится на H1 (выбор группы) и H2 (7 бит в контрольном байте),
+ * восемь контрольных байтов группы сравниваются с H2 за одну операцию.
+ */
+const ctrl = [
+  { t: '0x2a', s: 'full' },
+  { t: 'empty', s: '' },
+  { t: '0x5c', s: 'full', hit: true },
+  { t: '0x13', s: 'full' },
+  { t: 'del', s: '' },
+  { t: '0x5c', s: 'full', hit: true },
+  { t: 'empty', s: '' },
+  { t: '0x71', s: 'full' },
+]
+const X0 = 60
+const W = 80
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 330" role="img" aria-labelledby="gsw-t">
+      <title id="gsw-t">Хэш ключа делится на H1 и H2; H1 выбирает группу, H2 сравнивается сразу с восемью контрольными байтами группы</title>
+      <defs>
+        <marker id="gsw-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+
+      <text x="20" y="26" class="t-mono t-bold">hash(key, seed) — 64 бита</text>
+      <rect x="260" y="10" width="380" height="26" rx="4" class="box-2"></rect>
+      <text x="420" y="28" text-anchor="middle" class="t-mono t-small">H1: старшие 57 бит</text>
+      <rect x="640" y="10" width="100" height="26" rx="4" class="lead"></rect>
+      <text x="690" y="28" text-anchor="middle" class="t-mono t-small">H2 = 0x5c</text>
+      <text x="420" y="54" text-anchor="middle" class="t-muted t-small">верхние биты → таблица в каталоге, дальше → номер группы и порядок проб</text>
+      <path d="M420 60 V80" class="ln" marker-end="url(#gsw-a)"></path>
+
+      <text x={X0} y="98" class="t-bold">группа: контрольное слово (8 байт) + 8 слотов ключ/значение</text>
+      {
+        ctrl.map((c, i) => (
+          <g>
+            <rect x={X0 + i * W} y="108" width={W} height="40" class={c.hit ? 'cell-on' : c.t === 'empty' || c.t === 'del' ? 'cell-pending' : 'cell'}></rect>
+            <text x={X0 + i * W + W / 2} y="126" text-anchor="middle" class={c.hit ? 't-mono t-accent' : 't-mono'}>{c.t}</text>
+            <text x={X0 + i * W + W / 2} y="141" text-anchor="middle" class="t-muted t-small">{c.s}</text>
+            <rect x={X0 + i * W} y="156" width={W} height="40" class="box"></rect>
+            <text x={X0 + i * W + W / 2} y="180" text-anchor="middle" class="t-small t-mono">{c.t === 'empty' || c.t === 'del' ? '—' : `k${i} → v${i}`}</text>
+          </g>
+        ))
+      }
+      <text x="20" y="132" class="t-muted t-small">ctrl</text>
+      <text x="20" y="180" class="t-muted t-small">slots</text>
+
+      <path d={`M${X0 + 2 * W + W / 2} 200 V220`} class="ln-accent"></path>
+      <path d={`M${X0 + 5 * W + W / 2} 200 V220`} class="ln-accent"></path>
+      <text x={X0 + 3.5 * W + W / 2} y="236" text-anchor="middle" class="t-accent t-small">matchH2 → два кандидата, сравниваем ключи целиком: k2 == key? k5 == key?</text>
+
+      <rect x="20" y="254" width="720" height="62" rx="8" class="note"></rect>
+      <text x="36" y="274" class="t-small">Одна битовая операция отвечает сразу за 8 слотов: вместо 8 сравнений ключей — одно сравнение слова.</text>
+      <text x="36" y="292" class="t-small">Ложное совпадение по 7 битам — 1 из 128 на слот, поэтому ключ всё равно проверяется целиком.</text>
+      <text x="36" y="308" class="t-small">Если совпадения нет, но в группе есть empty — ключа в карте нет. Нет и empty — идём в следующую группу.</text>
+    </svg>
+  </div>
+  <figcaption>
+    Так устроены карты начиная с Go 1.24. Старший кусок хэша выбирает, где искать, младшие 7 бит лежат прямо в
+    контрольном байте каждого занятого слота. Пустые слоты (<code>empty</code>) останавливают поиск, удалённые из
+    полной группы (<code>del</code>, «надгробие») — нет.
+  </figcaption>
+</figure>

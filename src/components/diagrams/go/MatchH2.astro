@@ -1,0 +1,47 @@
+---
+/**
+ * matchH2 без SIMD: три арифметические операции над uint64 находят байты, равные H2.
+ */
+const rows = [
+  { label: 'ctrl', note: 'контрольное слово группы', bytes: ['2a', '80', '5c', '13', 'fe', '5c', '80', '71'] },
+  { label: 'LSB × H2', note: 'H2 = 0x5c в каждом байте', bytes: ['5c', '5c', '5c', '5c', '5c', '5c', '5c', '5c'] },
+  { label: 'v = ctrl ^ …', note: 'совпадение → нулевой байт', bytes: ['76', 'dc', '00', '4f', 'a2', '00', 'dc', '2d'], zero: [2, 5] },
+  { label: '(v − LSB) &^ v', note: 'у нулевого байта загорается старший бит', bytes: ['··', '··', 'ff', '··', '··', 'ff', '··', '··'], zero: [2, 5] },
+  { label: '… & MSB', note: 'маска кандидатов', bytes: ['00', '00', '80', '00', '00', '80', '00', '00'], zero: [2, 5] },
+]
+const X0 = 150
+const W = 52
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 270" role="img" aria-labelledby="gmh-t">
+      <title id="gmh-t">Сравнение восьми контрольных байтов с H2 тремя операциями над 64-битным словом</title>
+      <text x={X0} y="22" class="t-muted t-small">слот 0 … слот 7 (байты слова, младший слева)</text>
+      {
+        rows.map((r, j) => {
+          const y = 34 + j * 42
+          return (
+            <g>
+              <text x="20" y={y + 20} class="t-mono t-small t-bold">{r.label}</text>
+              {r.bytes.map((b, i) => (
+                <g>
+                  <rect x={X0 + i * W} y={y} width={W - 4} height="30" rx="3" class={r.zero?.includes(i) ? 'cell-on' : 'cell'}></rect>
+                  <text x={X0 + i * W + (W - 4) / 2} y={y + 20} text-anchor="middle" class={r.zero?.includes(i) ? 't-mono t-accent' : 't-mono'}>{b}</text>
+                </g>
+              ))}
+              <text x={X0 + 8 * W + 6} y={y + 20} class="t-muted t-small">{r.note}</text>
+            </g>
+          )
+        })
+      }
+      <text x="20" y="258" class="t-small">Без ветвлений и циклов: одна маска на всю группу. На amd64 то же делают SSE-инструкции PCMPEQB + PMOVMSKB.</text>
+    </svg>
+  </div>
+  <figcaption>
+    XOR с H2, размноженным на все байты, превращает совпадающий байт в ноль. Классический трюк «найти нулевой байт в
+    слове» поднимает у таких байтов старший бит. <code>empty</code> (0x80) и <code>deleted</code> (0xfe) совпасть не
+    могут: у занятого слота старший бит всегда 0, а H2 — всего 7 бит. Изредка трюк даёт ложное срабатывание на соседнем
+    байте — не страшно, ключ всё равно сравнивается целиком.
+  </figcaption>
+</figure>

@@ -1,0 +1,60 @@
+---
+/**
+ * Каталог таблиц: карта растёт не целиком — делится только переполненная таблица.
+ */
+const dir = ['00', '01', '10', '11']
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 300" role="img" aria-labelledby="gmd-t">
+      <title id="gmd-t">Каталог указывает на таблицы до 1024 слотов; при переполнении большая таблица делится на две, остальные не трогаются</title>
+      <defs>
+        <marker id="gmd-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+
+      <text x="20" y="26" class="t-bold">directory (globalDepth = 2)</text>
+      <text x="20" y="42" class="t-muted t-small">индекс — два старших бита хэша</text>
+      {
+        dir.map((d, i) => (
+          <g>
+            <rect x="20" y={56 + i * 44} width="90" height="36" class="cell"></rect>
+            <text x="65" y={79 + i * 44} text-anchor="middle" class="t-mono">{d}</text>
+          </g>
+        ))
+      }
+
+      <rect x="250" y="56" width="200" height="60" rx="6" class="box"></rect>
+      <text x="350" y="80" text-anchor="middle" class="t-bold t-small">таблица A, localDepth 1</text>
+      <text x="350" y="100" text-anchor="middle" class="t-muted t-small">640 / 1024 слотов</text>
+      <path d="M110 74 C180 74, 190 80, 246 82" class="ln" marker-end="url(#gmd-a)"></path>
+      <path d="M110 118 C180 118, 190 96, 246 92" class="ln" marker-end="url(#gmd-a)"></path>
+
+      <rect x="250" y="150" width="200" height="60" rx="6" class="risk"></rect>
+      <text x="350" y="174" text-anchor="middle" class="t-bold t-small">таблица B, localDepth 1</text>
+      <text x="350" y="194" text-anchor="middle" class="t-bad t-small">896 / 1024 — заполнена на 7/8</text>
+      <path d="M110 162 C180 162, 190 172, 246 176" class="ln" marker-end="url(#gmd-a)"></path>
+      <path d="M110 206 C180 206, 190 190, 246 186" class="ln" marker-end="url(#gmd-a)"></path>
+
+      <path d="M460 180 H520" class="ln" marker-end="url(#gmd-a)"></path>
+      <text x="490" y="170" text-anchor="middle" class="t-muted t-small">split</text>
+
+      <rect x="530" y="130" width="210" height="44" rx="6" class="lead"></rect>
+      <text x="635" y="150" text-anchor="middle" class="t-small t-bold">B0 ← ключи с префиксом 10</text>
+      <text x="635" y="166" text-anchor="middle" class="t-muted t-small">localDepth 2</text>
+      <rect x="530" y="186" width="210" height="44" rx="6" class="lead"></rect>
+      <text x="635" y="206" text-anchor="middle" class="t-small t-bold">B1 ← ключи с префиксом 11</text>
+      <text x="635" y="222" text-anchor="middle" class="t-muted t-small">localDepth 2</text>
+
+      <text x="20" y="260" class="t-small">Пока таблица меньше 1024 слотов, она растёт вдвое на месте. Дошла до предела — делится на две,</text>
+      <text x="20" y="278" class="t-small">и в каталоге перенаправляются только её строки. Таблица A и её ключи не трогаются вообще.</text>
+    </svg>
+  </div>
+  <figcaption>
+    Рост карты в Go 1.24+ — это расширяемое хэширование. Одна вставка может заставить перехэшировать не больше одной
+    таблицы, то есть не больше 1024 слотов, — сколько бы миллионов ключей ни лежало в карте. Если каталогу не хватает
+    бит, чтобы различить новые таблицы, он удваивается: это массив указателей, он дешёвый.
+  </figcaption>
+</figure>

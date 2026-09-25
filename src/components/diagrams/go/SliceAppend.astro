@@ -1,0 +1,72 @@
+---
+/**
+ * Два исхода append: есть место — пишет в общий массив и затирает соседа,
+ * нет места — переезжает в новый массив и отцепляется от старого.
+ */
+const W = 50
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 300" role="img" aria-labelledby="gsa-t">
+      <title id="gsa-t">append без переезда пишет в общий массив и меняет элемент чужого слайса; append с переездом копирует в новый массив</title>
+      <defs>
+        <marker id="gsa-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+
+      <text x="20" y="26" class="t-bold">cap хватает — пишем на месте</text>
+      <text x="20" y="44" class="t-mono t-small">a := []int{1, 2, 3, 4};  b := a[:2];  b = append(b, 99)</text>
+      {
+        [1, 2, 99, 4].map((v, i) => (
+          <g>
+            <rect x={60 + i * W} y="70" width={W} height="34" class={i === 2 ? 'risk' : 'cell-on'}></rect>
+            <text x={60 + i * W + W / 2} y="92" text-anchor="middle" class={i === 2 ? 't-mono t-bad' : 't-mono'}>{v}</text>
+          </g>
+        ))
+      }
+      <path d={`M60 116 H${60 + 4 * W}`} class="ln"></path>
+      <text x="60" y="132" class="t-muted t-small">a: len 4</text>
+      <path d={`M60 144 H${60 + 3 * W}`} class="ln-accent"></path>
+      <text x="60" y="160" class="t-accent t-small">b после append: len 3, cap 4</text>
+      <text x="60" y="190" class="t-bad t-small">a[2] теперь 99 — хотя a никто не трогал</text>
+
+      <path d="M390 20 V280" class="ln-life"></path>
+
+      <text x="410" y="26" class="t-bold">cap не хватает — переезд</text>
+      <text x="410" y="44" class="t-mono t-small">b := a[:4];  b = append(b, 5)</text>
+      <text x="410" y="64" class="t-muted t-small">старый массив, cap 4</text>
+      {
+        [1, 2, 3, 4].map((v, i) => (
+          <g>
+            <rect x={410 + i * W} y="70" width={W} height="34" class="cell-old"></rect>
+            <text x={410 + i * W + W / 2} y="92" text-anchor="middle" class="t-mono">{v}</text>
+          </g>
+        ))
+      }
+      <text x="620" y="92" class="t-muted t-small">← a смотрит сюда</text>
+      <path d="M510 108 V150" class="ln" marker-end="url(#gsa-a)"></path>
+      <text x="518" y="134" class="t-muted t-small">growslice: malloc + memmove</text>
+      <text x="410" y="160" class="t-muted t-small">новый массив, cap 8</text>
+      {
+        [1, 2, 3, 4, 5, '', '', ''].map((v, i) => (
+          <g>
+            <rect x={410 + i * 42} y="166" width="42" height="34" class={i < 5 ? 'cell-on' : 'cell-pending'}></rect>
+            <text x={410 + i * 42 + 21} y="188" text-anchor="middle" class="t-mono">{v}</text>
+          </g>
+        ))
+      }
+      <text x="410" y="222" class="t-accent t-small">b: len 5, cap 8 — дальше a и b независимы</text>
+
+      <rect x="20" y="238" width="720" height="44" rx="8" class="note"></rect>
+      <text x="380" y="256" text-anchor="middle" class="t-small">append возвращает новый заголовок. Какой из двух исходов случится, решает cap в момент вызова —</text>
+      <text x="380" y="272" text-anchor="middle" class="t-small">по коду его обычно не видно. Поэтому результат append присваивают той же переменной: s = append(s, …)</text>
+    </svg>
+  </div>
+  <figcaption>
+    Слева: у <code>b</code> длина 2, но ёмкость 4, и <code>append</code> пишет в третий элемент общего массива — тот
+    самый, который <code>a</code> считает своим. Справа: места нет, рантайм выделяет новый массив, копирует туда
+    элементы и возвращает заголовок, который смотрит уже в него.
+  </figcaption>
+</figure>
