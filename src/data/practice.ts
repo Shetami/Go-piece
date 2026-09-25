@@ -95,6 +95,7 @@ export const TASK_TOPICS = [
   { lang: 'sql', id: 'sql-grouping', title: 'SQL: группировка', blurb: 'GROUP BY и HAVING, агрегаты и NULL, условная агрегация, дыры в рядах по датам.' },
   { lang: 'sql', id: 'sql-subqueries', title: 'SQL: подзапросы и CTE', blurb: 'IN и NOT IN, EXISTS, коррелированные подзапросы, рекурсивные CTE.' },
   { lang: 'sql', id: 'sql-window', title: 'SQL: оконные функции', blurb: 'ROW_NUMBER, RANK и DENSE_RANK, нарастающий итог, рамка окна, LAG, острова и промежутки.' },
+  { lang: 'sql', id: 'sql-interview', title: 'SQL: комплексные задачи', blurb: 'Как на живом собеседовании: пять-шесть таблиц, CTE, окна и группировка в одном запросе, ловушки в данных.' },
 ] as const
 
 export type TaskTopicId = (typeof TASK_TOPICS)[number]['id']

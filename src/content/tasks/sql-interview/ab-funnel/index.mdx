@@ -1,0 +1,136 @@
+---
+title: "Воронка A/B-теста по сессиям"
+description: "Нарезать поток событий на сессии, проверить порядок шагов внутри сессии и сравнить варианты эксперимента."
+kind: implement
+topic: sql-interview
+level: hard
+order: 40
+ordered: true
+---
+
+Идёт A/B-тест новой карточки товара. Аналитику нужна воронка
+«просмотр → корзина → покупка» по **сессиям**, отдельно для каждого варианта.
+
+**Сессия.** События одного пользователя идут в одной сессии, пока пауза
+между соседними событиями не больше 30 минут. Пауза ровно 30 минут — ещё та
+же сессия, 30 минут и 1 секунда — уже новая.
+
+**Шаги воронки внутри сессии, строго по порядку:**
+
+- `viewed` — в сессии был просмотр;
+- `carted` — в сессии было добавление в корзину **после** первого
+  просмотра этой сессии;
+- `purchased` — в сессии была покупка **после** первого добавления в
+  корзину, которое засчитано на предыдущем шаге.
+
+Корзина без предшествующего просмотра и покупка без засчитанной корзины
+воронку не продвигают.
+
+В отчёт идут только участники эксперимента (`experiment`); боты
+(`users.is_bot`) исключаются.
+
+- колонки: `variant`, `sessions` (всего сессий), `viewed`, `carted`,
+  `purchased` (сколько сессий дошли до шага), `conversion_pct` —
+  `purchased / viewed` в процентах, `round(…, 1)`;
+- порядок: по `variant`.
+
+<Reveal>
+
+```sql
+WITH marked AS (
+  SELECT e.user_id, e.ts, e.event, x.variant,
+         CASE WHEN e.ts - lag(e.ts) OVER w <= interval '30 minutes' THEN 0 ELSE 1 END AS is_new
+  FROM events e
+  JOIN experiment x ON x.user_id = e.user_id
+  JOIN users u      ON u.id = e.user_id
+  WHERE NOT u.is_bot
+  WINDOW w AS (PARTITION BY e.user_id ORDER BY e.ts)
+),
+sessions AS (
+  SELECT *, sum(is_new) OVER (PARTITION BY user_id ORDER BY ts) AS session_no
+  FROM marked
+),
+with_view AS (
+  SELECT *, min(ts) FILTER (WHERE event = 'view') OVER s AS view_at
+  FROM sessions
+  WINDOW s AS (PARTITION BY user_id, session_no)
+),
+with_cart AS (
+  SELECT *, min(ts) FILTER (WHERE event = 'cart' AND ts > view_at) OVER s AS cart_at
+  FROM with_view
+  WINDOW s AS (PARTITION BY user_id, session_no)
+),
+per_session AS (
+  SELECT variant, user_id, session_no,
+         bool_or(view_at IS NOT NULL)               AS viewed,
+         bool_or(cart_at IS NOT NULL)               AS carted,
+         bool_or(event = 'purchase' AND ts > cart_at) AS purchased
+  FROM with_cart
+  GROUP BY variant, user_id, session_no
+)
+SELECT variant,
+       count(*)                            AS sessions,
+       count(*) FILTER (WHERE viewed)      AS viewed,
+       count(*) FILTER (WHERE carted)      AS carted,
+       count(*) FILTER (WHERE purchased)   AS purchased,
+       round(100.0 * count(*) FILTER (WHERE purchased)
+                   / nullif(count(*) FILTER (WHERE viewed), 0), 1) AS conversion_pct
+FROM per_session
+GROUP BY variant
+ORDER BY variant;
+```
+
+Ответ:
+
+```
+A | 4 | 3 | 1 | 1 | 33.3
+B | 4 | 3 | 2 | 2 | 66.7
+```
+
+**Сессионизация — «флаг начала + нарастающая сумма».** Это тот же приём,
+что в островах и промежутках:
+
+1. `lag(ts)` даёт время предыдущего события пользователя. Если пауза не
+   больше 30 минут, событие продолжает сессию (`is_new = 0`), иначе
+   открывает новую (`1`). У первого события `lag` — `NULL`, сравнение с
+   `NULL` не истинно, и `CASE` уходит в `ELSE 1` — ровно то, что нужно.
+2. `sum(is_new) OVER (… ORDER BY ts)` — нарастающий итог флагов. Он растёт
+   на единицу в начале каждой сессии и стоит на месте внутри неё — это и
+   есть номер сессии.
+
+`<= interval '30 minutes'`, а не `<`: у Ани корзина в 10:10 и покупка в
+10:40 — одна сессия. У Веры три паузы по 29 минут подряд — тоже одна сессия,
+хотя от первого события до последнего почти полтора часа: сессия
+определяется паузами, а не длительностью.
+
+**Оконная функция не может ссылаться на соседнюю в том же `SELECT`.** Чтобы
+найти корзину *после* первого просмотра, сначала нужен сам первый просмотр.
+Поэтому окна идут слоями: `with_view` считает `view_at`, `with_cart` уже
+видит его как обычную колонку. `FILTER` работает и у агрегатных функций в
+роли окна — `min(ts) FILTER (WHERE …) OVER (…)`.
+
+**Разбор сессий, на которых ломаются простые решения:**
+
+- Боря, 9:00 — корзина до просмотра. Сессия `viewed`, но не `carted`, а
+  покупка в 9:20 не засчитана: засчитанной корзины нет;
+- Боря, 9:55 (пауза 35 минут) — новая сессия без просмотра вообще;
+- Вера, 2 мая: просмотр в 20:00 и корзина в 20:50 — две разные сессии,
+  корзина снова без просмотра;
+- Гоша: покупка в 10:15 раньше корзины, но корзина в 10:20 и покупка в
+  10:25 идут по порядку — сессия проходит воронку целиком;
+- Дина не в эксперименте, `crawler` — бот. Если их не исключить, вариант B
+  получит лишнюю идеальную сессию.
+
+**Почему `bool_or` и `FILTER (WHERE purchased)` дружат с `NULL`.** Если
+`cart_at` — `NULL`, выражение `ts > cart_at` — тоже `NULL`, и `bool_or`
+вернёт `NULL`, а не `false`. `FILTER` пропускает только истину, поэтому такая
+сессия в `purchased` не посчитается. Явный `coalesce(…, false)` был бы
+аккуратнее, если флаг пойдёт куда-то дальше.
+
+**Что спросят дальше.** «Как это будет работать на миллиарде событий?» —
+окна с `PARTITION BY user_id ORDER BY ts` требуют сортировки всего потока;
+в проде сессии считают инкрементально и сохраняют `session_id` при записи
+события или в витрине. И второй вопрос: значима ли разница 33% против 67% на
+трёх сессиях? Нет — но это уже вопрос к статистике, а не к SQL.
+
+</Reveal>
