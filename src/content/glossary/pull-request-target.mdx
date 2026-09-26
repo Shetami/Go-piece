@@ -1,0 +1,21 @@
+---
+title: pull_request_target
+short: 'Событие GitHub Actions: workflow для PR из форка запускается в контексте базового репозитория — с секретами и токеном на запись. Безопасно, только пока он не запускает код из PR.'
+aliases: ['pull_request_target', 'pwn request', 'workflow_run', 'PR из форка', 'fork pull request', 'инъекция в workflow', 'zizmor', 'actionlint']
+category: настройка
+related: [ci-oidc, artifact-signing]
+---
+
+Сравнение:
+
+| | `pull_request` | `pull_request_target` |
+| --- | --- | --- |
+| Версия workflow | из PR | из базовой ветки |
+| Секреты для форков | нет | есть |
+| `GITHUB_TOKEN` для форков | только чтение | с записью |
+
+Pwn request — workflow на `pull_request_target`, который делает checkout кода из PR и запускает его: `go test`, `make`, `npm install`. Код злоумышленника — `init()`, `TestMain`, тесты — выполняется рядом с секретами.
+
+Правильно: тесты — на `pull_request` без секретов, результат — артефактом; привилегированное действие — отдельным workflow на `workflow_run`, который читает артефакт как данные.
+
+Родственная проблема — **инъекция**: `run: echo "${{ github.event.pull_request.title }}"` подставляет заголовок в скрипт до оболочки. Недоверенные значения передают через `env`. Оба класса ошибок находят `zizmor` и `actionlint`.

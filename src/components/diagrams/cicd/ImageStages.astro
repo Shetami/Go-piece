@@ -1,0 +1,70 @@
+---
+/**
+ * Многоэтапная сборка: слои этапа build и что из них попадает в итоговый образ.
+ * Слои снизу вверх; при изменении кода пересобирается только верхний слой build.
+ */
+const build = [
+  { t: 'golang:1.25', s: 'компилятор, git, gcc — ≈ 800 МБ', cls: 'box-2', cached: true },
+  { t: 'COPY go.mod go.sum', s: 'меняется редко', cls: 'box', cached: true },
+  { t: 'RUN go mod download', s: 'модули — из кэша слоя', cls: 'box', cached: true },
+  { t: 'COPY . .', s: 'меняется в каждом коммите', cls: 'cell-pending', cached: false },
+  { t: 'RUN go build', s: 'кэш сборки — в cache mount', cls: 'cell-pending', cached: false },
+]
+const final = [
+  { t: 'distroless/static:nonroot', s: 'сертификаты, tzdata, пользователь — ≈ 2 МБ', cls: 'box-2' },
+  { t: 'COPY --from=build /out/app', s: 'один статический бинарник', cls: 'cell-on' },
+]
+const h = 40
+const gap = 6
+const by = (i: number) => 262 - i * (h + gap)
+const fy = (i: number) => 262 - i * (h + gap)
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 330" role="img" aria-labelledby="ciim-t">
+      <title id="ciim-t">Этап сборки состоит из базового образа с компилятором, слоя с go.mod и go.sum, слоя со скачанными модулями, слоя с исходниками и слоя со сборкой. При изменении кода пересобираются только два верхних слоя. В итоговый образ попадает лишь минимальная база и скопированный бинарник</title>
+      <defs>
+        <marker id="ciim-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+
+      <text x="30" y="24" class="t-bold">этап build</text>
+      <text x="30" y="42" class="t-muted t-small">живёт только во время сборки</text>
+      {build.map((l, i) => (
+        <g>
+          <rect x="30" y={by(i)} width="300" height={h} rx="6" class={l.cls}></rect>
+          <text x="44" y={by(i) + 17} class="t-small t-mono">{l.t}</text>
+          <text x="44" y={by(i) + 32} class="t-muted t-small">{l.s}</text>
+          {l.cached ? (
+            <text x="320" y={by(i) + 25} text-anchor="end" class="t-ok t-small">кэш</text>
+          ) : (
+            <text x="320" y={by(i) + 25} text-anchor="end" class="t-bad t-small">заново</text>
+          )}
+        </g>
+      ))}
+
+      <text x="450" y="160" class="t-bold">итоговый образ</text>
+      <text x="450" y="178" class="t-muted t-small">то, что едет в реестр и на узлы</text>
+      {final.map((l, i) => (
+        <g>
+          <rect x="450" y={fy(i)} width="280" height={h} rx="6" class={l.cls}></rect>
+          <text x="464" y={fy(i) + 17} class="t-small t-mono">{l.t}</text>
+          <text x="464" y={fy(i) + 32} class="t-muted t-small">{l.s}</text>
+        </g>
+      ))}
+
+      <path d={`M334 ${by(4) + h / 2} C 390 ${by(4) + h / 2}, 400 ${fy(1) + h / 2}, 446 ${fy(1) + h / 2}`} class="ln-accent" marker-end="url(#ciim-a)"></path>
+      <text x="390" y={by(4) - 4} text-anchor="middle" class="t-accent t-small">только бинарник</text>
+
+      <text x="30" y="324" class="t-muted t-small">порядок слоёв важен: всё, что выше изменившегося, пересобирается</text>
+      <text x="450" y="324" class="t-muted t-small">≈ 15–25 МБ вместо ≈ 900</text>
+    </svg>
+  </div>
+  <figcaption>
+    Слой пересобирается, если изменился он сам или любой слой под ним. Поэтому go.mod и go.sum копируют отдельно
+    и раньше исходников: правка кода не заставляет заново скачивать модули. В итоговый образ из этапа сборки не
+    попадает ничего, кроме бинарника.
+  </figcaption>
+</figure>

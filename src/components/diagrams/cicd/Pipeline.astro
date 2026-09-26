@@ -1,0 +1,70 @@
+---
+/**
+ * Конвейер от коммита до прода: проверки до слияния, сборка одного артефакта
+ * после слияния и продвижение этого же артефакта по окружениям.
+ */
+const pre = [
+  { x: 20, w: 120, t: 'коммит в ветку', s: 'живёт 1–2 дня' },
+  { x: 160, w: 170, t: 'проверки PR', s: 'линтер, тесты, сборка' },
+  { x: 350, w: 120, t: 'очередь', s: 'merge queue' },
+]
+const post = [
+  { x: 20, w: 150, t: 'сборка артефакта', s: 'один раз, по SHA' },
+  { x: 190, w: 130, t: 'staging', s: 'тот же дайджест' },
+  { x: 340, w: 150, t: 'прод: канарейка', s: '5% → 25% → 100%' },
+  { x: 510, w: 110, t: 'прод', s: 'все поды' },
+]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 290" role="img" aria-labelledby="cipl-t">
+      <title id="cipl-t">Изменение проходит проверки в пулл-реквесте и очередь слияния, попадает в main, после чего из него один раз собирается артефакт, и этот же артефакт по очереди выкатывается в staging, на канарейку и на весь прод</title>
+      <defs>
+        <marker id="cipl-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+      </defs>
+
+      <text x="20" y="20" class="t-muted t-small">до слияния — обратная связь автору, цель — до 10 минут</text>
+      {pre.map((s, i) => (
+        <g>
+          <rect x={s.x} y="32" width={s.w} height="54" rx="8" class={i === 1 ? 'box-2' : 'box'}></rect>
+          <text x={s.x + s.w / 2} y="55" text-anchor="middle" class="t-bold t-small">{s.t}</text>
+          <text x={s.x + s.w / 2} y="73" text-anchor="middle" class="t-muted t-small">{s.s}</text>
+        </g>
+      ))}
+      {pre.slice(0, -1).map((s, i) => (
+        <path d={`M${s.x + s.w + 2} 59 H${pre[i + 1].x - 4}`} class="ln" marker-end="url(#cipl-a)"></path>
+      ))}
+      <rect x="500" y="32" width="120" height="54" rx="8" class="lead"></rect>
+      <text x="560" y="55" text-anchor="middle" class="t-bold t-small">main</text>
+      <text x="560" y="73" text-anchor="middle" class="t-muted t-small">всегда выкатываем</text>
+      <path d="M472 59 H496" class="ln" marker-end="url(#cipl-a)"></path>
+
+      <path d="M245 90 V112 H90 V92" class="ln-dash" marker-end="url(#cipl-a)"></path>
+      <text x="100" y="128" class="t-bad t-small">красное — автор чинит, пока помнит контекст</text>
+
+      <path d="M560 90 V150 H95 V172" class="ln" marker-end="url(#cipl-a)"></path>
+      <text x="200" y="168" class="t-muted t-small">после слияния — доставка</text>
+      {post.map((s, i) => (
+        <g>
+          <rect x={s.x} y="176" width={s.w} height="54" rx="8" class={i === 0 ? 'box-2' : 'box'}></rect>
+          <text x={s.x + s.w / 2} y="199" text-anchor="middle" class="t-bold t-small">{s.t}</text>
+          <text x={s.x + s.w / 2} y="217" text-anchor="middle" class="t-muted t-small">{s.s}</text>
+        </g>
+      ))}
+      {post.slice(0, -1).map((s, i) => (
+        <path d={`M${s.x + s.w + 2} 203 H${post[i + 1].x - 4}`} class="ln" marker-end="url(#cipl-a)"></path>
+      ))}
+      <path d="M415 234 V262 H95 V234" class="ln-dash" marker-end="url(#cipl-a)"></path>
+      <text x="200" y="280" class="t-bad t-small">метрики хуже — откат на предыдущий артефакт</text>
+      <text x="640" y="199" class="t-small">реестр образов:</text>
+      <text x="640" y="217" class="t-muted t-small t-mono">api@sha256:…</text>
+    </svg>
+  </div>
+  <figcaption>
+    Верхняя половина отвечает автору изменения: можно ли его сливать. Нижняя — доставляет в прод то, что уже
+    слито. Артефакт собирается один раз, и дальше окружения отличаются только конфигурацией, а не кодом.
+  </figcaption>
+</figure>

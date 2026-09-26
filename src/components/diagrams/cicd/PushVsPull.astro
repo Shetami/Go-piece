@@ -1,0 +1,68 @@
+---
+/**
+ * Две модели доставки. Push: CI сам применяет манифесты в кластер и держит
+ * от него ключи. Pull (GitOps): CI только коммитит в репозиторий конфигурации,
+ * а агент внутри кластера сам подтягивает изменения и исправляет дрейф.
+ */
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 350" role="img" aria-labelledby="cipp-t">
+      <title id="cipp-t">В модели push конвейер CI сам применяет манифесты в кластер и поэтому хранит доступ к нему. В модели pull конвейер только коммитит новый дайджест образа в репозиторий конфигурации, а агент GitOps внутри кластера сам сравнивает желаемое состояние из git с живым и применяет разницу, в том числе возвращая ручные изменения</title>
+      <defs>
+        <marker id="cipp-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+        <marker id="cipp-b" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head-accent"></path>
+        </marker>
+      </defs>
+
+      <text x="20" y="24" class="t-bold">push</text>
+      <rect x="20" y="40" width="170" height="56" rx="8" class="box-2"></rect>
+      <text x="105" y="64" text-anchor="middle" class="t-bold t-small">конвейер CI</text>
+      <text x="105" y="82" text-anchor="middle" class="t-muted t-small">держит kubeconfig прода</text>
+      <path d="M194 68 H496" class="ln" marker-end="url(#cipp-a)"></path>
+      <text x="345" y="60" text-anchor="middle" class="t-small t-mono">helm upgrade / kubectl apply</text>
+      <text x="345" y="88" text-anchor="middle" class="t-bad t-small">ключ от кластера — снаружи</text>
+      <rect x="500" y="40" width="240" height="56" rx="8" class="box"></rect>
+      <text x="620" y="64" text-anchor="middle" class="t-bold t-small">кластер</text>
+      <text x="620" y="82" text-anchor="middle" class="t-muted t-small">ручные правки никто не заметит</text>
+
+      <path d="M20 128 H740" class="ln-thin"></path>
+
+      <text x="20" y="160" class="t-bold">pull (GitOps)</text>
+      <rect x="20" y="180" width="170" height="56" rx="8" class="box-2"></rect>
+      <text x="105" y="204" text-anchor="middle" class="t-bold t-small">конвейер CI</text>
+      <text x="105" y="222" text-anchor="middle" class="t-muted t-small">права только на git</text>
+      <path d="M194 208 H266" class="ln" marker-end="url(#cipp-a)"></path>
+      <text x="230" y="198" text-anchor="middle" class="t-small">коммит</text>
+
+      <rect x="270" y="180" width="180" height="56" rx="8" class="lead"></rect>
+      <text x="360" y="204" text-anchor="middle" class="t-bold t-small">репозиторий конфигурации</text>
+      <text x="360" y="222" text-anchor="middle" class="t-muted t-small t-mono">image: api@sha256:…</text>
+
+      <rect x="500" y="170" width="240" height="160" rx="8" class="box"></rect>
+      <text x="620" y="192" text-anchor="middle" class="t-bold t-small">кластер</text>
+      <rect x="520" y="204" width="200" height="44" rx="6" class="box-2"></rect>
+      <text x="620" y="224" text-anchor="middle" class="t-bold t-small">агент: Argo CD / Flux</text>
+      <text x="620" y="240" text-anchor="middle" class="t-muted t-small">сравнивает git и живое</text>
+      <rect x="520" y="270" width="200" height="44" rx="6" class="cell"></rect>
+      <text x="620" y="290" text-anchor="middle" class="t-small">Deployment, Service, …</text>
+      <text x="620" y="306" text-anchor="middle" class="t-muted t-small">живое состояние</text>
+
+      <path d="M516 214 H454" class="ln-accent" marker-end="url(#cipp-b)"></path>
+      <text x="485" y="206" text-anchor="middle" class="t-accent t-small">читает</text>
+      <path d="M604 250 V266" class="ln" marker-end="url(#cipp-a)"></path>
+      <path d="M636 268 V252" class="ln-dash" marker-end="url(#cipp-a)"></path>
+      <text x="498" y="262" text-anchor="end" class="t-small">применяет разницу</text>
+      <text x="498" y="278" text-anchor="end" class="t-muted t-small">и откатывает дрейф</text>
+    </svg>
+  </div>
+  <figcaption>
+    В push-модели конвейер — единственный, кто знает, что должно быть в кластере, и ему нужен доступ к каждому
+    кластеру. В pull-модели источник правды — git: агент внутри кластера сам приводит живое состояние к описанному
+    и замечает, когда кто-то изменил его руками.
+  </figcaption>
+</figure>

@@ -1,0 +1,57 @@
+---
+/**
+ * Цепочка поставки: от исходников до пода. На каждом звене — чем атакуют
+ * и чем защищаются. Подпись и проверка при допуске связывают концы цепочки.
+ */
+const links = [
+  { t: 'исходники', attack: 'код из чужого PR', defense: 'pull_request' },
+  { t: 'зависимости', attack: 'тайпсквоттинг', defense: 'go.sum, sumdb' },
+  { t: 'конвейер CI', attack: 'чужой action', defense: 'пин по SHA' },
+  { t: 'реестр', attack: 'подмена тега', defense: 'дайджест' },
+  { t: 'кластер', attack: 'чужой образ', defense: 'политика допуска' },
+]
+const w = 128
+const gap = 20
+const x = (i: number) => 20 + i * (w + gap)
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 290" role="img" aria-labelledby="cisc-t">
+      <title id="cisc-t">Цепочка поставки состоит из исходников, зависимостей, конвейера CI, реестра образов и кластера. На каждом звене есть своя атака и своя защита, а подпись образа в CI и её проверка при допуске в кластер гарантируют, что запускается ровно то, что собрал конвейер</title>
+      <defs>
+        <marker id="cisc-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+        <marker id="cisc-b" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head-accent"></path>
+        </marker>
+      </defs>
+
+      {links.map((l, i) => (
+        <g>
+          <rect x={x(i)} y="80" width={w} height="48" rx="8" class={i === 2 ? 'box-2' : 'box'}></rect>
+          <text x={x(i) + w / 2} y="109" text-anchor="middle" class="t-bold t-small">{l.t}</text>
+          <rect x={x(i)} y="146" width={w} height="48" rx="6" class="risk"></rect>
+          <text x={x(i) + 8} y="166" class="t-small">атака:</text>
+          <text x={x(i) + 8} y="184" class="t-muted t-small">{l.attack}</text>
+          <rect x={x(i)} y="206" width={w} height="48" rx="6" class="cell-on"></rect>
+          <text x={x(i) + 8} y="226" class="t-small">защита:</text>
+          <text x={x(i) + 8} y="244" class="t-muted t-small">{l.defense}</text>
+        </g>
+      ))}
+      {links.slice(0, -1).map((_, i) => (
+        <path d={`M${x(i) + w + 2} 104 H${x(i + 1) - 4}`} class="ln" marker-end="url(#cisc-a)"></path>
+      ))}
+
+      <path d={`M${x(2) + w / 2} 76 V40 H${x(4) + w / 2} V74`} class="ln-accent" marker-end="url(#cisc-b)"></path>
+      <text x={(x(2) + x(4) + w) / 2} y="32" text-anchor="middle" class="t-accent t-small">подпись и происхождение: cosign, SLSA</text>
+      <text x="20" y="280" class="t-muted t-small">самое ценное звено — CI: у него доступ к исходникам, секретам, реестру и часто к проду</text>
+    </svg>
+  </div>
+  <figcaption>
+    Злоумышленнику не нужно ломать прод напрямую: достаточно одного слабого звена, через которое его код попадёт в
+    сборку. Подпись, сделанная конвейером, и её проверка кластером замыкают цепочку: запускается только то, что
+    собрал доверенный конвейер из известного коммита.
+  </figcaption>
+</figure>

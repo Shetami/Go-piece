@@ -1,0 +1,24 @@
+---
+title: SBOM
+short: 'Software bill of materials — список всех компонентов артефакта с версиями: модули Go, пакеты базового образа, лицензии. Отвечает на вопрос «где у нас уязвимая библиотека» за минуты.'
+aliases: ['software bill of materials', 'syft', 'SPDX', 'CycloneDX', 'go version -m', 'состав артефакта']
+category: сущность
+related: [artifact-signing, govulncheck]
+---
+
+SBOM генерируют при сборке (`syft`, `docker buildx --sbom`) в формате SPDX или CycloneDX и прикладывают к образу как подписанную аттестацию.
+
+В бинарнике Go часть этих данных уже есть:
+
+```
+$ go version -m ./app
+./app: go1.25.1
+	path	example.com/api/cmd/api
+	mod	example.com/api	v1.4.2
+	dep	github.com/jackc/pgx/v5	v5.7.5	h1:…
+	build	vcs.revision=a1b2c3…
+```
+
+Этого хватает `govulncheck -mode=binary`, но не видно системных пакетов базового образа — для них нужен SBOM образа целиком.
+
+Ценность SBOM раскрывается при массовой уязвимости: найти все работающие сервисы с нужной библиотекой по SBOM выкаченных образов быстрее и точнее, чем по репозиториям, которые могут не совпадать с тем, что реально работает.

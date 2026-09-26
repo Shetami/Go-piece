@@ -1,0 +1,17 @@
+---
+title: OIDC-федерация в CI
+short: 'Конвейер получает от CI подписанный токен о себе — репозиторий, ветка, окружение — и меняет его у облака на временные учётные данные. Долгоживущие ключи в секретах CI не нужны.'
+aliases: ['OIDC', 'OpenID Connect', 'id-token: write', 'workload identity federation', 'AssumeRoleWithWebIdentity', 'sub claim', 'job_workflow_ref']
+category: механизм
+related: [pull-request-target, artifact-signing]
+---
+
+Как это работает в GitHub Actions:
+
+1. Задаче выдаётся право `permissions: id-token: write`.
+2. Она запрашивает у GitHub JWT с утверждениями: `repository`, `ref`, `environment`, `job_workflow_ref` и составным `sub`, например `repo:acme/api:environment:production`.
+3. Облако проверяет подпись токена и условия доверия роли и выдаёт учётные данные на час.
+
+Вся безопасность — в **условиях доверия**. `sub: repo:acme/api:*` пускает любую ветку и любой PR из ветки этого репозитория: достаточно запушить ветку с workflow, который запросит токен. Для прода доверие ограничивают окружением (`…:environment:production`), а у окружения в GitHub — правилом «только из `main`». Ещё строже — проверять `job_workflow_ref`.
+
+Тот же токен используется для подписи без ключей в [cosign](/glossary/artifact-signing/).

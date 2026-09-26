@@ -1,0 +1,27 @@
+---
+title: Многоэтапная сборка
+short: 'Dockerfile из нескольких FROM: первый этап с компилятором собирает бинарник, последний копирует только его в минимальный образ. Для Go итоговый образ — 15–25 МБ вместо почти гигабайта.'
+aliases: ['multi-stage build', 'multistage', 'Dockerfile', 'COPY --from', 'distroless', 'scratch', 'CGO_ENABLED=0', 'BUILDPLATFORM']
+category: механизм
+related: [k8s-container-image, reproducible-build]
+---
+
+```dockerfile
+FROM --platform=$BUILDPLATFORM golang:1.25 AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG TARGETOS TARGETARCH
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -trimpath -ldflags="-s -w" -o /out/app ./cmd/api
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /out/app /app
+ENTRYPOINT ["/app"]
+```
+
+- **`go.mod` и `go.sum` — раньше кода**: слой с модулями берётся из кэша, пока не менялись зависимости;
+- **`CGO_ENABLED=0`**: в образе `golang` есть `gcc`, и без этого бинарник с `net` получится динамическим — в `distroless/static` или `scratch` он упадёт с `exec /app: no such file or directory`;
+- **`--platform=$BUILDPLATFORM`** + `GOARCH`: образ под arm64 собирается кросс-компиляцией, без медленной эмуляции QEMU;
+- **`.dockerignore`** обязателен — иначе в контекст сборки уедут `.git` и файлы с секретами.

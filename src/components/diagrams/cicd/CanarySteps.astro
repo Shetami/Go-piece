@@ -1,0 +1,60 @@
+---
+/**
+ * Канареечная выкатка по шагам: доля трафика на новой версии во времени,
+ * анализ метрик на каждом шаге и прерывание, если канарейка хуже базовой версии.
+ */
+const x0 = 80
+const y0 = 250 // ось X: 0% трафика
+const h = 200 // высота до 100%
+const steps = [
+  { t0: 0, t1: 120, w: 5 },
+  { t0: 120, t1: 260, w: 25 },
+  { t0: 260, t1: 400, w: 50 },
+  { t0: 400, t1: 620, w: 100 },
+]
+const y = (w: number) => y0 - (w / 100) * h
+const path = steps
+  .map((s, i) => `${i === 0 ? 'M' : 'L'}${x0 + s.t0} ${y(s.w)} H${x0 + s.t1}`)
+  .join(' ')
+const checks = steps.slice(0, 3).map((s) => x0 + s.t1 - 10)
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 310" role="img" aria-labelledby="cicn-t">
+      <title id="cicn-t">Доля трафика на новой версии растёт ступенями: 5, 25, 50 и 100 процентов. В конце каждой ступени анализ сравнивает метрики канарейки с базовой версией. Если канарейка хуже, выкатка прерывается и доля трафика сразу падает до нуля</title>
+      <path d={`M${x0} ${y0} H${x0 + 640}`} class="ln-thin"></path>
+      <path d={`M${x0} ${y0} V${y0 - h - 10}`} class="ln-thin"></path>
+      {[0, 25, 50, 100].map((w) => (
+        <text x={x0 - 8} y={y(w) + 4} text-anchor="end" class="t-muted t-small">{w}%</text>
+      ))}
+      <text x={x0 + 640} y={y0 + 20} text-anchor="end" class="t-muted t-small">время</text>
+      <text x={x0 + 6} y="30" class="t-muted t-small">доля трафика на новой версии</text>
+
+      <path d={path} fill="none" class="ln-accent"></path>
+      {steps.map((s) => (
+        <text x={x0 + (s.t0 + s.t1) / 2} y={y(s.w) - 8} text-anchor="middle" class="t-small t-bold">{s.w}%</text>
+      ))}
+
+      {checks.map((x) => (
+        <g>
+          <circle cx={x} cy={y0 + 22} r="9" class="dot-ok"></circle>
+          <text x={x} y={y0 + 46} text-anchor="middle" class="t-small">анализ</text>
+        </g>
+      ))}
+
+      <path d={`M${checks[1]} ${y(25)} V${y0}`} class="ln-dash"></path>
+      <text x={checks[1] + 8} y={y0 - 24} class="t-bad t-small">если хуже базовой →</text>
+      <text x={checks[1] + 8} y={y0 - 10} class="t-bad t-small">прервать, 0% за секунды</text>
+
+      <rect x="560" y="60" width="180" height="70" rx="8" class="note"></rect>
+      <text x="572" y="82" class="t-small t-bold">что сравнивает анализ</text>
+      <text x="572" y="100" class="t-muted t-small">долю 5xx, p99 задержки,</text>
+      <text x="572" y="116" class="t-muted t-small">бизнес-метрики: заказы</text>
+    </svg>
+  </div>
+  <figcaption>
+    Каждая ступень ограничивает ущерб: пока канарейка получает 5% трафика, плохая версия задевает 5% запросов. Анализ
+    решает, можно ли идти дальше, а прерывание возвращает весь трафик старой версии без новой выкатки.
+  </figcaption>
+</figure>
