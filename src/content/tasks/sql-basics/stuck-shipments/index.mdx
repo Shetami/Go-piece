@@ -1,0 +1,94 @@
+---
+title: "Застрявшие отправления"
+description: "Последний статус каждой посылки через DISTINCT ON: события не по порядку, ничьи по времени, посылки без событий и граница в 48 часов."
+kind: implement
+topic: sql-basics
+level: hard
+order: 120
+ordered: true
+---
+
+Логисты хотят видеть отправления, которые «застряли»: их **последний**
+статус не финальный и не менялся **больше 48 часов** на момент отчёта
+**2024-07-01 12:00**.
+
+- Последний статус — событие с наибольшим `happened_at`. Если у двух
+  событий одинаковое время, последним считается событие с большим `id`.
+  События пишутся не по порядку: больший `id` не значит более позднее время.
+- Статусы приходят в разном регистре и с пробелами. Финальные —
+  `delivered` и `cancelled`.
+- У отправления может не быть ни одного события: тогда его статус —
+  `created`, а время последнего изменения — `shipments.created_at`.
+- Ровно 48 часов — ещё не застряло.
+
+Колонки: `shipment_id`, `status` (в нижнем регистре, без пробелов),
+`last_at` (`timestamp` последнего изменения), `hours` — сколько **полных**
+часов прошло с `last_at` до момента отчёта (целое).
+Порядок: `hours` по убыванию, затем `shipment_id`.
+
+<Reveal>
+
+```sql
+WITH last_event AS (
+  SELECT DISTINCT ON (shipment_id)
+         shipment_id, lower(trim(status)) AS status, happened_at
+  FROM shipment_events
+  ORDER BY shipment_id, happened_at DESC, id DESC
+),
+cur AS (
+  SELECT s.id                                  AS shipment_id,
+         coalesce(e.status, 'created')         AS status,
+         coalesce(e.happened_at, s.created_at) AS last_at
+  FROM shipments s
+  LEFT JOIN last_event e ON e.shipment_id = s.id
+)
+SELECT shipment_id, status, last_at,
+       floor(extract(epoch FROM timestamp '2024-07-01 12:00' - last_at) / 3600)::int AS hours
+FROM cur
+WHERE status NOT IN ('delivered', 'cancelled')
+  AND last_at < timestamp '2024-07-01 12:00' - interval '48 hours'
+ORDER BY hours DESC, shipment_id;
+```
+
+Ответ:
+
+```
+5 | in_transit | 2024-06-26 18:00:00 | 114
+2 | in_transit | 2024-06-28 07:30:00 | 76
+7 | created | 2024-06-28 12:00:00 | 72
+10 | in_transit | 2024-06-28 11:30:00 | 72
+```
+
+**`DISTINCT ON` — «первая строка группы».** Оставляет по одной строке на
+каждый `shipment_id` — ту, что идёт первой в `ORDER BY`. Поэтому сортировка
+начинается с ключа `DISTINCT ON`, дальше — что значит «первая»:
+`happened_at DESC`, и тай-брейкер `id DESC`. Без тай-брейкера у посылок 4 и
+5 (два события в одну секунду) результат не определён: посылка 4 то
+доставлена, то «в пути».
+
+**Статус — не агрегат.** `GROUP BY shipment_id, status` с `max(happened_at)`
+дает по строке на *каждый* статус, а не последний. `max(id)` — тоже мимо:
+у посылки 6 событие `accepted` записали позже, чем `in_transit`, и
+«последний по id» объявил бы её застрявшей с 24 июня.
+
+**`LEFT JOIN` и `coalesce` для посылок без событий.** Посылка 7 создана
+72 часа назад, и по ней никто ничего не отметил — это самый застрявший
+случай, который запрос по одной таблице событий не увидит вовсе.
+
+**Нормализация перед `NOT IN`.** `'Delivered '` и `'CANCELLED'` — финальные
+статусы, но `status <> 'delivered'` их не узнаёт. Здесь `NOT IN` по списку
+констант безопасен: в нём нет `NULL`, а `status` после `coalesce` тоже не
+`NULL`.
+
+**Полные часы и граница.** `timestamp - timestamp` — интервал
+`4 days 18:00`; `extract(hour …)` вернул бы 18. Общее число секунд — `extract(epoch …)`,
+делим на 3600 и округляем вниз: 72,5 часа — это 72 полных, и тогда
+посылки 7 и 10 делят место, а порядок решает `shipment_id`. Посылка 3
+стоит ровно 48 часов — строгое `<` её не пропускает.
+
+**Что спросят дальше.** На миллионах событий `DISTINCT ON` сортирует всё;
+индекс `(shipment_id, happened_at DESC, id DESC)` позволяет брать последнее
+событие дёшево, а ещё лучше — хранить текущий статус в `shipments` и
+обновлять его вместе со вставкой события.
+
+</Reveal>

@@ -1,0 +1,82 @@
+---
+title: "Самое долгое плечо посылки"
+description: "LAG по сканам посылки, тай-брейк одинакового времени и выбор худшего плеча. Посылки с одним сканом и без сканов тоже в отчёте."
+kind: implement
+topic: sql-window
+level: medium
+order: 120
+ordered: true
+---
+
+Посылку сканируют в каждом хабе. **Плечо** — путь между двумя соседними
+сканами одной посылки. Найдите для каждой посылки самое долгое плечо.
+
+- сканы посылки упорядочены по `scanned_at`, при равном времени — по `id`;
+- при равной длительности берётся более раннее плечо;
+- в отчёте **все** посылки из `parcels`; если сканов меньше двух — `from_hub`,
+  `to_hub` и `minutes` равны `NULL`;
+- `minutes` — длительность плеча в минутах, целое;
+- колонки: `parcel`, `from_hub`, `to_hub`, `minutes`;
+- порядок: по `parcel`.
+
+Что проверяют скрытые данные: два скана в одну минуту, у которых порядок
+`id` не совпадает с порядком вставки; два плеча одинаковой длины; плечо
+через полночь; посылка с одним сканом и посылка без сканов.
+
+<Reveal>
+
+```sql
+WITH legs AS (
+  SELECT parcel,
+         hub AS to_hub,
+         lag(hub)        OVER w AS from_hub,
+         scanned_at - lag(scanned_at) OVER w AS dur,
+         scanned_at
+  FROM scans
+  WINDOW w AS (PARTITION BY parcel ORDER BY scanned_at, id)
+),
+ranked AS (
+  SELECT parcel, from_hub, to_hub,
+         (extract(epoch FROM dur) / 60)::int AS minutes,
+         row_number() OVER (PARTITION BY parcel ORDER BY dur DESC, scanned_at) AS rn
+  FROM legs
+  WHERE from_hub IS NOT NULL
+)
+SELECT p.code AS parcel, r.from_hub, r.to_hub, r.minutes
+FROM parcels p
+LEFT JOIN ranked r ON r.parcel = p.code AND r.rn = 1
+ORDER BY p.code;
+```
+
+Ответ:
+
+```
+P1 | Москва | Тверь | 120
+P2 | Москва | Тула | 180
+P3 | NULL | NULL | NULL
+P4 | NULL | NULL | NULL
+P5 | Казань | Чебоксары | 100
+```
+
+**Два `lag` на одном окне.** `lag(hub)` и `lag(scanned_at)` берут данные
+одной и той же предыдущей строки, если окно одно и порядок в нём полный.
+`WINDOW w` гарантирует, что это одно окно, а не два похожих.
+
+**Тай-брейк времени — `ORDER BY scanned_at, id`.** У P2 сканы Сортцентра
+(id 5) и Москвы (id 6) в 09:00. Без `id` порядок между ними не определён, и
+ответ «Москва → Тула» или «Сортцентр → Тула» зависел бы от плана запроса.
+
+**Разность `timestamp`, а не `time`.** У P5 плечо Казань → Чебоксары идёт
+через полночь: `01:10 − 23:30` по `time` дало бы −22 часа 20 минут. Разность
+`timestamp` — `interval`, в минуты его переводит `extract(epoch …) / 60`.
+
+**Выбор худшего плеча — ещё одно окно.** `row_number() OVER (PARTITION BY
+parcel ORDER BY dur DESC, scanned_at)` — top-1 с правилом ничьей (у P1 два
+плеча по 120 минут, побеждает Москва → Тверь). Подзапрос с `max(dur)` вернул
+бы оба.
+
+**`LEFT JOIN` от справочника.** Первое «плечо» каждой посылки — строка с
+`from_hub IS NULL`; её отбрасываем, и у P3 не остаётся ни одной строки.
+Поэтому посылки берутся из `parcels`, а не из `scans`.
+
+</Reveal>

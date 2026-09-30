@@ -1,0 +1,125 @@
+---
+title: "SLA поддержки в рабочих часах"
+description: "Первый ответ оператора, рабочие минуты через generate_series по дням, выходные и праздники, открытые тикеты до момента отчёта."
+kind: implement
+topic: sql-interview
+level: hard
+order: 130
+ordered: true
+---
+
+Руководитель поддержки проверяет, укладываются ли команды в SLA **первого
+ответа**. Отчёт строится на момент **2024-07-08 12:00**.
+
+**Рабочее время** — с понедельника по пятницу с 10:00 до 19:00. Субботы,
+воскресенья и дни из `holidays` нерабочие целиком. Время SLA тикает только в
+рабочие минуты.
+
+- **Первый ответ** — самое раннее сообщение с `author = 'agent'`.
+  Автоответ бота и сообщения клиента ответом не считаются;
+- **время ответа** тикета — число рабочих минут от `created_at` до первого
+  ответа. Если ответа ещё нет — до момента отчёта;
+- **нарушение** — время ответа строго больше нормы
+  `sla.first_reply_h` часов для приоритета тикета. Ровно норма — не
+  нарушение. Тикет без ответа тоже может нарушить SLA.
+
+Для **каждой** команды, включая команды без тикетов:
+
+- колонки: `team`, `tickets` — всего тикетов, `answered` — сколько уже
+  получили ответ, `breached` — сколько нарушили SLA, `avg_reply_min` —
+  среднее время ответа в рабочих минутах **только по отвеченным**,
+  `round(…, 1)`; если отвеченных нет — `NULL`;
+- порядок: по `team`.
+
+<Reveal>
+
+```sql
+WITH first_reply AS (
+  SELECT ticket_id, min(created_at) AS replied_at
+  FROM messages
+  WHERE author = 'agent'
+  GROUP BY ticket_id
+),
+spans AS (
+  SELECT t.id, t.team_id, t.priority, t.created_at AS started_at,
+         coalesce(f.replied_at, timestamp '2024-07-08 12:00') AS ended_at,
+         f.replied_at IS NOT NULL AS answered
+  FROM tickets t
+  LEFT JOIN first_reply f ON f.ticket_id = t.id
+),
+worked AS (
+  SELECT s.id,
+         coalesce(sum(greatest(0, extract(epoch FROM
+                    least(s.ended_at, d + time '19:00') - greatest(s.started_at, d + time '10:00')
+                  ) / 60)), 0) AS minutes
+  FROM spans s
+  CROSS JOIN LATERAL generate_series(s.started_at::date, s.ended_at::date, interval '1 day') AS g(d)
+  WHERE extract(isodow FROM d) < 6
+    AND d::date NOT IN (SELECT day FROM holidays)
+  GROUP BY s.id
+),
+per_ticket AS (
+  SELECT s.team_id, s.answered,
+         coalesce(w.minutes, 0) AS minutes,
+         coalesce(w.minutes, 0) > 60 * l.first_reply_h AS breached
+  FROM spans s
+  JOIN sla l ON l.priority = s.priority
+  LEFT JOIN worked w ON w.id = s.id
+)
+SELECT tm.name AS team,
+       count(p.team_id)                   AS tickets,
+       count(*) FILTER (WHERE p.answered) AS answered,
+       count(*) FILTER (WHERE p.breached) AS breached,
+       round(avg(p.minutes) FILTER (WHERE p.answered), 1) AS avg_reply_min
+FROM teams tm
+LEFT JOIN per_ticket p ON p.team_id = tm.id
+GROUP BY tm.id, tm.name
+ORDER BY team;
+```
+
+Ответ:
+
+```
+Доставка | 5 | 3 | 2 | 200.0
+Партнёры | 0 | 0 | 0 | NULL
+Платежи  | 6 | 6 | 1 | 84.3
+```
+
+**Рабочие минуты — пересечение отрезков по дням.** Интервал «создан →
+ответ» режется на календарные дни через `generate_series(start::date,
+end::date, '1 day')`. Для каждого рабочего дня берётся пересечение с окном
+`[d + 10:00, d + 19:00]`: `least(конец) − greatest(начало)`. Если
+пересечения нет (тикет пришёл в 08:00, ответ в 09:50), разность
+отрицательная — `greatest(0, …)` превращает её в ноль. Выходные и праздники
+отсекаются в `WHERE` ещё до суммирования.
+
+**Разбор тикетов, на которых ломается подсчёт «по часам на стене»:**
+
+- №2: вечер вторника → утро четверга, в среду праздник. На стене 40,5
+  часа, рабочих — 60 + 30 = 90 минут, SLA 2 часа соблюдён;
+- №3: пятница 18:30 → понедельник 10:40 — 70 минут, а не трое суток;
+  сообщение клиента в субботу ответом не является;
+- №4 и №5: ровно 120 минут — ещё норма, 121 — уже нарушение (`>`, а не
+  `>=`);
+- №7: весь вторник (540 минут) плюс праздничная среда — 540 > 480,
+  нарушение. Без таблицы праздников получилось бы 1080;
+- №8: ответил только бот, до момента отчёта набежало 120 + 120 = 240
+  минут — нарушение, хотя тикет не отвечен;
+- №10: создан и отвечен до начала рабочего дня — 0 минут.
+
+**Первый ответ — `min` по агентам, а не «первое сообщение».** В тикете №1
+сначала автоответ бота через 5 секунд, а два ответа оператора вставлены не
+по порядку. `LEFT JOIN messages` без фильтра размножит тикеты по
+сообщениям и испортит и `count`, и среднее.
+
+**Пустая команда.** «Партнёры» появляются только потому, что отчёт строится
+от `teams` через `LEFT JOIN`; `count(p.team_id)` даёт 0, а не 1, а `avg`
+по пустому набору — `NULL`, как и требует условие.
+
+**Что спросят дальше.** На больших объёмах `generate_series` по каждому
+тикету дорог — строят таблицу-календарь рабочих интервалов (с часовыми
+поясами команд и сокращёнными днями) и считают пересечение соединением с
+ней. Второй вопрос — часовые пояса: если `created_at` в UTC, а поддержка
+работает по Москве, окно 10–19 надо сдвигать `AT TIME ZONE`.
+
+</Reveal>

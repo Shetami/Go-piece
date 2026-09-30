@@ -1,0 +1,95 @@
+---
+title: "Шаги по неделям с пустыми неделями"
+description: "generate_series + CROSS JOIN достраивают сетку недель, LAG сравнивает с прошлой неделей. Деление на ноль и неделя с воскресным логом."
+kind: implement
+topic: sql-window
+level: hard
+order: 110
+ordered: true
+---
+
+Фитнес-трекер строит недельный отчёт по шагам. Неделя начинается с
+понедельника (`date_trunc('week', …)`).
+
+- недели — **все** от недели самой ранней записи до недели самой поздней
+  записи в таблице (общие для всех пользователей);
+- каждый пользователь, у которого есть хоть одна запись, получает строку на
+  **каждую** неделю; неделя без записей — `0` шагов;
+- `change_pct` — изменение к **предыдущей неделе** в процентах:
+  `100 · (steps − prev) / prev`, `round(…, 1)`; `NULL`, если предыдущей недели
+  нет или в ней было `0` шагов;
+- колонки: `user_name`, `week_start` (дата понедельника), `steps`, `change_pct`;
+- порядок: по `user_name`, `week_start`.
+
+Что проверяют скрытые данные: пропущенная неделя в середине; пользователь,
+начавший позже остальных; запись в воскресенье поздно вечером и в
+понедельник сразу после полуночи; целочисленное деление.
+
+<Reveal>
+
+```sql
+WITH weeks AS (
+  SELECT generate_series(
+           date_trunc('week', min(logged_at)),
+           date_trunc('week', max(logged_at)),
+           INTERVAL '1 week'
+         )::date AS week_start
+  FROM activity
+),
+users AS (
+  SELECT DISTINCT user_name FROM activity
+),
+weekly AS (
+  SELECT user_name, date_trunc('week', logged_at)::date AS week_start, sum(steps) AS steps
+  FROM activity
+  GROUP BY 1, 2
+),
+grid AS (
+  SELECT u.user_name, w.week_start, coalesce(x.steps, 0) AS steps
+  FROM users u
+  CROSS JOIN weeks w
+  LEFT JOIN weekly x ON x.user_name = u.user_name AND x.week_start = w.week_start
+)
+SELECT user_name, week_start, steps,
+       round(100.0 * (steps - lag(steps) OVER w) / nullif(lag(steps) OVER w, 0), 1) AS change_pct
+FROM grid
+WINDOW w AS (PARTITION BY user_name ORDER BY week_start)
+ORDER BY user_name, week_start;
+```
+
+Ответ:
+
+```
+anna | 2024-04-01 | 12000 | NULL
+anna | 2024-04-08 | 6000 | -50.0
+anna | 2024-04-15 | 0 | -100.0
+anna | 2024-04-22 | 10000 | NULL
+anna | 2024-04-29 | 0 | -100.0
+boris | 2024-04-01 | 0 | NULL
+boris | 2024-04-08 | 0 | NULL
+boris | 2024-04-15 | 12000 | NULL
+boris | 2024-04-22 | 0 | -100.0
+boris | 2024-04-29 | 3000 | NULL
+```
+
+**`LAG` смотрит на предыдущую строку, а не на предыдущую неделю.** Если
+пустых недель нет в выборке, у anna за 22 апреля `lag` вернёт 8 апреля, и
+отчёт покажет «+66.7%», хотя неделю перед этим она не ходила вообще. Сетка
+из `generate_series` × пользователи × `LEFT JOIN` делает «предыдущую строку»
+и «предыдущую неделю» одним и тем же.
+
+**`nullif(prev, 0)` — защита от деления на ноль** и одновременно правило
+«после пустой недели — `NULL`»: рост с нуля в процентах не определён.
+
+**`100.0`, а не `100`.** `steps` — целые, и `100 * (6000 − 12000) / 12000`
+в целочисленной арифметике случайно даст −50, но на других данных
+округлит молча. Одно `numeric`-слагаемое переводит всё выражение в `numeric`.
+
+**Границы недели.** 28 апреля 23:30 — воскресенье, это ещё неделя с 22-го;
+29 апреля 00:10 — уже новая неделя, и из-за неё сетка расширяется на пятую
+неделю для всех.
+
+**`WINDOW w AS (…)`** избавляет от двух одинаковых `OVER (PARTITION BY …
+ORDER BY …)` в одном выражении.
+
+</Reveal>

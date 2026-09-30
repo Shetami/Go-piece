@@ -1,0 +1,81 @@
+---
+title: Повторы, которые не повторяют панику
+description: Retry с ожиданием между попытками и отменой по context. Ошибку fn повторяем, панику — нет: она становится *PanicError, из которого errors.As достаёт исходную ошибку.
+kind: implement
+topic: defer-panic
+level: medium
+order: 270
+related: [retry-backoff, context-cancellation]
+---
+
+Retry-обёртки часто ставят `recover`, «чтобы ретраи не падали», — и
+начинают повторять баги: `nil pointer` пять раз подряд с экспоненциальной
+паузой. Реализуйте `Retry`, который отличает временный сбой от паники.
+
+Что проверяют скрытые тесты:
+
+- успех с третьей попытки — `nil`, `wait` вызван с номерами `1, 2`;
+- попытки кончились — ошибка **последней** попытки, после неё `wait` не
+  вызывается;
+- паника на второй попытке — сразу `*PanicError`, повторов нет;
+  `errors.Is` находит ошибку, если паниковали ею, а для строки она лежит в
+  `Value`;
+- `wait` вернул отмену — выход, в ошибке и причина попытки, и
+  `context.Canceled`;
+- `attempts = 0` — всё равно одна попытка.
+
+<Reveal>
+
+```go
+func Retry(ctx context.Context, attempts int, wait func(ctx context.Context, n int) error, fn func(ctx context.Context) error) error {
+	attempts = max(attempts, 1)
+	var err error
+	for n := 1; n <= attempts; n++ {
+		var panicked bool
+		err, panicked = callOnce(ctx, fn)
+		if err == nil || panicked {
+			return err
+		}
+		if n == attempts {
+			break
+		}
+		if werr := wait(ctx, n); werr != nil {
+			return errors.Join(err, werr)
+		}
+	}
+	return err
+}
+
+func callOnce(ctx context.Context, fn func(context.Context) error) (err error, panicked bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			err, panicked = &PanicError{Value: r}, true
+		}
+	}()
+	return fn(ctx), false
+}
+```
+
+**Отдельный признак паники.** После превращения в `*PanicError` паника
+выглядит как обычная ошибка, и цикл повторил бы её. Флаг `panicked` из
+`callOnce` — самый прямой способ сказать «это не повторяем». Можно и
+`errors.As(err, &pe)`, но тогда `fn`, вернувшая чей-то `*PanicError`
+(например, из вложенного `Retry`), тоже перестанет повторяться.
+
+**`recover` — в отдельной функции на каждую попытку.** Один `defer` на весь
+`Retry` поймает панику, но прервёт цикл без понятного результата и не
+даст отличить номер попытки.
+
+**Не ждать после последней попытки.** Лишний backoff в конце — это
+секунды задержки ответа без всякой пользы. Классическая ошибка —
+`wait` в начале каждой итерации или в конце без проверки.
+
+**`errors.Join` при отмене.** Вызывающему важны обе вещи: почему не
+удалось (503 от апстрима) и почему перестали пытаться (отмена или
+дедлайн запроса).
+
+**Что спросят следом.** Джиттер в `wait` против синхронных волн ретраев,
+бюджет ретраев на весь сервис и почему повторять можно только
+идемпотентные запросы.
+
+</Reveal>

@@ -1,0 +1,114 @@
+---
+title: Группа задач с первопричиной
+description: Как errgroup, но без шума — первая ошибка становится причиной отмены (context.Cause), эхо отмены отбрасывается, настоящие вторичные сбои сохраняются.
+kind: implement
+topic: errors
+level: hard
+order: 190
+related: [errgroup, context-cancellation, cascading-failure]
+lecture: concurrency/coordination
+---
+
+Обычная картина в логе после сбоя базы: одна строка «база недоступна» и
+тридцать строк «context canceled» от задач, которые просто отменили. Хуже,
+если первопричину вообще не видно: какая-то задача вернула `ctx.Err()`, и
+до реальной ошибки не добраться.
+
+Реализуйте `Group`: первая ошибка отменяет остальных и становится
+`context.Cause` для их контекста, а `Wait` возвращает первопричину плюс
+только те вторичные ошибки, которые несут новую информацию.
+
+Что проверяют скрытые тесты:
+
+- без ошибок — `nil`, `Wait` дожидается всех, контекст после `Wait` отменён;
+- первая ошибка отменяет контекст, и задачи видят её через
+  `context.Cause(ctx)`;
+- `ctx.Err()` и обёрнутая `context.Cause(ctx)` от отменённых задач в
+  результат не попадают — текст `Wait` равен тексту первопричины;
+- настоящий вторичный сбой (скажем, упал откат) сохраняется, но первой
+  строкой идёт первопричина;
+- пятьдесят одновременных ошибок — ни одна не потеряна, первая строка
+  совпадает с причиной отмены.
+
+<Reveal>
+
+```go
+type Group struct {
+	cancel context.CancelCauseFunc
+	wg     sync.WaitGroup
+	mu     sync.Mutex
+	first  error
+	rest   []error
+}
+
+func WithContext(ctx context.Context) (*Group, context.Context) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	return &Group{cancel: cancel}, ctx
+}
+
+func (g *Group) Go(f func() error) {
+	g.wg.Add(1)
+	go func() {
+		defer g.wg.Done()
+		if err := f(); err != nil {
+			g.record(err)
+		}
+	}()
+}
+
+func (g *Group) record(err error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.first == nil {
+		g.first = err
+		g.cancel(err)
+		return
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, g.first) {
+		return
+	}
+	g.rest = append(g.rest, err)
+}
+
+func (g *Group) Wait() error {
+	g.wg.Wait()
+	g.cancel(nil)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.first == nil {
+		return nil
+	}
+	return errors.Join(append([]error{g.first}, g.rest...)...)
+}
+```
+
+**`context.WithCancelCause` (Go 1.20) переносит причину к отменённым.**
+`ctx.Err()` у них по-прежнему `context.Canceled` — так устроен контракт
+контекста, — но `context.Cause(ctx)` вернёт ту ошибку, что передали в
+`cancel(err)`. Задача может честно сообщить «прервано из-за: база
+недоступна», а не безликое «context canceled».
+
+**«Первая» и «причина отмены» решаются под одним мьютексом.** Если
+запомнить первую ошибку через `sync.Once`, а отменять отдельно, две
+одновременные ошибки могут разойтись: `Wait` покажет одну, а
+`context.Cause` — другую. Тест с пятьюдесятью ошибками сравнивает именно
+это. Повторный `cancel` безопасен: причина фиксируется при первом вызове,
+поэтому `cancel(nil)` в `Wait` её не затирает.
+
+**Фильтр — по смыслу, а не по типу.** Отбрасываем то, что
+`errors.Is(err, context.Canceled)` (эхо отмены) или
+`errors.Is(err, first)` (задача вернула обёрнутый `context.Cause`).
+Остальное — настоящий новый сбой, например неудачный откат при отмене, и
+терять его нельзя. Фильтровать только после первой ошибки важно: если
+внешний контекст отменили, первая же ошибка — законный `Canceled`, и её
+надо вернуть.
+
+**`wg.Add` до `go`.** Иначе `Wait`, вызванный сразу после `Go`, может
+увидеть нулевой счётчик и вернуться до старта задачи.
+
+**Что спросят дальше.** Лимит параллельности (`SetLimit` в errgroup),
+паника в задаче (превратить в ошибку, а не уронить процесс), и почему
+errgroup из `x/sync` возвращает только первую ошибку — а когда нужна
+именно такая «группа со всем содержательным».
+
+</Reveal>

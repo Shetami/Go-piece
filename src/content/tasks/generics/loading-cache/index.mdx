@@ -1,0 +1,115 @@
+---
+title: Кэш с загрузкой, TTL и одной загрузкой на ключ
+description: Cache[K comparable, V any] с функцией загрузки. Пятьдесят одновременных промахов — один поход в базу, ключи не ждут друг друга, ошибки не кэшируются, и отмена одного клиента не срывает загрузку остальным.
+kind: implement
+topic: generics
+level: hard
+order: 240
+related: [singleflight, cache-stampede, cache-aside, context-cancellation]
+lecture: system-design/caching
+---
+
+Допишите `Cache`, `NewCache` и `Get`. Перед сервисом профилей стоит
+кэш на минуту; когда популярная запись протухает, в неё одновременно
+приходят сотни запросов, и все они не должны разом пойти в базу.
+
+Что проверяют скрытые тесты:
+
+- 50 одновременных `Get` одного ключа — ровно один вызов `load`, все
+  получают значение;
+- пока грузится медленный ключ, `Get` другого ключа отвечает сразу;
+- на подменённых часах запись свежая за наносекунду до конца `ttl` и
+  перезагружается ровно в момент истечения;
+- ошибка загрузки не кэшируется;
+- `Get`, чей контекст отменили, сразу возвращает `context.Canceled`, а
+  загрузка не видит этой отмены, доходит до конца, и её результат
+  получает следующий `Get` без повторного `load`.
+
+<Reveal>
+
+```go
+type cacheEntry[V any] struct {
+	val V
+	exp time.Time
+}
+
+type loadCall[V any] struct {
+	done chan struct{}
+	val  V
+	err  error
+}
+
+type Cache[K comparable, V any] struct {
+	ttl  time.Duration
+	now  func() time.Time
+	load func(context.Context, K) (V, error)
+
+	mu       sync.Mutex
+	items    map[K]cacheEntry[V]
+	inflight map[K]*loadCall[V]
+}
+
+func (c *Cache[K, V]) Get(ctx context.Context, key K) (V, error) {
+	c.mu.Lock()
+	if e, ok := c.items[key]; ok && c.now().Before(e.exp) {
+		c.mu.Unlock()
+		return e.val, nil
+	}
+	cl, ok := c.inflight[key]
+	if !ok {
+		cl = &loadCall[V]{done: make(chan struct{})}
+		c.inflight[key] = cl
+		go c.run(context.WithoutCancel(ctx), key, cl)
+	}
+	c.mu.Unlock()
+
+	select {
+	case <-cl.done:
+		return cl.val, cl.err
+	case <-ctx.Done():
+		var zero V
+		return zero, ctx.Err()
+	}
+}
+
+func (c *Cache[K, V]) run(ctx context.Context, key K, cl *loadCall[V]) {
+	v, err := c.load(ctx, key)
+	c.mu.Lock()
+	if err == nil {
+		c.items[key] = cacheEntry[V]{val: v, exp: c.now().Add(c.ttl)}
+	}
+	delete(c.inflight, key)
+	cl.val, cl.err = v, err
+	c.mu.Unlock()
+	close(cl.done)
+}
+```
+
+**`K comparable` — ровно то, что нужно ключу мапы.** Строки, числа,
+структуры из них и указатели подходят, слайсы и мапы — нет, и компилятор
+скажет об этом в месте вызова. Служебные типы `cacheEntry[V]` и
+`loadCall[V]` тоже обобщённые: у каждого экземпляра кэша свои.
+
+**Две наивные версии и почему они плохи.** Держать `mu` на время `load` —
+загрузка одного ключа останавливает весь кэш. Отпустить замок и грузить
+без учёта уже идущих загрузок — получится
+cache stampede: сто промахов дают сто
+запросов в базу. Мапа `inflight` — это `singleflight`, встроенный в кэш.
+
+**Кто владеет загрузкой.** Если `load` выполняет горутина первого
+клиента с его контекстом, то его таймаут обрывает загрузку для всех, кто
+ждёт. Поэтому загрузка идёт в отдельной горутине с
+`context.WithoutCancel` (Go 1.21), а каждый клиент ждёт с учётом своего
+контекста.
+
+**Ошибка — не значение.** Закэшировать ошибку на минуту значит минуту
+отвечать «база недоступна» после того, как она поднялась. Запись из
+`inflight` удаляется в любом случае, а в `items` попадает только успех.
+Часы передаются снаружи (`now`), поэтому TTL проверяется без `time.Sleep`.
+
+**Что спросят дальше:** как ограничить размер (LRU поверх той же мапы),
+как отдавать протухшее значение, пока идёт фоновое обновление
+(stale-while-revalidate), и как добавить к TTL случайный разброс, чтобы
+записи, загруженные вместе, не протухали вместе.
+
+</Reveal>

@@ -1,0 +1,131 @@
+---
+title: Деньги с fmt.Formatter и типом ошибки
+description: Тип Money сам решает, как печататься через fmt — String, Format с шириной и флагами, свой вид для неизвестных глаголов. И ошибка-структура, которую находят и errors.Is, и errors.As. Отрицательные копейки и MinInt64.
+kind: implement
+topic: interfaces
+level: medium
+order: 270
+---
+
+Деньги хранят в минорных единицах (копейках) целым числом — float для денег
+не годится. Остаётся научить тип красиво печататься. `fmt` проверяет у
+значения несколько интерфейсов: `fmt.Formatter` главнее всех, за ним
+`error` и `fmt.Stringer`. Реализовав `Format`, вы берёте на себя **все**
+глаголы.
+
+Реализуйте `String`, `Format`, методы `*CurrencyError` и `Sum` по контракту
+из заготовки.
+
+Что проверяют скрытые тесты:
+
+- `-5` копеек — `"-0.05 USD"`, а не `"0.-5"` или `"0.05"`; `math.MinInt64`
+  печатается без переполнения;
+- `%v`, `%s`, ширина `%12v` и `%-12s`, `%+v` со знаком у нуля и у
+  отрицательного, `%d`, чужой глагол `%x`;
+- слайс `[]Money` через `%v` — каждый элемент через ваш `Format`;
+- ошибка разных валют, обёрнутая ещё раз через `%w`, находится и
+  `errors.Is(…, ErrCurrencyMismatch)`, и `errors.As(…, &*CurrencyError)`.
+
+<Reveal>
+
+```go
+type Money struct {
+	Minor int64
+	Cur   string
+}
+
+func (m Money) String() string {
+	return m.amount(false) + " " + m.Cur
+}
+
+func (m Money) amount(plus bool) string {
+	neg := m.Minor < 0
+	u := uint64(m.Minor)
+	if neg {
+		u = -u
+	}
+	s := strconv.FormatUint(u/100, 10) + "." + fmt.Sprintf("%02d", u%100)
+	switch {
+	case neg:
+		return "-" + s
+	case plus:
+		return "+" + s
+	}
+	return s
+}
+
+func (m Money) Format(f fmt.State, verb rune) {
+	var s string
+	switch verb {
+	case 'v', 's':
+		s = m.amount(verb == 'v' && f.Flag('+')) + " " + m.Cur
+	case 'd':
+		s = strconv.FormatInt(m.Minor, 10)
+	default:
+		s = "%!" + string(verb) + "(Money=" + m.String() + ")"
+	}
+	if w, ok := f.Width(); ok && len(s) < w {
+		pad := strings.Repeat(" ", w-len(s))
+		if f.Flag('-') {
+			s += pad
+		} else {
+			s = pad + s
+		}
+	}
+	f.Write([]byte(s))
+}
+
+var ErrCurrencyMismatch = errors.New("currency mismatch")
+
+type CurrencyError struct{ Want, Got string }
+
+func (e *CurrencyError) Error() string {
+	return "currency mismatch: want " + e.Want + ", got " + e.Got
+}
+
+func (e *CurrencyError) Is(target error) bool { return target == ErrCurrencyMismatch }
+
+func Sum(ms ...Money) (Money, error) {
+	if len(ms) == 0 {
+		return Money{}, nil
+	}
+	total := Money{Cur: ms[0].Cur}
+	for _, m := range ms {
+		if m.Cur != total.Cur {
+			return Money{}, &CurrencyError{Want: total.Cur, Got: m.Cur}
+		}
+		total.Minor += m.Minor
+	}
+	return total, nil
+}
+```
+
+**Знак отдельно, модуль — отдельно.** `-5 / 100 == 0` и `-5 % 100 == -5` —
+в Go деление округляет к нулю. Наивное `fmt.Sprintf("%d.%02d", m/100, m%100)`
+теряет минус у сумм меньше рубля и печатает мусор. Модуль считается в
+`uint64`: у `math.MinInt64` нет положительной пары в `int64`, а
+`uint64(x)` с последующим `-u` даёт верный модуль по правилам беззнаковой
+арифметики.
+
+**`Format` не может звать `fmt` со своим значением.** `fmt.Fprintf(f, "%v", m)`
+внутри `Format` снова вызовет `Format` — бесконечная рекурсия и переполнение
+стека. Строку нужно собрать из частей самому (или привести к типу без
+методов: `type plain Money`).
+
+**Formatter отвечает за всё.** Как только метод `Format` есть, `fmt` больше
+не применяет ни ширину, ни флаги, ни `String` — поэтому ширину и `-`
+приходится обрабатывать вручную через `f.Width()` и `f.Flag('-')`. Если
+забыть ветку `default`, `%x` напечатает пустую строку, и проблему никто не
+заметит.
+
+**`Is` на типе ошибки.** Структура с полями полезна для `errors.As` —
+вызывающий достаёт валюты. Метод `Is(target) bool` дополнительно связывает её
+с сигнальной ошибкой `ErrCurrencyMismatch`, чтобы проверка «это несовпадение
+валют?» не требовала знания типа. `errors.Is` вызывает этот метод на каждом
+звене цепочки.
+
+Что спросят дальше: почему методы `Money` на значении, а у `CurrencyError` —
+на указателе (ошибку возвращают как `*CurrencyError`, и `errors.As` ищет
+именно этот тип), и как не потерять деньги при делении суммы на три части.
+
+</Reveal>

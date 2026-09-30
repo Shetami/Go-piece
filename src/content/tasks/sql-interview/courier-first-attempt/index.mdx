@@ -1,0 +1,103 @@
+---
+title: "Доставка с первой попытки по курьерам"
+description: "Номер попытки внутри заказа, а не внутри курьера: передача заказа между курьерами, двойные сканы, тестовые заказы и курьер без работы."
+kind: implement
+topic: sql-interview
+level: medium
+order: 220
+ordered: true
+---
+
+Служба доставки оценивает курьеров по метрике **«вручено с первой
+попытки»** (first attempt delivery).
+
+Каждая попытка вручения записана в `attempts`. Заказ может передаваться
+между курьерами: первую попытку делает один, следующую — другой.
+
+- **первая попытка** — самая ранняя попытка **заказа** (не курьера!); она
+  принадлежит тому курьеру, который её сделал;
+- сканер иногда присылает одну и ту же попытку дважды — полностью
+  одинаковые строки считаются одной попыткой;
+- тестовые заказы (`orders.is_test`) не учитываются нигде.
+
+Для **каждого** курьера:
+
+- колонки: `courier`, `attempts` — его попыток, `orders` — разных заказов,
+  по которым он делал попытки, `delivered` — его успешных попыток
+  (`result = 'delivered'`), `first_try_pct` — из заказов, где первая
+  попытка была его, доля врученных с этой первой попытки, в процентах,
+  `round(…, 1)`; `NULL`, если первых попыток у курьера нет;
+- порядок: по `courier`.
+
+<Reveal>
+
+```sql
+WITH a AS (
+  SELECT DISTINCT at.order_id, at.courier_id, at.attempted_at, at.result
+  FROM attempts at
+  JOIN orders o ON o.id = at.order_id
+  WHERE NOT o.is_test
+),
+numbered AS (
+  SELECT a.*,
+         row_number() OVER (PARTITION BY order_id ORDER BY attempted_at) AS attempt_no
+  FROM a
+),
+per_courier AS (
+  SELECT courier_id,
+         count(*)                                                        AS attempts,
+         count(DISTINCT order_id)                                        AS orders,
+         count(*) FILTER (WHERE result = 'delivered')                    AS delivered,
+         count(*) FILTER (WHERE attempt_no = 1)                          AS first_attempts,
+         count(*) FILTER (WHERE attempt_no = 1 AND result = 'delivered') AS first_ok
+  FROM numbered
+  GROUP BY courier_id
+)
+SELECT c.name AS courier,
+       coalesce(p.attempts, 0)  AS attempts,
+       coalesce(p.orders, 0)    AS orders,
+       coalesce(p.delivered, 0) AS delivered,
+       round(100.0 * p.first_ok / nullif(p.first_attempts, 0), 1) AS first_try_pct
+FROM couriers c
+LEFT JOIN per_courier p ON p.courier_id = c.id
+ORDER BY courier;
+```
+
+Ответ:
+
+```
+Аня  | 3 | 2 | 2 | 50.0
+Боря | 2 | 2 | 1 | 50.0
+Вера | 4 | 4 | 3 | 66.7
+Гоша | 0 | 0 | 0 | NULL
+```
+
+**Номер попытки — в разрезе заказа.** `row_number() OVER (PARTITION BY
+order_id ORDER BY attempted_at)` нумерует попытки заказа независимо от того,
+кто их делал. Если разбить по курьеру, то вторая попытка заказа №3 —
+первая для Веры, и Вера получит «вручено с первой попытки» за заказ, который
+до неё не смог вручить Боря. Метрика должна отвечать на вопрос клиента:
+«привезли ли с первого раза», а не «повезло ли курьеру».
+
+**Сначала дедупликация, потом нумерация.** Двойной скан заказа №4 без
+`DISTINCT` даст Боре лишнюю попытку и лишнюю доставку. Если же схлопывать
+дубли *после* `row_number`, у копии будет номер 2 — это тоже надо помнить.
+Порядок шагов в CTE здесь и есть решение.
+
+**Знаменатель — только первые попытки курьера.** Доля считается не от всех
+попыток и не от всех заказов курьера: у Ани два заказа, и первая попытка
+в обоих её; вручила с первого раза один — 50%. У Веры четыре заказа, но в
+заказе №3 она делала вторую попытку, поэтому знаменатель 3 (№5, №6, №8),
+а отказ клиента по №5 — неудача первой попытки.
+
+**Пустые курьеры и деление на ноль.** Гоша возил только тестовый заказ —
+после фильтра у него нет попыток. `LEFT JOIN` от `couriers` сохраняет
+строку, `coalesce` превращает счётчики в нули, а `nullif(…, 0)` в
+знаменателе даёт `NULL` вместо ошибки деления.
+
+**Что спросят дальше.** Как сделать дедупликацию на входе, а не в каждом
+отчёте: у события попытки должен быть идентификатор от сканера, а в таблице —
+уникальный ключ `(order_id, attempted_at, courier_id)` и `INSERT … ON
+CONFLICT DO NOTHING`.
+
+</Reveal>

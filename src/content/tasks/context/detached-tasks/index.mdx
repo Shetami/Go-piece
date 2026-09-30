@@ -1,0 +1,113 @@
+---
+title: Фоновые задачи, которые переживают запрос
+description: Ответили клиенту — и надо ещё записать аудит. Контекст без отмены, но со значениями и своим таймаутом, лимит одновременных задач и Shutdown, который ждёт, но не вечно.
+kind: implement
+topic: context
+level: medium
+order: 200
+related: [graceful-shutdown, context-cancellation]
+lecture: production/go-service
+---
+
+Обработчик отвечает клиенту и запускает «хвосты»: аудит, событие в шину,
+прогрев кэша. Если запустить их просто `go f(ctx)`, всё ломается сразу по
+нескольким причинам: контекст запроса отменяется, как только ответ ушёл;
+под нагрузкой горутин становится бесконечно много; при деплое процесс
+умирает, не дождавшись их. Реализуйте `Background`.
+
+Что проверяют скрытые тесты:
+
+- задача не отменяется вместе с запросом, но видит его значения
+  (request id) и имеет свой дедлайн;
+- зависшая задача получает `DeadlineExceeded` по своему таймауту;
+- при занятом лимите `Go` сразу возвращает `false`, а не ждёт; место
+  освобождается, когда задача закончилась;
+- `Shutdown` дожидается всех задач, после него `Go` отказывает, повторный
+  вызов безопасен;
+- `Shutdown` с истёкшим контекстом возвращает `DeadlineExceeded`, а не
+  висит.
+
+<Reveal>
+
+```go
+type Background struct {
+	timeout time.Duration
+	limit   int
+
+	mu      sync.Mutex
+	closed  bool
+	running int
+	wg      sync.WaitGroup
+}
+
+func NewBackground(timeout time.Duration, limit int) *Background {
+	return &Background{timeout: timeout, limit: limit}
+}
+
+func (b *Background) Go(ctx context.Context, f func(context.Context)) bool {
+	b.mu.Lock()
+	if b.closed || b.running >= b.limit {
+		b.mu.Unlock()
+		return false
+	}
+	b.running++
+	b.wg.Add(1)
+	b.mu.Unlock()
+
+	tctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), b.timeout)
+	go func() {
+		defer func() {
+			cancel()
+			b.mu.Lock()
+			b.running--
+			b.mu.Unlock()
+			b.wg.Done()
+		}()
+		f(tctx)
+	}()
+	return true
+}
+
+func (b *Background) Shutdown(ctx context.Context) error {
+	b.mu.Lock()
+	b.closed = true
+	b.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		b.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+```
+
+**`context.WithoutCancel` (Go 1.21) — отвязать от отмены, но не от
+значений.** Раньше писали `context.Background()` и теряли request id,
+trace id и пользователя — в логах фоновой задачи уже не найти, к какому
+запросу она относится. `WithoutCancel` сохраняет цепочку значений, но
+`Done()` у него `nil`, а дедлайна нет.
+
+**Поэтому свой таймаут обязателен.** Задача без дедлайна, зависшая на
+сетевом вызове, будет жить вечно, и `Shutdown` её никогда не дождётся.
+
+**Лимит без ожидания — это load shedding.** Если `Go` будет ждать места,
+обработчик запроса начнёт тормозить из-за фоновых хвостов — ровно то, от
+чего их увели в фон. Отбросить и посчитать в метрике честнее.
+
+**`wg.Add` под тем же мьютексом, что и `closed`.** Иначе возможна гонка:
+`Go` проверил `closed`, затем `Shutdown` выставил флаг и начал
+`wg.Wait()`, и только потом `Go` сделал `Add` — это нарушает контракт
+`WaitGroup` и задача может быть потеряна при остановке.
+
+**Что спросят дальше:** почему бы не принудительно отменить задачи при
+истечении `Shutdown` (нужен общий «стоп»-контекст, объединённый с
+контекстом задачи), и чем такая схема хуже outbox-таблицы, если аудит
+терять нельзя совсем.
+
+</Reveal>

@@ -1,0 +1,110 @@
+---
+title: Функциональные опции с валидацией
+description: Конструктор с Option func(*Config) error — значения по умолчанию, все ошибки сразу через errors.Join и опция, которую переиспользуют для двух конфигов.
+kind: implement
+topic: closures
+level: medium
+order: 200
+---
+
+Функциональные опции — стандартный способ настраивать клиентов в Go:
+`New(addr, WithTimeout(time.Second), WithRetries(5))`. Каждая опция —
+замыкание, которое помнит свой аргумент и при вызове меняет конфиг. Здесь
+опции ещё и проверяют аргументы.
+
+Напишите `WithTimeout`, `WithRetries`, `WithTags` и `New` по контракту в
+заготовке.
+
+Что проверяют скрытые тесты:
+
+- без опций — значения по умолчанию; опции применяются по порядку, `nil`
+  среди них пропускается, `WithRetries(0)` — допустимое значение;
+- пустой адрес и три неверные опции дают одну ошибку, в которой есть все
+  четыре причины, и `errors.Is(err, ErrInvalid)`; конфиг при этом `nil`;
+- если после `WithTags(ts...)` вызывающий поменял `ts`, ни опция, ни
+  созданный конфиг этого не видят;
+- одну и ту же опцию с тегами используют для двух конфигов, и к каждому
+  добавляют свой тег — создание второго конфига не портит первый.
+
+<Reveal>
+
+```go
+func WithTimeout(d time.Duration) Option {
+	return func(c *Config) error {
+		if d <= 0 {
+			return fmt.Errorf("timeout %v must be positive: %w", d, ErrInvalid)
+		}
+		c.Timeout = d
+		return nil
+	}
+}
+
+func WithRetries(n int) Option {
+	return func(c *Config) error {
+		if n < 0 || n > 10 {
+			return fmt.Errorf("retries %d out of range 0..10: %w", n, ErrInvalid)
+		}
+		c.Retries = n
+		return nil
+	}
+}
+
+func WithTags(tags ...string) Option {
+	tags = append([]string(nil), tags...)
+	return func(c *Config) error {
+		for _, t := range tags {
+			if t == "" {
+				return fmt.Errorf("empty tag: %w", ErrInvalid)
+			}
+		}
+		c.Tags = append(c.Tags[:len(c.Tags):len(c.Tags)], tags...)
+		return nil
+	}
+}
+
+func New(addr string, opts ...Option) (*Config, error) {
+	c := &Config{Addr: addr, Timeout: 5 * time.Second, Retries: 3}
+	var errs []error
+	if addr == "" {
+		errs = append(errs, fmt.Errorf("addr is empty: %w", ErrInvalid))
+	}
+	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
+		if err := opt(c); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+```
+
+**Опция — замыкание над аргументом.** `WithTimeout(d)` ничего не меняет
+сама: она возвращает функцию, которая помнит `d` и применит его, когда
+`New` её позовёт. Поэтому опции можно собрать заранее, сложить в слайс и
+переиспользовать — и поэтому всё, что опция захватила, должно оставаться
+её собственным.
+
+**Главная ловушка — общий массив тегов.** Наивное `c.Tags = tags` кладёт в
+конфиг захваченный слайс. Дальше `WithTags("a-only")` делает `append`, и
+если у захваченного слайса есть запас ёмкости, элемент пишется прямо в
+его массив. Второй конфиг делает то же самое — и перетирает хвост первого.
+Две защиты: копия аргумента в `WithTags` (отвязка от вызывающего) и
+`c.Tags[:len:len]` перед `append` (запрет дописывать в чужой массив).
+
+**Все ошибки сразу.** Пользователю неприятно чинить конфиг по одной ошибке
+за запуск. Ошибки копятся в слайсе и склеиваются `errors.Join`: сообщение
+содержит все причины, а `errors.Is` находит `ErrInvalid` в каждой ветке.
+`errors.Join` без аргументов возвращает `nil`, так что отдельная проверка
+длины не нужна.
+
+**Что спросят дальше:** чем это лучше структуры `Config` с нулевыми
+значениями (нельзя отличить «не задано» от «задано ноль», как с
+`Retries: 0`), и как сделать опции, общие для нескольких конструкторов, —
+интерфейс `Option` с методом `apply` вместо голого типа функции.
+
+</Reveal>

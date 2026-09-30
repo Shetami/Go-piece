@@ -1,0 +1,125 @@
+---
+title: Валидация с путями до поля
+description: Вложенная валидация, где ошибки дочерних структур получают полный путь вида Items[2].SKU — переписать дерево Join без мутаций, собрать все пути и найти дубликаты.
+kind: implement
+topic: errors
+level: hard
+order: 260
+---
+
+Фронтенду мало знать, что «SKU обязателен», — ему нужно подсветить
+конкретное поле: `Items[2].SKU`. Валидаторы вложенных структур при этом
+удобно писать независимо, с путями относительно себя (`City`, `Qty`), а
+полный путь собирать на уровне выше.
+
+`ValidateAddress` и `ValidateItem` уже есть. Напишите `Prefix`, `Paths` и
+`ValidateOrder`.
+
+Что проверяют скрытые тесты:
+
+- корректный заказ → настоящий `nil`;
+- `Prefix` переписывает пути во всех ветках `errors.Join`, работает
+  вложенно (`Items[0].Box.W`), не трогает исходные ошибки, `nil` →
+  `nil`, а `errors.Is` по-прежнему находит сентинелы;
+- `Paths` возвращает пути *всех* ошибок в дереве, по порядку;
+- у плохого заказа — ровно ожидаемый список путей, включая
+  дубликаты SKU со ссылкой на первое вхождение;
+- `errors.As` находит первый `*FieldError`;
+- нет адреса и позиций — ошибки на `Shipping` и `Items`, а не паника.
+
+<Reveal>
+
+```go
+func Prefix(prefix string, err error) error {
+	switch e := err.(type) {
+	case nil:
+		return nil
+	case *FieldError:
+		return &FieldError{Path: prefix + "." + e.Path, Err: e.Err}
+	case interface{ Unwrap() []error }:
+		var out []error
+		for _, x := range e.Unwrap() {
+			out = append(out, Prefix(prefix, x))
+		}
+		return errors.Join(out...)
+	}
+	return err
+}
+
+func Paths(err error) []string {
+	var out []string
+	var walk func(error)
+	walk = func(e error) {
+		switch x := e.(type) {
+		case nil:
+		case *FieldError:
+			out = append(out, x.Path)
+		case interface{ Unwrap() []error }:
+			for _, c := range x.Unwrap() {
+				walk(c)
+			}
+		case interface{ Unwrap() error }:
+			walk(x.Unwrap())
+		}
+	}
+	walk(err)
+	return out
+}
+
+func ValidateOrder(o Order) error {
+	var errs []error
+	if o.ID == "" {
+		errs = append(errs, &FieldError{"ID", ErrRequired})
+	}
+	if o.Shipping == nil {
+		errs = append(errs, &FieldError{"Shipping", ErrRequired})
+	} else {
+		errs = append(errs, Prefix("Shipping", ValidateAddress(*o.Shipping)))
+	}
+	if len(o.Items) == 0 {
+		errs = append(errs, &FieldError{"Items", ErrRequired})
+	}
+	seen := make(map[string]int)
+	for i, it := range o.Items {
+		p := fmt.Sprintf("Items[%d]", i)
+		errs = append(errs, Prefix(p, ValidateItem(it)))
+		if it.SKU == "" {
+			continue
+		}
+		if j, ok := seen[it.SKU]; ok {
+			errs = append(errs, &FieldError{p + ".SKU", fmt.Errorf("%w: как Items[%d]", ErrDuplicate, j)})
+		} else {
+			seen[it.SKU] = i
+		}
+	}
+	return errors.Join(errs...)
+}
+```
+
+**Дерево ошибок можно не только читать, но и перестраивать.**
+`errors.Join` — обычное значение с `Unwrap() []error`. `Prefix` проходит
+его рекурсивно и собирает новый `Join` из переписанных частей. Звенья,
+которые не `*FieldError` и не `Join`, переносятся как есть — `errors.Is`
+продолжает их видеть.
+
+**Не мутировать.** Соблазнительно написать `e.Path = prefix + "." +
+e.Path` — меньше аллокаций. Но ошибка — значение, которое уже могли
+положить в кэш, отдать в лог или вернуть из общего сентинела; поменять её
+«на месте» — значит испортить чужие данные, а при конкурентной валидации
+получить гонку.
+
+**`errors.As` находит только первое совпадение.** Для валидации это
+мало: нужны все поля. Поэтому `Paths` — ручной обход с обоими видами
+`Unwrap`. Та же задача встанет при маппинге в JSON-ответ `{"errors":
+[{"path": …, "code": …}]}`.
+
+**Дубликаты — кросс-полевая проверка.** Она не укладывается в
+валидатор одного элемента, поэтому живёт уровнем выше и использует мапу
+«SKU → первый индекс». Пустой SKU в мапу не кладём: иначе вторая пустая
+строка получила бы бессмысленное «дубликат» поверх «обязательно».
+
+**Что спросят дальше.** Как сделать это обобщённо через `reflect` и теги
+(`validate:"required"`), как локализовать сообщения (код ошибки вместо
+текста) и как ограничить число ошибок для огромного массива.
+
+</Reveal>

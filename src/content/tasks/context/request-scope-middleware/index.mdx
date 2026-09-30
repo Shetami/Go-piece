@@ -1,0 +1,114 @@
+---
+title: Middleware с request id и пользователем в контексте
+description: Цепочка middleware, которая кладёт в контекст request id и пользователя, и логгер, который их достаёт. Приватные ключи, порядок оборачивания и пользователь, который не должен просочиться.
+kind: implement
+topic: context
+level: medium
+order: 210
+related: [structured-logging, trace-context]
+---
+
+Каждая строка лога сервиса должна начинаться с request id и имени
+пользователя — иначе при разборе инцидента не собрать запрос по кускам.
+Протаскивать их параметрами через все слои нельзя, поэтому они едут в
+контексте. Реализуйте `Chain`, два middleware, геттеры и `Logf`.
+
+Что проверяют скрытые тесты:
+
+- полный запрос: `[r-1 alice] заказ 42`, пробелы вокруг request id
+  срезаны;
+- нет заголовков (`Header == nil`), пустой request id, неизвестный токен,
+  схема `Basic` вместо `Bearer`, пустой токен — генерируется id, пользователь
+  `anon`;
+- `mws[0]` — самый внешний слой;
+- значения, положенные чужим кодом по строковым ключам (`"request_id"`,
+  `"user"` и т. п.), не читаются;
+- если внешний слой уже положил пользователя, а в этом запросе токен
+  неизвестен, пользователь не наследуется.
+
+<Reveal>
+
+```go
+type ridKey struct{}
+type userKey struct{}
+
+func Chain(h Handler, mws ...Middleware) Handler {
+	for i := len(mws) - 1; i >= 0; i-- {
+		h = mws[i](h)
+	}
+	return h
+}
+
+func WithRequestID(gen func() string) Middleware {
+	return func(next Handler) Handler {
+		return func(ctx context.Context, req Request) string {
+			id := strings.TrimSpace(req.Header["X-Request-Id"])
+			if id == "" {
+				id = gen()
+			}
+			return next(context.WithValue(ctx, ridKey{}, id), req)
+		}
+	}
+}
+
+func WithUser(tokens map[string]string) Middleware {
+	return func(next Handler) Handler {
+		return func(ctx context.Context, req Request) string {
+			var user string
+			tok, ok := strings.CutPrefix(req.Header["Authorization"], "Bearer ")
+			if ok && tok != "" {
+				user = tokens[tok]
+			}
+			return next(context.WithValue(ctx, userKey{}, user), req)
+		}
+	}
+}
+
+func RequestID(ctx context.Context) string {
+	id, _ := ctx.Value(ridKey{}).(string)
+	return id
+}
+
+func User(ctx context.Context) (string, bool) {
+	u, _ := ctx.Value(userKey{}).(string)
+	return u, u != ""
+}
+
+func Logf(ctx context.Context, format string, args ...any) string {
+	rid := RequestID(ctx)
+	if rid == "" {
+		rid = "-"
+	}
+	user, ok := User(ctx)
+	if !ok {
+		user = "anon"
+	}
+	return fmt.Sprintf("[%s %s] ", rid, user) + fmt.Sprintf(format, args...)
+}
+```
+
+**Ключ — неэкспортируемый тип.** `ctx.Value` сравнивает ключи через `==`
+вместе с типом, поэтому `ridKey{}` не совпадёт ни с какой строкой. Со
+строковым ключом любой пакет может и прочитать значение, и — хуже —
+подложить своего «пользователя» в контекст.
+
+**Оборачивать с конца.** Middleware, применённый последним, оказывается
+снаружи. Чтобы `mws[0]` выполнялся первым, цикл идёт от последнего
+элемента к первому — частая ошибка на собеседовании, порядок получается
+перевёрнутым.
+
+**Отсутствие — тоже значение.** Контекст неизменяем: нельзя «удалить»
+пользователя, положенного выше по цепочке. Если `WithUser` при неизвестном
+токене просто вызовет `next(ctx, …)`, запрос унаследует чужого
+пользователя. Поэтому `""` кладётся явно и перекрывает старое значение —
+а геттер считает пустую строку отсутствием.
+
+**Геттеры с `, ok`-приведением** не паникуют на голом `Background`, и
+`Logf` работает в любом контексте — в том числе в фоновых задачах, где
+middleware не было.
+
+**Что спросят дальше:** почему в контекст кладут request-scoped данные,
+но не зависимости (базу, конфиг), и как то же сделать со `slog` —
+`slog.Handler`, который достаёт атрибуты из `ctx` в `Handle`.
+
+</Reveal>

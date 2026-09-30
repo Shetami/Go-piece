@@ -1,0 +1,80 @@
+---
+title: Result[T] и TryMap со всеми ошибками
+description: Разобрать пачку строк целиком и вернуть и удачные значения, и все ошибки с индексами. errors.Join, свой тип ошибки с Unwrap и типизированный nil, который не равен nil.
+kind: implement
+topic: generics
+level: medium
+order: 210
+---
+
+Допишите `ItemError`, `Collect` и `TryMap`. Сценарий — импорт CSV: не
+падать на первой плохой строке, а загрузить хорошие и показать
+пользователю список всех ошибок с номерами строк.
+
+Что проверяют скрытые тесты:
+
+- если ошибок нет, `err` — настоящий `nil`, а не пустая обёртка;
+- `f` вызывается для всех элементов, в значениях только успешные, по
+  порядку;
+- `errors.Is` находит исходную ошибку (`strconv.ErrSyntax`) сквозь обе
+  обёртки, `errors.As` достаёт `*ItemError` с индексом;
+- ошибки объединены `errors.Join`: из результата достаются все индексы, а
+  текст — строки `элемент i: …` через перевод строки;
+- `Collect` от готовых результатов и от пустого слайса.
+
+<Reveal>
+
+```go
+func (e *ItemError) Error() string { return fmt.Sprintf("элемент %d: %v", e.Index, e.Err) }
+func (e *ItemError) Unwrap() error { return e.Err }
+
+func Collect[T any](rs []Result[T]) ([]T, error) {
+	var (
+		vals []T
+		errs []error
+	)
+	for i, r := range rs {
+		if r.Err != nil {
+			errs = append(errs, &ItemError{Index: i, Err: r.Err})
+			continue
+		}
+		vals = append(vals, r.Val)
+	}
+	return vals, errors.Join(errs...)
+}
+
+func TryMap[T, U any](in []T, f func(T) (U, error)) ([]U, error) {
+	rs := make([]Result[U], len(in))
+	for i, v := range in {
+		rs[i].Val, rs[i].Err = f(v)
+	}
+	return Collect(rs)
+}
+```
+
+**`Result[T]` — не монада, а просто пара.** В Go нет сопоставления с
+образцом, поэтому `Result` полезен как элемент слайса или канала, когда
+значение и ошибку надо передать вместе, например из воркеров. Цепочки
+`r.Map(...).AndThen(...)` в Go не приживаются: у методов не бывает своих
+параметров типа.
+
+**`strconv.Atoi` подходит как `f` без обёртки.** Его сигнатура
+`func(string) (int, error)` совпадает с `func(T) (U, error)`, и `T`, `U`
+выводятся из неё.
+
+**Ловушка типизированного `nil`.** Если копить ошибки в `*ItemError` или
+вернуть переменную типа `*joinError`, равную `nil`, как `error`, получится
+интерфейс с типом и нулевым указателем, и `err != nil` окажется истиной.
+`errors.Join` без аргументов (или только с `nil`) возвращает настоящий
+`nil`, поэтому здесь это работает само.
+
+**Две обёртки, и обе прозрачны.** `errors.Join` даёт `Unwrap() []error`,
+`ItemError` даёт `Unwrap() error`. `errors.Is` и `errors.As` обходят это
+дерево в глубину, поэтому находят и `strconv.ErrSyntax`, и `*ItemError`.
+Без `Unwrap` у своего типа исходная ошибка пропала бы.
+
+**Что спросят дальше:** как ограничить число ошибок (после сотни — «и ещё
+N»), почему `Collect` не прерывается на первой ошибке и как совместить
+это с параллельной обработкой (слайс `Result` по индексам).
+
+</Reveal>

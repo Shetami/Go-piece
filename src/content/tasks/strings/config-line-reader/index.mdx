@@ -1,0 +1,169 @@
+---
+title: Построчный разбор конфига из io.Reader
+description: Формат в духе nginx — директивы, кавычки, комментарии, перенос строки через обратную косую. Номера строк в ошибках, CRLF, строки длиннее буфера bufio.Scanner и ошибки чтения.
+kind: implement
+topic: strings
+level: hard
+order: 250
+---
+
+Сервис читает конфиг в формате «директива и аргументы через пробел», как
+nginx или sshd. Напишите `ParseConfig`: он получает `io.Reader` (файл,
+тело HTTP-запроса, строку в тесте) и возвращает директивы с номерами
+строк — чтобы сообщение об ошибке указывало, куда смотреть. Правила — в
+комментарии к функции.
+
+Что проверяют скрытые тесты:
+
+- комментарии, пустые строки и строки из пробелов, табы, `"\r\n"`,
+  последняя строка без перевода строки;
+- слово в кавычках с пробелами и `#` внутри; пустые кавычки — пустой
+  аргумент;
+- продолжение строки через `\`, в том числе с `"\r\n"` и в самой последней
+  строке; номер строки — первой строки директивы;
+- строка в 200 КБ;
+- незакрытая кавычка: `*LineError` с номером строки и `ErrUnclosedQuote`
+  внутри;
+- ошибка чтения из `r` не теряется и не превращается в «конец файла».
+
+<Reveal>
+
+```go
+type Directive struct {
+	Line int // номер строки (с 1), где директива начинается
+	Key  string
+	Args []string
+}
+
+type LineError struct {
+	Line int
+	Err  error
+}
+
+func (e *LineError) Error() string { return fmt.Sprintf("строка %d: %v", e.Line, e.Err) }
+func (e *LineError) Unwrap() error { return e.Err }
+
+var ErrUnclosedQuote = errors.New("незакрытая кавычка")
+
+func ParseConfig(r io.Reader) ([]Directive, error) {
+	// bufio.Reader, а не Scanner: у Scanner лимит строки 64 КБ по умолчанию.
+	br := bufio.NewReader(r)
+	var out []Directive
+	var pending strings.Builder // склеенные строки-продолжения
+	hasPending := false
+	lineNo, startLine := 0, 0
+	flush := func() error {
+		if !hasPending {
+			return nil
+		}
+		words, err := splitWords(pending.String())
+		pending.Reset()
+		hasPending = false
+		if err != nil {
+			return &LineError{Line: startLine, Err: err}
+		}
+		if len(words) > 0 {
+			out = append(out, Directive{Line: startLine, Key: words[0], Args: words[1:]})
+		}
+		return nil
+	}
+	for {
+		raw, err := br.ReadString('\n')
+		if err != nil && err != io.EOF {
+			return nil, fmt.Errorf("чтение конфига: %w", err)
+		}
+		if raw != "" {
+			lineNo++
+			line := strings.TrimSuffix(strings.TrimSuffix(raw, "\n"), "\r")
+			if !hasPending {
+				startLine, hasPending = lineNo, true
+			} else {
+				pending.WriteByte(' ')
+			}
+			cont, isCont := strings.CutSuffix(line, `\`)
+			if isCont {
+				pending.WriteString(cont) // директива продолжится на следующей строке
+			} else {
+				pending.WriteString(line)
+				if ferr := flush(); ferr != nil {
+					return nil, ferr
+				}
+			}
+		}
+		if err == io.EOF {
+			// Файл кончился сразу после '\' — дописываем то, что накопили.
+			if ferr := flush(); ferr != nil {
+				return nil, ferr
+			}
+			return out, nil
+		}
+	}
+}
+
+func splitWords(s string) ([]string, error) {
+	var words []string
+	var cur strings.Builder
+	inWord, inQuote := false, false
+loop:
+	for _, r := range s {
+		switch {
+		case inQuote:
+			if r == '"' {
+				inQuote = false
+			} else {
+				cur.WriteRune(r)
+			}
+		case r == '"':
+			inQuote, inWord = true, true // "" — тоже слово, пустое
+		case r == '#':
+			break loop // комментарий только вне кавычек
+		case r == ' ' || r == '\t':
+			if inWord {
+				words = append(words, cur.String())
+				cur.Reset()
+				inWord = false
+			}
+		default:
+			cur.WriteRune(r)
+			inWord = true
+		}
+	}
+	if inQuote {
+		return nil, ErrUnclosedQuote
+	}
+	if inWord {
+		words = append(words, cur.String())
+	}
+	return words, nil
+}
+```
+
+**Scanner — ловушка на длинных строках.** `bufio.Scanner` по умолчанию
+не читает строки длиннее 64 КБ: `Scan()` возвращает `false`, а
+`Err()` — `bufio.ErrTooLong`. Если забыть проверить `Err()`, конфиг
+молча обрежется на длинной строке — например, на встроенном сертификате.
+Лечится `scanner.Buffer(buf, max)` или, как здесь, `bufio.Reader.ReadString`
+без лимита.
+
+**`ReadString` на последней строке возвращает и данные, и `io.EOF`.**
+Поэтому сначала обрабатываем то, что прочитали, и только потом выходим.
+Проверка «`err != nil` → выход» до обработки теряет последнюю строку без
+перевода строки — самый частый баг в таких циклах. Любая ошибка, кроме
+`io.EOF`, — настоящая, её оборачиваем через `%w`.
+
+**Склейка продолжений — до разбора на слова.** Строки с `\` в конце копим,
+а разбираем уже склеенную логическую строку. Номер запоминаем при первой
+физической строке: ошибка «строка 5» для директивы, которая начинается на
+строке 3, заставит человека искать не там.
+
+**Разбор слов — маленький автомат.** Состояния «внутри слова» и «внутри
+кавычек». `strings.Fields` не подходит: он не знает про кавычки, а
+`#` внутри кавычек — не комментарий. Флаг `inWord` при открытии кавычки
+нужен, чтобы `""` дало пустой аргумент, а не исчезло.
+
+**Ошибка с номером строки — тип с `Unwrap`.** `*LineError` отдаёт номер
+для подсветки, а `errors.Is(err, ErrUnclosedQuote)` работает сквозь него.
+Дальше спросят: как вернуть все ошибки файла, а не первую, и как добавить
+блоки `{ … }` — это уже стек вложенности поверх того же токенайзера.
+
+</Reveal>

@@ -1,0 +1,122 @@
+---
+title: "Сверка платежей с провайдером"
+description: "FULL JOIN двух источников после приведения к одному зерну: последнее состояние платежа из потока вебхуков с дублями, разнесённые проводки и ручные записи без ключа."
+kind: implement
+topic: sql-joins
+level: hard
+order: 170
+ordered: true
+---
+
+Каждое утро финансы сверяют внутренний журнал поступлений `ledger` с
+вебхуками платёжного провайдера `provider_events`. Нужен список
+**расхождений**.
+
+**Сторона провайдера.** На каждую смену статуса платежа приходит событие;
+при таймауте провайдер повторяет доставку, так что одинаковые события
+бывают дважды. Состояние платежа — его **последнее событие** по
+`received_at`, при равенстве — с большим `event_id`. Деньги получены, только
+если последнее состояние — `succeeded` (платёж, который потом вернули, —
+`refunded` — деньгами уже не считается).
+
+**Сторона журнала.** Один платёж журнал иногда разносит на несколько
+проводок с одним `external_id` — сравнивается их сумма. Ручные проводки
+бухгалтерии (`external_id` пуст) сверить не с чем — они попадают в отчёт
+отдельно.
+
+- колонки: `external_id`, `ledger_amount`, `provider_amount`, `issue`;
+- `issue`: `'missing_in_ledger'` — провайдер получил деньги, журнала нет;
+  `'missing_at_provider'` — в журнале есть, у провайдера денег нет;
+  `'amount_mismatch'` — есть с обеих сторон, суммы разные;
+  `'manual_entry'` — ручная проводка, по строке на проводку, `external_id` и
+  `provider_amount` — `NULL`;
+- совпавшие платежи в отчёт не идут;
+- порядок: по `issue`, затем `external_id`, затем `ledger_amount`.
+
+Что проверяют скрытые данные: повторно доставленный вебхук, возврат после
+успешной оплаты, неуспешный платёж, два события в одну секунду, платёж,
+разнесённый на две проводки, ручные проводки, платёж, о котором не знает
+одна из сторон.
+
+<Reveal>
+
+```sql
+WITH last_state AS (
+  SELECT DISTINCT ON (external_id) external_id, status, amount
+  FROM provider_events
+  ORDER BY external_id, received_at DESC, event_id DESC
+),
+provider AS (
+  SELECT external_id, amount
+  FROM last_state
+  WHERE status = 'succeeded'
+),
+book AS (
+  SELECT external_id, sum(amount) AS amount
+  FROM ledger
+  WHERE external_id IS NOT NULL
+  GROUP BY external_id
+)
+SELECT external_id,
+       b.amount AS ledger_amount,
+       p.amount AS provider_amount,
+       CASE
+         WHEN b.amount IS NULL THEN 'missing_in_ledger'
+         WHEN p.amount IS NULL THEN 'missing_at_provider'
+         ELSE 'amount_mismatch'
+       END AS issue
+FROM book b
+FULL JOIN provider p USING (external_id)
+WHERE b.amount IS DISTINCT FROM p.amount
+UNION ALL
+SELECT NULL, amount, NULL, 'manual_entry'
+FROM ledger
+WHERE external_id IS NULL
+ORDER BY issue, external_id, ledger_amount;
+```
+
+Ответ:
+
+```
+pay_B | 205 | 250 | amount_mismatch
+NULL | 20 | NULL | manual_entry
+NULL | 500 | NULL | manual_entry
+pay_C | 80 | NULL | missing_at_provider
+pay_D | 40 | NULL | missing_at_provider
+pay_H | 90 | NULL | missing_at_provider
+pay_F | NULL | 55 | missing_in_ledger
+```
+
+**Сверка — это `FULL JOIN` двух сторон, приведённых к одному зерну.** Зерно
+здесь — «один платёж» (`external_id`). Сырые таблицы ему не соответствуют: у
+провайдера на платёж несколько событий, в журнале — иногда несколько
+проводок. Соединить их напрямую — получить произведение: `pay_A` (три
+события × одна проводка) и `pay_E` (одно событие × две проводки по 150)
+разъедутся на несколько строк с ложными расхождениями.
+
+**Состояние из потока событий — «последняя строка на ключ».** `DISTINCT ON
+(external_id) … ORDER BY external_id, received_at DESC, event_id DESC` —
+идиома Postgres для этого. Фильтр `status = 'succeeded'` *до* выбора
+последнего события — классическая ошибка: `pay_C` вернули, но успешное
+событие у него было, и платёж засчитался бы. У `pay_G` два события в одну
+секунду — решает `event_id`.
+
+**`IS DISTINCT FROM` вместо `<>`.** В `FULL JOIN` у строк, найденных только с
+одной стороны, сумма другой стороны — `NULL`, и `b.amount <> p.amount` —
+`UNKNOWN`: строка отфильтруется. `IS DISTINCT FROM` сравнивает `NULL` как
+значение и одним условием отбирает и расхождения сумм, и односторонние
+строки.
+
+**`NULL`-ключ не соединяется ни с чем.** Ручные проводки с пустым
+`external_id` в `FULL JOIN` превратились бы в `missing_at_provider`, а
+при соединении «ключ = ключ» ни с чем бы не совпали. Они — отдельная
+категория и идут в отчёт через `UNION ALL`, по строке на проводку (свёртка
+по `NULL` склеила бы их в одну).
+
+**Что спросят дальше.** «Как сверять, если провайдер отдаёт выгрузку раз в
+сутки, а платежи идут через полночь?» — сравнивать по окну с запасом и
+отдельно помечать «ещё в пути»; и «где хранить результат?» — в таблице
+расхождений со статусом разбора, чтобы вчерашнее расхождение не
+всплывало каждый день заново.
+
+</Reveal>

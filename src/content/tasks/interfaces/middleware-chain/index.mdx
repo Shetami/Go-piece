@@ -1,0 +1,129 @@
+---
+title: Цепочка middleware со своим Handler
+description: Интерфейс обработчика, адаптер функции к нему в стиле http.HandlerFunc, сборка цепочки и три middleware — восстановление после паники, перевод ошибок в статусы и авторизация.
+kind: implement
+topic: interfaces
+level: hard
+order: 220
+---
+
+Сети здесь нет — только интерфейсы. `Handler` — наш аналог `http.Handler`,
+но с ошибкой в результате, как в gRPC-интерсепторах. Напишите:
+
+- `HandlerFunc.Serve` — адаптер, превращающий функцию в `Handler`;
+- `Chain` — сборку цепочки;
+- `Recover`, `Errors`, `RequireUser` — три middleware.
+
+Контракты — в комментариях заготовки. Что проверяют скрытые тесты:
+
+- `Chain(h, a, b, c)`: вызовы идут `a> b> c> h <c <b <a` — первый в
+  списке middleware оказывается внешним;
+- паника строкой превращается в ошибку с `ErrPanic` и текстом паники; паника
+  **ошибкой** — ещё и `errors.Is` на исходную ошибку; обычные ошибки
+  `Recover` не трогает;
+- `Errors` находит `StatusError` **внутри обёрток** `fmt.Errorf("…: %w")`,
+  причём тип ошибки реализует интерфейс методами на указателе;
+- обработчик вернул `(nil, nil)` — не паника, а ответ 500;
+- полная сборка `Errors, Recover, RequireUser`: без пользователя — 401 и
+  обработчик не вызван; паника — ответ 500 с текстом паники.
+
+<Reveal>
+
+```go
+func (f HandlerFunc) Serve(ctx context.Context, r *Request) (*Response, error) {
+	return f(ctx, r)
+}
+
+func Chain(h Handler, mws ...Middleware) Handler {
+	for i := len(mws) - 1; i >= 0; i-- {
+		h = mws[i](h)
+	}
+	return h
+}
+
+func Recover() Middleware {
+	return func(next Handler) Handler {
+		return HandlerFunc(func(ctx context.Context, r *Request) (resp *Response, err error) {
+			defer func() {
+				if v := recover(); v != nil {
+					resp = nil
+					if e, ok := v.(error); ok {
+						err = fmt.Errorf("%w: %w", ErrPanic, e)
+					} else {
+						err = fmt.Errorf("%w: %v", ErrPanic, v)
+					}
+				}
+			}()
+			return next.Serve(ctx, r)
+		})
+	}
+}
+
+func Errors() Middleware {
+	return func(next Handler) Handler {
+		return HandlerFunc(func(ctx context.Context, r *Request) (*Response, error) {
+			resp, err := next.Serve(ctx, r)
+			if err != nil {
+				status := 500
+				var se StatusError
+				if errors.As(err, &se) {
+					status = se.Status()
+				}
+				return &Response{Status: status, Body: err.Error()}, nil
+			}
+			if resp == nil {
+				return &Response{Status: 500, Body: "empty response"}, nil
+			}
+			return resp, nil
+		})
+	}
+}
+
+type statusErr struct {
+	code int
+	msg  string
+}
+
+func (e statusErr) Error() string { return e.msg }
+func (e statusErr) Status() int   { return e.code }
+
+func RequireUser() Middleware {
+	return func(next Handler) Handler {
+		return HandlerFunc(func(ctx context.Context, r *Request) (*Response, error) {
+			if r.User == "" {
+				return nil, statusErr{401, "unauthorized"}
+			}
+			return next.Serve(ctx, r)
+		})
+	}
+}
+```
+
+**`HandlerFunc` — функция с методом.** Метод можно объявить на любом
+именованном типе, в том числе функциональном. `HandlerFunc(f)` — просто
+преобразование типа, и значение сразу реализует `Handler`. Благодаря этому
+каждый middleware пишется как замыкание, без отдельной структуры.
+
+**Порядок в `Chain`.** Оборачивать нужно с конца: тогда последний
+middleware окажется ближе всех к обработчику, а первый — снаружи. Цикл
+вперёд даёт обратный порядок, и авторизация выполнится уже после
+обработчика. Это частый баг: код компилируется, а тесты «на счастливый путь»
+проходят.
+
+**`Recover` — через именованные результаты.** Только `defer` видит панику, и
+только через именованные `resp, err` он может изменить то, что функция
+вернёт. `%w` дважды в одном `fmt.Errorf` (с Go 1.20) даёт ошибку с двумя
+ветками — `errors.Is` находит обе. Если паника — это `error`, а вы
+напечатаете её через `%v`, связь с исходной ошибкой потеряется.
+
+**`errors.As` с интерфейсом.** Цель `&se`, где `se StatusError`, — указатель
+на интерфейс; `As` ищет в цепочке первую ошибку, которая этот интерфейс
+реализует. Утверждение `err.(StatusError)` не заглядывает в обёртки, и
+обёрнутый 404 превратится в 500.
+
+Что спросят дальше: почему `Recover` должен стоять ближе к обработчику, чем
+`Errors` (иначе паника уйдёт мимо перевода в статус), и как пробросить через
+цепочку данные запроса — через `context.WithValue` с неэкспортируемым типом
+ключа.
+
+</Reveal>

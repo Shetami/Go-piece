@@ -1,0 +1,107 @@
+---
+title: Отчёт о пакетной обработке с отменой
+description: Пул из n воркеров обрабатывает задания и при отмене контекста останавливается — но отчитывается за каждое задание: сделано, упало или пропущено. Ни один id не теряется.
+kind: implement
+topic: context
+level: medium
+order: 160
+related: [worker-pool, context-cancellation]
+lecture: concurrency/worker-pools
+---
+
+Ночной джоб пересчитывает тысячи заказов. Его могут остановить в любой
+момент — деплой, ручная отмена, дедлайн. После остановки нужно точно знать,
+какие заказы обработаны, какие упали по своей причине, а какие надо
+перезапустить. Напишите тело `ProcessAll`.
+
+Что проверяют скрытые тесты:
+
+- без отмены обрабатываются все id, `Done` по возрастанию, одновременно
+  работает не больше `n` вызовов `handle`, `Failed` — пустая мапа, а не `nil`;
+- ошибка `handle` попадает в `Failed` — даже если она оборачивает
+  `context.Canceled`, но сам `ctx` жив (отменили что-то ниже по стеку);
+- отмена посреди работы: уже сделанное — в `Done`, прерванное и не начатое —
+  в `Skipped`, ни один id не пропал, а ошибка — причина отмены;
+- контекст отменён заранее — `handle` не вызывается ни разу;
+- функция возвращается только когда все `handle` закончились.
+
+<Reveal>
+
+```go
+func ProcessAll(ctx context.Context, ids []int, n int, handle func(context.Context, int) error) (Report, error) {
+	jobs := make(chan int, len(ids))
+	for _, id := range ids {
+		jobs <- id
+	}
+	close(jobs)
+
+	rep := Report{Failed: map[int]error{}}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for id := range jobs {
+				if ctx.Err() != nil {
+					mu.Lock()
+					rep.Skipped = append(rep.Skipped, id)
+					mu.Unlock()
+					continue
+				}
+				err := handle(ctx, id)
+				mu.Lock()
+				switch {
+				case err == nil:
+					rep.Done = append(rep.Done, id)
+				case ctx.Err() != nil && isCtxErr(err):
+					rep.Skipped = append(rep.Skipped, id)
+				default:
+					rep.Failed[id] = err
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+
+	slices.Sort(rep.Done)
+	slices.Sort(rep.Skipped)
+	if len(rep.Skipped) > 0 {
+		return rep, context.Cause(ctx)
+	}
+	return rep, nil
+}
+
+func isCtxErr(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+```
+
+**Отмена не должна терять задания.** Самое частое решение — воркер делает
+`select { case id := <-jobs: … case <-ctx.Done(): return }`. Оно
+останавливается, но всё, что осталось в канале, просто исчезает из отчёта.
+Здесь воркеры дочитывают канал до конца и для каждого id решают: делать или
+записать в `Skipped`. Проверка `ctx.Err()` перед каждым заданием дешёвая и
+детерминированная, в отличие от `select`, который из двух готовых веток
+выбирает случайно.
+
+**«Ошибка похожа на отмену» — ещё не отмена.** `errors.Is(err,
+context.Canceled)` будет истинным и тогда, когда отменили контекст
+какого-то внутреннего вызова, а наш `ctx` жив. Такое задание упало, и его
+нельзя молча перезапускать как прерванное. Поэтому условие двойное: ошибка
+контекстная **и** наш `ctx` уже отменён.
+
+**`context.Cause`, а не `ctx.Err()`.** Вызывающему важно, почему всё
+остановилось: деплой, ручная отмена, таймаут. `Err()` скажет только
+`Canceled`.
+
+**Результаты — под мьютексом, сортировка в конце.** Порядок завершения в
+пуле случаен, так что отчёт стабилизируют после `wg.Wait()`.
+
+**Что спросят дальше:** как сделать то же на `errgroup` (и почему
+`errgroup.WithContext` отменит всех при первой же ошибке — здесь это не
+нужно), и как сохранять `Skipped` для перезапуска, если заданий миллионы и
+в память они не помещаются.
+
+</Reveal>

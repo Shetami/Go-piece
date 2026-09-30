@@ -1,0 +1,87 @@
+---
+title: Таймаут на пайплайн и на каждый шаг
+description: У всего пайплайна свой бюджет, у каждого шага — свой. Какой из них истёк, должно быть видно по ошибке — через WithTimeoutCause и context.Cause.
+kind: implement
+topic: context
+level: hard
+order: 170
+related: [request-deadline, context-cancellation]
+---
+
+Обработка заказа — несколько шагов подряд: проверить, зарезервировать,
+списать. SLA на всю операцию — `total`, а ни один шаг не должен висеть
+дольше `perStep`. В логах и метриках надо различать «завис один шаг» и
+«в целом не уложились». Напишите тело `RunPipeline`.
+
+Что проверяют скрытые тесты:
+
+- все шаги успели — `nil`, шаги выполнены по порядку;
+- шаг завис дольше `perStep` — ошибка с именем шага, `ErrStepTimeout` и
+  `DeadlineExceeded`, следующие шаги не запускаются;
+- каждый шаг укладывается в `perStep`, но вместе они не укладываются в
+  `total` — `ErrTotalTimeout`, а не `ErrStepTimeout`;
+- отмена родителя с причиной — ошибка отвечает и на `Canceled`, и на
+  причину;
+- обычная ошибка шага — возвращается с именем шага и без «таймаутных»
+  пометок;
+- контекст шага отменён сразу после шага, и у каждого шага он свой.
+
+<Reveal>
+
+```go
+func RunPipeline(ctx context.Context, total, perStep time.Duration, steps []Step) error {
+	all, cancelAll := context.WithTimeoutCause(ctx, total, ErrTotalTimeout)
+	defer cancelAll()
+
+	for _, s := range steps {
+		if all.Err() != nil {
+			return fmt.Errorf("перед шагом %s: %w: %w", s.Name, context.Cause(all), all.Err())
+		}
+		if err := runStep(all, perStep, s); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func runStep(all context.Context, perStep time.Duration, s Step) error {
+	ctx, cancel := context.WithTimeoutCause(all, perStep, ErrStepTimeout)
+	defer cancel()
+
+	err := s.Run(ctx)
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)) {
+		return fmt.Errorf("шаг %s: %w: %w", s.Name, context.Cause(ctx), err)
+	}
+	return fmt.Errorf("шаг %s: %w", s.Name, err)
+}
+```
+
+**Контекст шага — от общего, а не от исходного.** Если писать
+`WithTimeout(ctx, perStep)` от входного `ctx`, каждый шаг получит свежие
+`perStep`, и `total` не соблюдается вовсе: три шага по 80 мс спокойно
+проработают 240 мс при бюджете 150. Когда шаг наследует от `all`, его
+дедлайн автоматически равен меньшему из двух.
+
+**`WithTimeoutCause` различает, *кто* истёк** (Go 1.21). `ctx.Err()` в
+обоих случаях — `DeadlineExceeded`, а `context.Cause` вернёт причину того
+контекста, чей таймер сработал. Хитрость в том, что если дедлайн родителя
+раньше, дочерний контекст свой таймер даже не заводит и получает отмену
+с причиной родителя — `ErrTotalTimeout`.
+
+**Две `%w` в одном `fmt.Errorf`** (Go 1.20) — и `errors.Is` находит обе:
+вызывающий проверяет «это таймаут?» по `DeadlineExceeded`, а метрики
+считают шаговые и общие таймауты по сентинелам.
+
+**Ошибка контекста шага — не любая `Canceled`.** Шаг мог вернуть отмену,
+пришедшую откуда-то снизу, при живом контексте; тогда это его собственная
+ошибка, и причину контекста к ней не приклеивают.
+
+**`defer cancel()` на каждый шаг** — поэтому шаг вынесен в функцию: `defer`
+в цикле копил бы таймеры до конца `RunPipeline`. Дальше обычно спрашивают,
+как пробросить остаток бюджета в соседний сервис (заголовок с таймаутом) и
+зачем оставлять шагу запас на запись результата.
+
+</Reveal>

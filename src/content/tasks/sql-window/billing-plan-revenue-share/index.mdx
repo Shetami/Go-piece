@@ -1,0 +1,71 @@
+---
+title: "Доля тарифа в выручке месяца"
+description: "Окно над агрегатом: sum(sum(...)) OVER (PARTITION BY месяц). Возвраты, неуспешные платежи с NULL и целочисленное деление."
+kind: implement
+topic: sql-window
+level: medium
+order: 160
+ordered: true
+---
+
+Финансы хотят видеть, какую долю месячной выручки приносит каждый тариф.
+
+- выручка = сумма платежей `paid` **минус** сумма возвратов `refunded`
+  (возврат хранится отдельной строкой с положительной суммой); `failed` не
+  учитываются;
+- тариф попадает в месяц, если в этом месяце по нему был хотя бы один
+  платёж `paid` или `refunded` (даже если итог получился 0);
+- `share_pct` — доля выручки тарифа в выручке всего месяца, в процентах,
+  `round(…, 1)`;
+- колонки: `month` (`'YYYY-MM'`), `plan`, `revenue`, `share_pct`;
+- порядок: по `month`, затем `revenue` по убыванию, затем `plan`.
+
+Что проверяют скрытые данные: полный возврат в том же месяце; `failed`
+с `NULL` в сумме и `failed` с суммой; суммы — целые числа.
+
+<Reveal>
+
+```sql
+WITH by_plan AS (
+  SELECT to_char(paid_at, 'YYYY-MM') AS month, plan,
+         sum(CASE status WHEN 'paid' THEN amount ELSE -amount END) AS revenue
+  FROM payments
+  WHERE status IN ('paid', 'refunded')
+  GROUP BY 1, 2
+)
+SELECT month, plan, revenue,
+       round(100.0 * revenue / sum(revenue) OVER (PARTITION BY month), 1) AS share_pct
+FROM by_plan
+ORDER BY month, revenue DESC, plan;
+```
+
+Ответ:
+
+```
+2024-01 | team | 1000 | 76.9
+2024-01 | basic | 300 | 23.1
+2024-01 | pro | 0 | 0.0
+2024-02 | pro | 600 | 85.7
+2024-02 | basic | 100 | 14.3
+```
+
+**Окно поверх `GROUP BY`.** После группировки строка — это «месяц + тариф»,
+и `sum(revenue) OVER (PARTITION BY month)` складывает все тарифы месяца, не
+схлопывая строки. Без CTE то же пишется как `sum(sum(…)) OVER (PARTITION BY
+…)` — внутренний `sum` агрегатный, внешний оконный.
+
+**Знаменатель — месяц, а не вся таблица.** Подзапрос `(SELECT sum(amount)
+FROM payments)` делит на выручку за всё время, и доли месяца не складываются
+в 100.
+
+**Возврат — со знаком минус.** `CASE status WHEN 'paid' THEN amount ELSE
+-amount END` после фильтра по статусу. Pro в январе: 300 − 300 = 0, тариф в
+отчёте есть, доля 0.0.
+
+**`100.0 * …`.** `amount` — `int`, и `100 * 300 / 1300` в целых даст 23 —
+round на целом ничего не округлит, получится `23` вместо `23.1`.
+
+**`failed` отбрасывается в `WHERE`,** поэтому Team в феврале в отчёт не
+попадает: платёж был, но неуспешный.
+
+</Reveal>

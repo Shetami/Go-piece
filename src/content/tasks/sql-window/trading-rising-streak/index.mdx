@@ -1,0 +1,89 @@
+---
+title: "Самая длинная серия роста цены"
+description: "LAG размечает дни роста, счётчик «не-ростов» нумерует серии. Выходные не рвут серию, а цена без изменений — рвёт."
+kind: implement
+topic: sql-window
+level: hard
+order: 230
+ordered: true
+---
+
+Для каждого тикера найдите самую длинную серию роста: подряд идущие
+**торговые** дни, в каждый из которых цена закрытия **строго выше**, чем в
+предыдущий торговый день.
+
+- длина серии — число дней роста (первый день серии — первый день, когда
+  цена выросла; день «до роста» в серию не входит);
+- в выходные торгов нет — строк нет; это не разрывает серию;
+- день без изменения цены или с падением разрывает серию;
+- при равной длине — более ранняя серия;
+- если роста не было ни разу — `0`, `NULL`, `NULL`;
+- колонки: `ticker`, `streak_days`, `from_day`, `to_day`;
+- порядок: по `ticker`.
+
+Что проверяют скрытые данные: серия, проходящая через выходные; цена без
+изменений; две серии одной длины; тикер, который только падает.
+
+<Reveal>
+
+```sql
+WITH flagged AS (
+  SELECT ticker, day,
+         coalesce(close > lag(close) OVER (PARTITION BY ticker ORDER BY day), false) AS rising
+  FROM closes
+),
+grouped AS (
+  SELECT ticker, day, rising,
+         count(*) FILTER (WHERE NOT rising) OVER (
+           PARTITION BY ticker ORDER BY day
+           ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+         ) AS grp
+  FROM flagged
+),
+streaks AS (
+  SELECT ticker, count(*) AS streak_days, min(day) AS from_day, max(day) AS to_day
+  FROM grouped
+  WHERE rising
+  GROUP BY ticker, grp
+),
+best AS (
+  SELECT *, row_number() OVER (PARTITION BY ticker ORDER BY streak_days DESC, from_day) AS rn
+  FROM streaks
+)
+SELECT t.ticker,
+       coalesce(b.streak_days, 0) AS streak_days,
+       b.from_day, b.to_day
+FROM (SELECT DISTINCT ticker FROM closes) t
+LEFT JOIN best b ON b.ticker = t.ticker AND b.rn = 1
+ORDER BY t.ticker;
+```
+
+Ответ:
+
+```
+AAA | 3 | 2024-06-07 | 2024-06-11
+BBB | 2 | 2024-06-04 | 2024-06-05
+CCC | 0 | NULL | NULL
+```
+
+**«Дата минус номер» здесь не работает.** Этот приём ищет календарные
+серии, а торговые дни идут с дырами на выходных: у AAA пятница 7 июня и
+понедельник 10-го — соседние торговые дни, но разница дат — 3. Серия
+AAA (7, 10, 11 июня) развалилась бы на две.
+
+**Серии по флагу, а не по датам.** `rising = close > lag(close)`. Каждый
+день *без* роста — разделитель; нарастающий счётчик разделителей
+`count(*) FILTER (WHERE NOT rising) OVER (…)` одинаков у всех дней роста
+между двумя разделителями — это номер серии. Остаётся `GROUP BY` по нему.
+
+**`>=` вместо `>` — ошибка.** У AAA 5 и 6 июня цена 12: без изменения — не
+рост, серия 4–5 июня заканчивается.
+
+**`lag` первого дня — `NULL`**, и `close > NULL` — тоже `NULL`. `coalesce(…,
+false)` превращает его в явное «не рост», иначе `NOT rising` для первой
+строки тоже `NULL` и фильтр её пропустит.
+
+**Тикер без роста** не даёт ни одной серии, поэтому список тикеров берётся
+отдельно и соединяется `LEFT JOIN`.
+
+</Reveal>

@@ -1,0 +1,109 @@
+---
+title: Политика backoff из комбинаторов
+description: Экспонента, потолок, джиттер и лимит попыток — каждый как замыкание-обёртка над другим. Переполнение Duration, float64 на границе int64 и Stop, который не должен искажаться.
+kind: implement
+topic: closures
+level: medium
+order: 240
+related: [retry-backoff]
+---
+
+Цикл повторов пишут один раз, а политику пауз настраивают под каждый
+клиент: экспонента от 100 мс, не больше минуты, с джиттером, не больше пяти
+попыток. Удобно, когда политика — функция `attempt → пауза`, а настройки —
+обёртки над ней:
+
+```go
+b := Jitter(Capped(MaxAttempts(Exponential(100*time.Millisecond), 5), time.Minute), 0.5, rand.Float64)
+```
+
+Напишите `Exponential`, `Capped`, `Jitter` и `MaxAttempts`.
+
+Что проверяют скрытые тесты:
+
+- `Exponential(100ms)`: 100 мс, 200 мс, 800 мс на четвёртой попытке;
+  попытка `0` считается первой;
+- `Exponential(1s)` на попытках до 300 никогда не уменьшается и
+  упирается в `math.MaxInt64`;
+- `Capped(…, 5s)` отдаёт 5 с и на седьмой, и на тысячной попытке;
+- `Jitter` на известных `rnd()` даёт точные значения, `frac` вне `[0, 1]`
+  прижимается к границе, и от насыщенной паузы результат остаётся
+  положительным при любом `rnd()`;
+- `Stop` из `MaxAttempts` проходит сквозь `Capped` и `Jitter` нетронутым.
+
+<Reveal>
+
+```go
+func Exponential(base time.Duration) Backoff {
+	return func(attempt int) time.Duration {
+		d := base
+		for i := 1; i < attempt; i++ {
+			if d > math.MaxInt64/2 {
+				return math.MaxInt64
+			}
+			d *= 2
+		}
+		return d
+	}
+}
+
+func Capped(b Backoff, limit time.Duration) Backoff {
+	return func(attempt int) time.Duration {
+		d := b(attempt)
+		if d == Stop {
+			return Stop
+		}
+		return min(d, limit)
+	}
+}
+
+func Jitter(b Backoff, frac float64, rnd func() float64) Backoff {
+	frac = min(max(frac, 0), 1)
+	return func(attempt int) time.Duration {
+		d := b(attempt)
+		if d <= 0 {
+			return d
+		}
+		x := float64(d) * frac * rnd()
+		if x >= float64(d) {
+			return 0
+		}
+		return d - time.Duration(x)
+	}
+}
+
+func MaxAttempts(b Backoff, n int) Backoff {
+	return func(attempt int) time.Duration {
+		if attempt > n {
+			return Stop
+		}
+		return b(attempt)
+	}
+}
+```
+
+**Декораторы на замыканиях.** Каждый комбинатор захватывает внутреннюю
+политику и свои параметры и возвращает новую функцию того же типа. Поэтому
+их можно вкладывать в любом порядке, и цикл повторов ничего о них не знает.
+Так же устроены middleware в `net/http`.
+
+**Переполнение — главная ловушка.** `base << (attempt-1)` на 64-й попытке
+даёт ноль или отрицательное число, и `Capped` потом честно возвращает
+`min(отрицательное, limit)` — сервис начинает долбить упавшую зависимость
+без пауз. Проверка `d > MaxInt64/2` до умножения даёт насыщение.
+
+**float64 на границе int64.** `float64(math.MaxInt64)` — это ровно 2⁶³, а
+2⁶³ в `int64` не помещается. Результат такого преобразования зависит от
+платформы: на amd64 это `math.MinInt64`. Поэтому через float считаем
+только вычитаемое, которое меньше `d`, а вычитаем уже в целых.
+
+**Сигнальное значение проходит сквозь обёртки.** `Stop` — это `-1`, и
+любая обёртка, которая с ним что-то посчитает (`min`, умножение на
+коэффициент), сломает сигнал. Каждая обёртка сначала проверяет его.
+
+**Что спросят дальше:** зачем джиттер вообще (синхронные повторы тысяч
+клиентов бьют по сервису волнами — thundering herd), чем «full jitter»
+отличается от «equal jitter», и почему `rnd` передаётся параметром —
+детерминированные тесты и отсутствие глобального состояния.
+
+</Reveal>

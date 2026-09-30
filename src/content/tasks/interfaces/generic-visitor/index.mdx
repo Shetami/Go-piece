@@ -1,0 +1,182 @@
+---
+title: Обобщённый visitor для дерева выражений
+description: Запечатанный интерфейс узла, Visitor[R] с тремя реализациями и функция Walk вместо метода Accept — потому что у методов в Go нет параметров типа. Узлы по указателю, nil-указатель в интерфейсе и остановка на первой ошибке.
+kind: implement
+topic: interfaces
+level: hard
+order: 250
+---
+
+Дерево выражения: числа, переменные и бинарные операции. Над ним нужны разные
+операции — вычислить, напечатать, собрать переменные — и каждая возвращает
+своё: `float64`, `string`, `[]string`. Классический visitor из ООП
+(`node.Accept(visitor)`) в Go с дженериками не выражается: метод
+`Accept[R any]` объявить нельзя. Поэтому обход — отдельная обобщённая
+функция `Walk[R]`, а visitor — обобщённый интерфейс.
+
+Реализуйте `Walk` и три visitor'а: `Eval`, `Printer`, `FreeVars`. Контракты
+— в заготовке.
+
+Что проверяют скрытые тесты:
+
+- `(x + 2) * (y - 0.5)` при `x=1, y=3` даёт `7.5` и печатается как
+  `((x + 2) * (y - 0.5))`; часть узлов в дереве — **указатели**;
+- неизвестная переменная — `*UnboundError` через `errors.As`, деление на ноль
+  где-то в глубине — `ErrDivByZero`, неизвестная операция — ошибка;
+- `nil`, `nil`-потомок, `(*Num)(nil)` и `(*Bin)(nil)` — `ErrNilNode`, а не
+  паника; чужой тип узла — ошибка;
+- обход слева направо и остановка на первой ошибке — правое поддерево после
+  ошибки не посещается;
+- `FreeVars` — имена без повторов и по алфавиту.
+
+<Reveal>
+
+```go
+type Node interface{ node() }
+
+type Num struct{ V float64 }
+type Var struct{ Name string }
+type Bin struct {
+	Op   byte
+	L, R Node
+}
+
+func (Num) node() {}
+func (Var) node() {}
+func (Bin) node() {}
+
+type Visitor[R any] interface {
+	Num(n Num) (R, error)
+	Var(v Var) (R, error)
+	Bin(op byte, l, r R) (R, error)
+}
+
+var (
+	ErrNilNode   = errors.New("nil node")
+	ErrDivByZero = errors.New("division by zero")
+)
+
+func Walk[R any](n Node, v Visitor[R]) (R, error) {
+	var zero R
+	switch x := n.(type) {
+	case nil:
+		return zero, ErrNilNode
+	case Num:
+		return v.Num(x)
+	case *Num:
+		if x == nil {
+			return zero, ErrNilNode
+		}
+		return v.Num(*x)
+	case Var:
+		return v.Var(x)
+	case *Var:
+		if x == nil {
+			return zero, ErrNilNode
+		}
+		return v.Var(*x)
+	case Bin:
+		return walkBin(x, v)
+	case *Bin:
+		if x == nil {
+			return zero, ErrNilNode
+		}
+		return walkBin(*x, v)
+	default:
+		return zero, fmt.Errorf("unknown node %T", n)
+	}
+}
+
+func walkBin[R any](b Bin, v Visitor[R]) (R, error) {
+	var zero R
+	l, err := Walk(b.L, v)
+	if err != nil {
+		return zero, err
+	}
+	r, err := Walk(b.R, v)
+	if err != nil {
+		return zero, err
+	}
+	return v.Bin(b.Op, l, r)
+}
+
+type UnboundError struct{ Name string }
+
+func (e *UnboundError) Error() string { return "unbound variable " + e.Name }
+
+type Eval struct{ Env map[string]float64 }
+
+func (e Eval) Num(n Num) (float64, error) { return n.V, nil }
+
+func (e Eval) Var(v Var) (float64, error) {
+	x, ok := e.Env[v.Name]
+	if !ok {
+		return 0, &UnboundError{v.Name}
+	}
+	return x, nil
+}
+
+func (e Eval) Bin(op byte, l, r float64) (float64, error) {
+	switch op {
+	case '+':
+		return l + r, nil
+	case '-':
+		return l - r, nil
+	case '*':
+		return l * r, nil
+	case '/':
+		if r == 0 {
+			return 0, ErrDivByZero
+		}
+		return l / r, nil
+	}
+	return 0, fmt.Errorf("unknown op %q", op)
+}
+
+type Printer struct{}
+
+func (Printer) Num(n Num) (string, error) { return strconv.FormatFloat(n.V, 'g', -1, 64), nil }
+func (Printer) Var(v Var) (string, error) { return v.Name, nil }
+func (Printer) Bin(op byte, l, r string) (string, error) {
+	return "(" + l + " " + string(op) + " " + r + ")", nil
+}
+
+type FreeVars struct{}
+
+func (FreeVars) Num(Num) ([]string, error)   { return nil, nil }
+func (FreeVars) Var(v Var) ([]string, error) { return []string{v.Name}, nil }
+func (FreeVars) Bin(_ byte, l, r []string) ([]string, error) {
+	out := slices.Concat(l, r)
+	slices.Sort(out)
+	return slices.Compact(out), nil
+}
+```
+
+**Почему функция, а не метод.** В Go у методов не бывает собственных
+параметров типа, поэтому `func (b Bin) Accept[R any](v Visitor[R]) R`
+не компилируется. Можно было бы сделать `Accept(v any) any`, но тогда
+теряется типобезопасность. `Walk[R]` — функция, и тип результата выводится
+из visitor'а: `Walk(e, Printer{})` вернёт `string`.
+
+**Запечатанный интерфейс.** Метод `node()` неэкспортируемый — реализовать
+`Node` снаружи пакета нельзя, и type switch в `Walk` исчерпывающий «по
+построению». Так делают `go/ast` (`exprNode()`) и многие парсеры. Ветка
+`default` всё равно нужна: внутри пакета новый узел добавить можно, и лучше
+получить ошибку, чем молчаливый нулевой результат.
+
+**Указатель в интерфейсе — отдельный тип.** `Num` и `*Num` — разные
+динамические типы, `case Num` указатель не поймает. А `(*Num)(nil)`,
+положенный в `Node`, — это не `nil`-интерфейс: `case nil` его не поймает, и
+разыменование `*x` упадёт. Отсюда явная проверка `x == nil` в каждой
+ветке-указателе.
+
+**Visitor получает результаты детей.** Это свёртка (fold): рекурсию делает
+`Walk`, а visitor — чистые функции без обхода. В `FreeVars` важно не писать
+`append(l, r...)`: у `l` может быть свободная ёмкость, и две ветки дерева
+перезапишут общий массив. `slices.Concat` всегда создаёт новый.
+
+Что спросят дальше: когда выгоднее type switch в функциях, а когда методы у
+узлов (expression problem), и как добавить узел `Let{Name, Value, Body}`, у
+которого окружение меняется при спуске — уже не чистая свёртка снизу вверх.
+
+</Reveal>

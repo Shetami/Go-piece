@@ -1,0 +1,91 @@
+---
+title: Ошибка со стеком вызовов
+description: Обёртка, которая один раз снимает стек через runtime.Callers и CallersFrames, не дублирует его при повторной обёртке и не прячет исходную ошибку.
+kind: implement
+topic: errors
+level: hard
+order: 220
+related: [structured-logging]
+lecture: observability/logs
+---
+
+В логе «нет соединения» — а откуда? Стандартные ошибки Go стек не носят.
+Популярный выход (как в `pkg/errors`) — снимать стек в месте, где ошибка
+впервые появилась в нашем коде, и печатать его в логе.
+
+Реализуйте `StackError`, `WithStack` и `StackOf`.
+
+Что проверяют скрытые тесты:
+
+- `WithStack(nil)` — настоящий `nil`;
+- первые кадры — функция, вызвавшая `WithStack`, и её вызывающий;
+  служебных кадров в стеке нет;
+- текст ошибки не меняется, `errors.Is` и `errors.As` работают сквозь
+  обёртку;
+- ошибку, у которой стек уже есть (в том числе в ветке `errors.Join`),
+  повторно не оборачивают — сохраняется самый глубокий стек;
+- на глубокой рекурсии кадров ровно 32.
+
+<Reveal>
+
+```go
+func (e *StackError) Error() string { return e.Err.Error() }
+func (e *StackError) Unwrap() error { return e.Err }
+
+func WithStack(err error) error {
+	if err == nil {
+		return nil
+	}
+	var se *StackError
+	if errors.As(err, &se) {
+		return err
+	}
+	pcs := make([]uintptr, 32)
+	n := runtime.Callers(2, pcs)
+	frames := runtime.CallersFrames(pcs[:n])
+	var names []string
+	for {
+		f, more := frames.Next()
+		names = append(names, f.Function)
+		if !more {
+			break
+		}
+	}
+	return &StackError{Err: err, Frames: names}
+}
+
+func StackOf(err error) []string {
+	var se *StackError
+	if errors.As(err, &se) {
+		return se.Frames
+	}
+	return nil
+}
+```
+
+**`skip` в `runtime.Callers` считается от самого `Callers`.** `0` — сам
+`runtime.Callers`, `1` — `WithStack`, `2` — тот, кто нас вызвал. Ошибка на
+единицу — и в каждом стеке первой строкой висит служебная функция.
+
+**`CallersFrames`, а не `FuncForPC` по каждому `pc`.** Компилятор
+встраивает маленькие функции (`chkInner` — идеальный кандидат), и один
+адрес возврата соответствует нескольким логическим кадрам.
+`CallersFrames` их разворачивает, `FuncForPC` — нет, и из стека
+пропадают как раз наши функции.
+
+**Стек снимают один раз.** Если каждый слой зовёт `WithStack`, лог
+разрастается повторами, а самый полезный — глубокий — стек тонет.
+`errors.As` находит `*StackError` в любой ветке, включая `Join`, так что
+проверка «уже есть» — одна строка. Отсюда и совет: `WithStack` — на
+границе с чужим кодом (драйвер, stdlib), дальше — обычный `%w`.
+
+**`nil` → `nil` без типа.** `return &StackError{…}` для `nil` сломал бы
+`if err != nil` у всех вызывающих; вернуть `(*StackError)(nil)` через
+`error` — тоже.
+
+**Что спросят дальше.** Сколько это стоит (Callers — сотни наносекунд,
+годится для ошибок, не для горячего пути), как вывести стек через
+`fmt.Formatter` с `%+v`, и почему в Go принято оборачивать ошибку
+контекстом вместо стека.
+
+</Reveal>

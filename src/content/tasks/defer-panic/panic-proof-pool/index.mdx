@@ -1,0 +1,100 @@
+---
+title: Пул воркеров, который переживает панику задачи
+description: Обобщённый Map на пуле горутин. Паника на одном элементе становится его ошибкой, воркер продолжает работу, отмена context останавливает раздачу, порядок результатов сохраняется.
+kind: implement
+topic: defer-panic
+level: hard
+order: 170
+related: [worker-pool, context-cancellation, goroutine-leak]
+lecture: concurrency/worker-pools
+---
+
+Классическая авария: пул из четырёх воркеров, одна «ядовитая» запись
+роняет весь сервис. Если вокруг задачи поставить `recover` неаккуратно —
+сервис не падает, но воркер тихо умирает, и через несколько плохих
+записей пул встаёт. Реализуйте `Map`, у которой нет ни той, ни другой
+проблемы.
+
+Что проверяют скрытые тесты:
+
+- `results[i]` соответствует `items[i]`, даже если задачи завершаются в
+  другом порядке;
+- паники на части элементов становятся ошибками **этих** элементов (с
+  текстом паники; `errors.Is` находит ошибку, если паниковали ею), а
+  остальные элементы обрабатываются — даже когда паникуют **все** задачи;
+- одновременно работает не больше `workers` задач, но и не по одной;
+- после отмены `ctx` новые элементы не запускаются и получают
+  `context.Canceled`;
+- после возврата `Map` не остаётся горутин, пустой `items` и `workers = 0`
+  не ломают её.
+
+<Reveal>
+
+```go
+func Map[T, R any](ctx context.Context, items []T, workers int, fn func(context.Context, T) (R, error)) []Result[R] {
+	workers = max(workers, 1)
+	results := make([]Result[R], len(items))
+	jobs := make(chan int)
+
+	var wg sync.WaitGroup
+	for range min(workers, len(items)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				if err := ctx.Err(); err != nil {
+					results[i].Err = err
+					continue
+				}
+				results[i] = runItem(ctx, items[i], fn)
+			}
+		}()
+	}
+	for i := range items {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+	return results
+}
+
+func runItem[T, R any](ctx context.Context, item T, fn func(context.Context, T) (R, error)) (res Result[R]) {
+	defer func() {
+		if r := recover(); r != nil {
+			if err, ok := r.(error); ok {
+				res = Result[R]{Err: fmt.Errorf("паника в задаче: %w", err)}
+			} else {
+				res = Result[R]{Err: fmt.Errorf("паника в задаче: %v", r)}
+			}
+		}
+	}()
+	v, err := fn(ctx, item)
+	return Result[R]{Value: v, Err: err}
+}
+```
+
+**`recover` — вокруг одной задачи, а не вокруг воркера.** Если поставить
+`defer` с `recover` в начало горутины-воркера, он остановит панику, но
+закончит и цикл `for range jobs`: воркер выходит. Когда умрут все воркеры,
+отправитель в `jobs <- i` повиснет навсегда. Отдельная функция `runItem`
+со своим `defer` изолирует каждую задачу.
+
+**Результат по индексу, без мьютекса.** Каждая горутина пишет только в
+свой `results[i]`, а читает их `Map` после `wg.Wait()` — это
+happens-before, гонки нет. Канал результатов с сортировкой тоже работает,
+но сложнее.
+
+**Отмена проверяется перед каждым элементом.** Раздатчик продолжает
+отправлять индексы, но воркеры для них больше не вызывают `fn`, а
+проставляют `ctx.Err()`. Так каждый результат заполнен, а `Map` не
+ждёт — задачи уже в работе сами решают, как реагировать на `ctx`.
+
+**Не запускать лишних воркеров.** `min(workers, len(items))` — мелочь, но
+на пустом входе не создаётся ни одной горутины.
+
+**Что спросят следом.** Как сохранить стек паники для логов
+(`debug.Stack` в том же `defer`), как ограничить число ошибок до
+остановки пула (circuit breaker) и как отдавать результаты потоком, не
+дожидаясь всех.
+
+</Reveal>

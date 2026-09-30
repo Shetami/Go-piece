@@ -1,0 +1,97 @@
+---
+title: Свой io.Copy с быстрыми путями
+description: Проверка опциональных интерфейсов io.WriterTo и io.ReaderFrom и честный цикл через буфер. Данные вместе с EOF, короткая запись и writer, который врёт про n.
+kind: implement
+topic: interfaces
+level: hard
+order: 210
+related: [zero-copy]
+---
+
+`io.Copy` принимает простые `io.Writer` и `io.Reader`, но сначала проверяет,
+не умеют ли они больше. `*os.File` умеет `ReadFrom` через `sendfile`,
+`bytes.Buffer` и `strings.Reader` пишут себя одним вызовом через `WriteTo`.
+Это главный приём Go для оптимизаций за интерфейсом: **опциональный
+интерфейс и проверка типа**.
+
+Напишите `Copy` по контракту из заготовки — без `io.Copy` и его родственников.
+
+Что проверяют скрытые тесты:
+
+- если у источника есть `WriteTo`, а у приёмника — `ReadFrom`, вызывается
+  `WriteTo`, а `Read` источника не трогается;
+- приёмник с `ReadFrom` получает всю работу, если у источника нет `WriteTo`;
+- в цикле: `0, nil` от источника — не конец, последние байты вместе с `io.EOF`
+  записываются, 100 КБ копируются полностью;
+- ошибка чтения, пришедшая вместе с данными: данные записаны, ошибка
+  возвращена как есть, `n` их учитывает;
+- writer, записавший меньше без ошибки, — `io.ErrShortWrite`; writer,
+  «записавший» больше, чем дали, — `ErrInvalidWrite`.
+
+<Reveal>
+
+```go
+func Copy(dst io.Writer, src io.Reader) (int64, error) {
+	if wt, ok := src.(io.WriterTo); ok {
+		return wt.WriteTo(dst)
+	}
+	if rf, ok := dst.(io.ReaderFrom); ok {
+		return rf.ReadFrom(src)
+	}
+	buf := make([]byte, 32*1024)
+	var written int64
+	for {
+		nr, rerr := src.Read(buf)
+		if nr > 0 {
+			nw, werr := dst.Write(buf[:nr])
+			if nw < 0 || nw > nr {
+				nw = 0
+				if werr == nil {
+					werr = ErrInvalidWrite
+				}
+			}
+			written += int64(nw)
+			if werr != nil {
+				return written, werr
+			}
+			if nw != nr {
+				return written, io.ErrShortWrite
+			}
+		}
+		if rerr == io.EOF {
+			return written, nil
+		}
+		if rerr != nil {
+			return written, rerr
+		}
+	}
+}
+```
+
+**Быстрый путь — проверка типа на интерфейс.** `src.(io.WriterTo)`
+спрашивает у динамического типа, есть ли у него метод `WriteTo`. Вызывающий
+по-прежнему передаёт простой `io.Reader`, а оптимизация срабатывает сама. Так
+же устроены `http.Flusher`, `io.StringWriter`, `io.ReaderAt` в
+`io.SectionReader`.
+
+**Обратная сторона: обёртка прячет быстрый путь.** `struct{ io.Reader }{r}` —
+это ровно то, что делает любой декоратор: набор методов обёртки — только
+`Read`. Тест так и проверяет цикл на `strings.Reader`. В проде это приводит к
+тому, что после добавления метрик в `resp.Body` копирование через `sendfile`
+тихо перестаёт работать.
+
+**Сначала данные, потом ошибка.** `Read` может вернуть `n > 0` и ошибку
+одновременно. Если проверять `err` раньше `n`, последний кусок пропадёт,
+особенно часто — с `io.EOF`.
+
+**Не верить writer'у на слово.** `n > len(p)` — нарушение контракта; если его
+прибавить к `written`, счётчик уедет. `n < len(p)` без ошибки — тоже
+нарушение, и молча продолжать нельзя: байты потеряны.
+
+**Ловушка рекурсии.** Если у вашего типа `ReadFrom` реализован через
+`io.Copy(t, r)`, `io.Copy` увидит у `t` метод `ReadFrom` и вызовет его —
+получится бесконечная рекурсия. В стандартной библиотеке её обходят, передавая
+в `io.Copy` обёртку, у которой `ReadFrom` нет. Об этом часто спрашивают
+следующим вопросом.
+
+</Reveal>

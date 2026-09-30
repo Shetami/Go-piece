@@ -1,0 +1,95 @@
+---
+title: "Почасовая сетка с протягиванием значения"
+description: "generate_series строит сетку, последний замер часа — DISTINCT ON, а протягивание вперёд — count() OVER как номер группы. В PostgreSQL нет IGNORE NULLS."
+kind: implement
+topic: sql-window
+level: hard
+order: 250
+ordered: true
+---
+
+Счётчики шлют показания нерегулярно, а графику нужна ровная почасовая
+сетка. Постройте её за `2024-02-01` с `00:00` по `05:00` включительно для
+каждого устройства из `devices`.
+
+- значение часа — **последнее не-`NULL`** показание внутри этого часа
+  (`[hh:00, hh+1:00)`);
+- если в часе такого нет — берётся значение последнего предыдущего часа, где
+  оно было (протягивание вперёд, сколько бы часов подряд ни пустовало);
+- до первого известного значения — `NULL`;
+- колонки: `device`, `hour` (`'HH24:MI'`), `value`;
+- порядок: по `device`, `hour`.
+
+Что проверяют скрытые данные: два показания в одном часе; час, в котором
+пришёл только `NULL`; последнее показание часа — `NULL`, а до него было
+число; несколько пустых часов подряд; устройство, которое начинает слать
+данные не с полуночи; показание за пределами сетки.
+
+<Reveal>
+
+```sql
+WITH hours AS (
+  SELECT generate_series(TIMESTAMP '2024-02-01 00:00',
+                         TIMESTAMP '2024-02-01 05:00',
+                         INTERVAL '1 hour') AS hour
+),
+last_in_hour AS (
+  SELECT DISTINCT ON (device, date_trunc('hour', ts))
+         device, date_trunc('hour', ts) AS hour, value
+  FROM meter
+  WHERE value IS NOT NULL
+  ORDER BY device, date_trunc('hour', ts), ts DESC
+),
+grid AS (
+  SELECT d.id AS device, h.hour, l.value,
+         count(l.value) OVER (PARTITION BY d.id ORDER BY h.hour
+                              ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS grp
+  FROM devices d
+  CROSS JOIN hours h
+  LEFT JOIN last_in_hour l ON l.device = d.id AND l.hour = h.hour
+)
+SELECT device,
+       to_char(hour, 'HH24:MI') AS hour,
+       max(value) OVER (PARTITION BY device, grp) AS value
+FROM grid
+ORDER BY device, grid.hour;
+```
+
+Ответ:
+
+```
+m1 | 00:00 | 7.00
+m1 | 01:00 | 7.00
+m1 | 02:00 | 7.00
+m1 | 03:00 | 9.00
+m1 | 04:00 | 9.00
+m1 | 05:00 | 4.00
+m2 | 00:00 | NULL
+m2 | 01:00 | NULL
+m2 | 02:00 | 12.00
+m2 | 03:00 | 12.00
+m2 | 04:00 | 11.00
+m2 | 05:00 | 11.00
+```
+
+**Сетка — из `generate_series`, а не из данных.** Часов, в которые ничего
+не пришло, в `meter` нет — ни `lag`, ни `coalesce` не создадут строку,
+которой нет. `devices × hours` и `LEFT JOIN` к замерам дают все 12 строк.
+
+**Последний не-`NULL` замер часа.** `max(value)` — не последний, а
+наибольший: у m1 в 00:00 он дал бы 8, а последним пришло 7.
+`DISTINCT ON (device, hour) … ORDER BY …, ts DESC` с предварительным
+`WHERE value IS NOT NULL` — ровно «последний известный».
+
+**`lag` протягивает только на один шаг.** Пустых часов подряд может быть
+сколько угодно. В стандарте для этого есть `last_value(… IGNORE NULLS)`, но
+в PostgreSQL его нет.
+
+**Приём: `count(value)` как номер группы.** `count` не считает `NULL`,
+поэтому нарастающий `count(value)` увеличивается только на часах со
+значением и стоит на месте на пустых. Каждая группа — один известный час и
+пустые после него; в группе ровно одно не-`NULL`, и `max` (или
+`first_value`) по разделу `(device, grp)` протягивает его на всю группу. У
+m2 первые два часа — группа 0 без значений, там `max` честно даёт `NULL`.
+
+</Reveal>

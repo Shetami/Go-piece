@@ -1,0 +1,118 @@
+---
+title: Автомат защиты, который различает ошибки
+description: Circuit breaker, где ошибки клиента и отмена не размыкают цепь, OpenError отвечает и на ErrOpen, и на причину, а в полуоткрытом состоянии идёт ровно одна проба.
+kind: implement
+topic: errors
+level: hard
+order: 240
+related: [circuit-breaker, cascading-failure, graceful-degradation]
+lecture: system-design/resilience
+---
+
+Автомат защиты (circuit breaker) перестаёт звать зависимость, когда она
+раз за разом падает, и даёт ей отдохнуть. Самая частая ошибка в
+реализациях — считать сбоем любую ошибку. Тогда пользователи, закрывшие
+вкладку, или бот, шлющий невалидные запросы, «выключают» здоровую базу
+для всех.
+
+Реализуйте `Breaker` и допишите методы `OpenError` по контракту в
+заготовке.
+
+Что проверяют скрытые тесты:
+
+- успех сбрасывает счётчик, а три сбоя подряд размыкают цепь; дальше
+  `f` не вызывается;
+- ошибка разомкнутого автомата — `*OpenError`, и для неё истинны и
+  `errors.Is(err, ErrOpen)`, и `errors.Is(err, причина)`; `Until` =
+  `now + cooldown`;
+- `context.Canceled` и ошибки с `ErrClient` не считаются и не сбрасывают
+  счётчик; отменённый контекст — `f` не вызывается;
+- после `cooldown` идёт проба: неудачная снова размыкает, с «не нашей»
+  ошибкой — ничего не решает, удачная — замыкает;
+- десять одновременных вызовов в полуоткрытом состоянии: ровно один
+  пробный, девять получают `ErrOpen`, и никто не ждёт медленную пробу.
+
+<Reveal>
+
+```go
+func (e *OpenError) Is(target error) bool { return target == ErrOpen }
+func (e *OpenError) Unwrap() error        { return e.LastErr }
+
+type Breaker struct {
+	threshold int
+	cooldown  time.Duration
+	now       func() time.Time
+
+	mu      sync.Mutex
+	fails   int
+	until   time.Time
+	lastErr error
+	probing bool
+}
+
+func (b *Breaker) Call(ctx context.Context, f func(context.Context) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	probe := false
+	if !b.until.IsZero() {
+		if b.probing || b.now().Before(b.until) {
+			err := &OpenError{Until: b.until, LastErr: b.lastErr}
+			b.mu.Unlock()
+			return err
+		}
+		probe = true
+		b.probing = true
+	}
+	b.mu.Unlock()
+
+	err := f(ctx)
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if probe {
+		b.probing = false
+	}
+	switch {
+	case err == nil:
+		b.fails, b.until, b.lastErr = 0, time.Time{}, nil
+	case errors.Is(err, context.Canceled) || errors.Is(err, ErrClient):
+	default:
+		b.fails++
+		b.lastErr = err
+		if probe || b.fails >= b.threshold {
+			b.until = b.now().Add(b.cooldown)
+		}
+	}
+	return err
+}
+```
+
+**`Is` и `Unwrap` у одной ошибки — про разное.** `Unwrap` говорит «внутри
+лежит причина» — и `errors.Is(err, ErrDB)` находит сбой базы, который
+разомкнул цепь. `Is` говорит «я — разновидность `ErrOpen`», хотя внутри
+`ErrOpen` нет. Так вызывающий может и отличить «не звали» (`ErrOpen` →
+быстрый фолбэк), и понять почему.
+
+**Классификация — сердце автомата.** `context.Canceled` — это клиент
+ушёл, а не база сломалась. Ошибки валидации — тоже не про зависимость.
+Такие ошибки не должны ни прибавлять, ни сбрасывать счётчик: успехом они
+тоже не являются. `DeadlineExceeded`, наоборот, — главный симптом
+больной зависимости, его считаем.
+
+**`f` — без мьютекса.** Вызов зависимости может длиться секунды; держать
+на нём блокировку значит выстроить все запросы в очередь. Мьютекс
+защищает только переходы состояния: «решить, пускать ли» и «учесть
+результат».
+
+**Одна проба.** Флаг `probing` выставляется под тем же мьютексом, под
+которым решаем «Until наступил». Без него после паузы в только что
+поднявшуюся зависимость влетает вся накопившаяся толпа — и роняет её
+снова.
+
+**Что спросят дальше.** Скользящее окно и доля ошибок вместо «N подряд»,
+несколько проб в полуоткрытом состоянии, метрики переходов и что
+возвращать пользователю при `ErrOpen` (кэш, заглушка, 503 с Retry-After).
+
+</Reveal>

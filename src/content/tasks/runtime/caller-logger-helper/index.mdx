@@ -1,0 +1,109 @@
+---
+title: Логгер с местом вызова и Helper
+description: Логгер пишет file.go:line места вызова, как testing.T. Функции-обёртки, помеченные Helper, пропускаются. runtime.Callers, CallersFrames и inlining.
+kind: implement
+topic: runtime
+level: hard
+order: 170
+related: [structured-logging, mutex]
+lecture: go-runtime/scheduler
+---
+
+Допишите `Logger`. Строка лога с `file.go:42` экономит минуты при
+разборе инцидента. Но как только появляются обёртки вроде
+`assertOK(t, err)` или `logRequest(r)`, все строки начинают указывать
+внутрь обёртки. `testing.T` решает это методом `Helper()`: помеченная
+функция при поиске места вызова пропускается. Сделайте так же.
+
+Что проверяют скрытые тесты:
+
+- прямой вызов `Log` и `Logf` пишет **строку вызова в тестовом коде**, а не
+  строку внутри логгера; имя файла без каталогов;
+- вызов через функцию с `Helper()` указывает на её вызывающего, в том
+  числе через две вложенные helper-функции и через `Logf`;
+- обёртка **без** `Helper()` остаётся местом вызова;
+- 8 горутин пишут одновременно: строки целые, каждая приходит одним
+  `Write`, гонок нет.
+
+<Reveal>
+
+```go
+type Logger struct {
+	mu      sync.Mutex
+	w       io.Writer
+	helpers map[string]struct{}
+}
+
+func NewLogger(w io.Writer) *Logger {
+	return &Logger{w: w, helpers: make(map[string]struct{})}
+}
+
+func (l *Logger) Log(msg string) { l.output(msg) }
+
+func (l *Logger) Logf(format string, args ...any) { l.output(fmt.Sprintf(format, args...)) }
+
+func (l *Logger) Helper() {
+	var pc [1]uintptr
+	if runtime.Callers(2, pc[:]) == 0 {
+		return
+	}
+	f, _ := runtime.CallersFrames(pc[:]).Next()
+	l.mu.Lock()
+	l.helpers[f.Function] = struct{}{}
+	l.mu.Unlock()
+}
+
+func (l *Logger) output(msg string) {
+	var pcs [32]uintptr
+	n := runtime.Callers(3, pcs[:])
+	frames := runtime.CallersFrames(pcs[:n])
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	file, line := "???", 0
+	for {
+		f, more := frames.Next()
+		if _, ok := l.helpers[f.Function]; !ok || !more {
+			file, line = filepath.Base(f.File), f.Line
+			break
+		}
+	}
+	b := make([]byte, 0, len(file)+len(msg)+16)
+	b = append(b, file...)
+	b = append(b, ':')
+	b = strconv.AppendInt(b, int64(line), 10)
+	b = append(b, ": "...)
+	b = append(b, msg...)
+	b = append(b, '\n')
+	l.w.Write(b)
+}
+```
+
+**Глубина пропуска должна быть одинаковой.** `Logf`, вызывающий `Log`,
+добавляет лишний кадр, и `Logf` начинает указывать на строку внутри
+логгера. Поэтому оба публичных метода вызывают общий `output`
+напрямую, и число пропускаемых кадров фиксировано: `Callers`, `output`,
+`Log`/`Logf`. Так же сделаны `log.Output(calldepth)` и `slog`.
+
+**`runtime.Callers` + `CallersFrames`, а не цикл по `runtime.Caller(i)`.**
+Компилятор встраивает маленькие функции, и один физический PC может
+соответствовать нескольким логическим кадрам. `CallersFrames` честно
+раскрывает встроенные вызовы. `runtime.FuncForPC(pc).Name()` на таком PC
+может вернуть не ту функцию. Один вызов `Callers` к тому же дешевле, чем
+N вызовов `Caller`.
+
+**Ключ helper-а — полное имя функции** (`main.assertOK`, для метода —
+`main.(*Server).check`). Именно так работает `testing.T.Helper`. Отсюда
+следствие, о котором стоит упомянуть: помечается функция целиком, а не
+конкретный вызов.
+
+**Конкурентность.** Карта helper-ов пишется из `Helper` и читается из
+`output`, значит нужен мьютекс. Строку собираем целиком и пишем одним
+`Write`, иначе строки из разных горутин перемешаются.
+
+**Что спросят дальше.** Сколько это стоит: `runtime.Callers` на каждой
+строке лога заметен в профиле, поэтому `slog` собирает PC только при
+`AddSource`. И почему `filepath.Base`, а не полный путь: полный путь
+раскрывает структуру сборочной машины, а для этого есть флаг `-trimpath`.
+
+</Reveal>

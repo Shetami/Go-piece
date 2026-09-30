@@ -1,0 +1,154 @@
+---
+title: Кэширующий декоратор хранилища
+description: Read-through-кэш, который сам реализует тот же интерфейс Storage. Кэш «не найдено», временные ошибки мимо кэша, копии срезов и сброс записи после неудачной записи.
+kind: implement
+topic: interfaces
+level: hard
+order: 230
+related: [cache-aside, slice-aliasing]
+---
+
+Сервис ходит в медленное хранилище через интерфейс `Storage`. Нужен кэш, но
+код сервиса трогать не хочется: декоратор `Cache` сам реализует `Storage` и
+подставляется вместо оригинала одной строкой.
+
+Реализуйте `Cached` и методы `*Cache` по контракту из заготовки.
+
+Что проверяют скрытые тесты:
+
+- три `Get` одного ключа — одно обращение к хранилищу, `Stats` = 2 попадания
+  и 1 промах;
+- отсутствующий ключ: второй `Get` в хранилище не ходит, но ошибка всё так же
+  `ErrNotFound` — хранилище возвращает её **обёрнутой**;
+- пустое значение после `Put` — это значение, а не промах; после `Delete` —
+  снова «не найдено» из кэша;
+- временная ошибка хранилища не кэшируется;
+- изменение среза, полученного из `Get` или переданного в `Put`, не портит ни
+  кэш, ни хранилище;
+- неудачный `Put` сбрасывает запись кэша;
+- параллельные `Put`/`Get`/`Stats` под `-race`, счётчики сходятся.
+
+<Reveal>
+
+```go
+var ErrNotFound = errors.New("not found")
+
+type Storage interface {
+	Get(ctx context.Context, key string) ([]byte, error)
+	Put(ctx context.Context, key string, val []byte) error
+	Delete(ctx context.Context, key string) error
+}
+
+type entry struct {
+	val []byte
+	err error
+}
+
+type Cache struct {
+	s            Storage
+	mu           sync.Mutex
+	m            map[string]entry
+	hits, misses int
+}
+
+func Cached(s Storage) *Cache {
+	return &Cache{s: s, m: make(map[string]entry)}
+}
+
+func (c *Cache) Get(ctx context.Context, key string) ([]byte, error) {
+	c.mu.Lock()
+	e, ok := c.m[key]
+	if ok {
+		c.hits++
+		c.mu.Unlock()
+		if e.err != nil {
+			return nil, e.err
+		}
+		return slices.Clone(e.val), nil
+	}
+	c.misses++
+	c.mu.Unlock()
+
+	val, err := c.s.Get(ctx, key)
+	switch {
+	case err == nil:
+		c.store(key, entry{val: cloneNonNil(val)})
+		return cloneNonNil(val), nil
+	case errors.Is(err, ErrNotFound):
+		c.store(key, entry{err: err})
+		return nil, err
+	default:
+		return nil, err
+	}
+}
+
+func (c *Cache) Put(ctx context.Context, key string, val []byte) error {
+	if err := c.s.Put(ctx, key, val); err != nil {
+		c.drop(key)
+		return err
+	}
+	c.store(key, entry{val: cloneNonNil(val)})
+	return nil
+}
+
+func (c *Cache) Delete(ctx context.Context, key string) error {
+	if err := c.s.Delete(ctx, key); err != nil {
+		c.drop(key)
+		return err
+	}
+	c.store(key, entry{err: ErrNotFound})
+	return nil
+}
+
+func (c *Cache) Stats() (hits, misses int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.hits, c.misses
+}
+
+func (c *Cache) store(key string, e entry) {
+	c.mu.Lock()
+	c.m[key] = e
+	c.mu.Unlock()
+}
+
+func (c *Cache) drop(key string) {
+	c.mu.Lock()
+	delete(c.m, key)
+	c.mu.Unlock()
+}
+
+func cloneNonNil(b []byte) []byte {
+	return append([]byte{}, b...)
+}
+```
+
+**Декоратор — это тот же интерфейс.** `Cache` не наследует хранилище и не
+знает его тип: он держит `Storage` и сам реализует `Storage`. Поэтому
+декораторы складываются: `Cached(WithMetrics(WithRetry(pg)))`. Строка
+`var _ Storage = (*Cache)(nil)` в тесте ловит несовпадение сигнатур при
+компиляции.
+
+**Отличать «нет записи» от «пустого значения».** Проверка `if v := c.m[k];
+v != nil` путает пустое значение с отсутствием ключа и уходит в хранилище
+каждый раз. Нужна форма `v, ok := m[k]`, а значение хранится как непустой
+срез нулевой длины.
+
+**Кэшируется только определённый ответ.** «Не найдено» — ответ хранилища, его
+можно кэшировать (negative caching: защищает от лавины запросов к
+несуществующим ключам). Таймаут ответом не является: закэшировав его, вы
+превратите секундный сбой в постоянный. Распознавать нужно через
+`errors.Is`, потому что хранилище оборачивает ошибку ключом.
+
+**Срезы — общая память.** `[]byte` — это указатель на массив. Если отдать
+наружу срез из кэша, вызывающий может его изменить — и следующий читатель
+получит испорченные данные. То же с `Put`: вызывающий вправе
+переиспользовать свой буфер. Копия на входе и на выходе — обязательная цена.
+
+**После ошибки записи состояние неизвестно.** Хранилище могло записать
+значение и не успеть ответить. Оставить в кэше старое значение — значит,
+показывать устаревшие данные неограниченно долго; безопасно удалить запись
+и прочитать заново. Что спросят дальше: TTL, ограничение размера (LRU) и
+защита от одновременных промахов по одному ключу через `singleflight`.
+
+</Reveal>

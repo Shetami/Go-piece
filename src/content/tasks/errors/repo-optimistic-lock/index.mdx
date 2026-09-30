@@ -1,0 +1,123 @@
+---
+title: Репозиторий с оптимистической блокировкой
+description: Сентинелы для категорий и типизированная ошибка для подробностей конфликта версий, плюс read-modify-write, который повторяет только конфликт.
+kind: implement
+topic: errors
+level: medium
+order: 270
+related: [lost-update, mutex]
+lecture: databases/transactions
+---
+
+Два запроса одновременно пополняют баланс: оба прочитали 10, оба
+записали 11 — одно пополнение потеряно. Оптимистическая блокировка решает
+это номером версии: запись проходит, только если версия не изменилась с
+момента чтения.
+
+Реализуйте репозиторий в памяти и `Modify` по контракту в заготовке.
+Категории ошибок — сентинелы, подробности конфликта — `*VersionError`.
+
+Что проверяют скрытые тесты:
+
+- «не найдено» и «уже существует» проверяются через `errors.Is`, ID есть
+  в тексте;
+- `Update` несуществующей записи — это «не найдено», а не конфликт;
+- устаревшая версия → `*VersionError` с обеими версиями, который
+  одновременно `errors.Is(err, ErrConflict)`;
+- ошибка бизнес-логики из `fn` возвращается сразу, `fn` вызвана один раз,
+  запись не тронута;
+- двадцать параллельных пополнений через `Modify` — ни одно не потеряно и
+  ни одно не вернуло ошибку.
+
+<Reveal>
+
+```go
+func (e *VersionError) Error() string {
+	return fmt.Sprintf("user %s: версия %d, в базе %d", e.ID, e.Want, e.Have)
+}
+
+func (e *VersionError) Is(target error) bool { return target == ErrConflict }
+
+func (r *Repo) Get(id string) (User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	u, ok := r.m[id]
+	if !ok {
+		return User{}, fmt.Errorf("user %s: %w", id, ErrNotFound)
+	}
+	return u, nil
+}
+
+func (r *Repo) Create(u User) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.m[u.ID]; ok {
+		return fmt.Errorf("user %s: %w", u.ID, ErrExists)
+	}
+	u.Version = 1
+	r.m[u.ID] = u
+	return nil
+}
+
+func (r *Repo) Update(u User) (User, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cur, ok := r.m[u.ID]
+	if !ok {
+		return User{}, fmt.Errorf("user %s: %w", u.ID, ErrNotFound)
+	}
+	if cur.Version != u.Version {
+		return User{}, &VersionError{ID: u.ID, Want: u.Version, Have: cur.Version}
+	}
+	u.Version++
+	r.m[u.ID] = u
+	return u, nil
+}
+
+func Modify(r *Repo, id string, fn func(*User) error) error {
+	var err error
+	for range 50 {
+		var u User
+		if u, err = r.Get(id); err != nil {
+			return err
+		}
+		if err = fn(&u); err != nil {
+			return err
+		}
+		if _, err = r.Update(u); !errors.Is(err, ErrConflict) {
+			return err
+		}
+	}
+	return err
+}
+```
+
+**Сентинел или тип — зависит от того, что нужно вызывающему.** «Не
+найдено» — это категория: HTTP-слою хватает `errors.Is(err, ErrNotFound)`
+→ 404, а ID достаточно в тексте. Конфликт версий несёт данные, которые
+нужны коду (показать пользователю «запись изменил кто-то другой, версия
+2»), — поэтому это тип. Метод `Is` связывает их: тип остаётся
+разновидностью категории, и простой код проверяет конфликт так же, как
+«не найдено».
+
+**Сентинелы — только обёрнутые.** `return ErrNotFound` без контекста
+даёт в логе «не найдено» без намёка, чего именно. `fmt.Errorf("user %s:
+%w", …)` добавляет ID и сохраняет категорию.
+
+**Повторять надо только конфликт.** Он означает «ты опоздал —
+перечитай»: следующая попытка работает с новыми данными и почти всегда
+проходит. «Недостаточно средств» или «не найдено» от повтора не
+изменятся — их возвращают сразу. Ограничение числа попыток нужно на
+случай горячей записи, которую постоянно перехватывают.
+
+**Проверка версии и запись — атомарно.** Если сравнить версию, отпустить
+мьютекс и затем записать, окно между ними возвращает ту самую потерю
+обновлений. В SQL то же самое — `UPDATE … SET version = version + 1
+WHERE id = $1 AND version = $2` и проверка числа изменённых строк.
+
+**Что спросят дальше.** Чем оптимистическая блокировка лучше и хуже
+`SELECT … FOR UPDATE`, что делать, если `fn` имеет побочные эффекты
+(повтор вызовет их снова) и как отдать конфликт клиенту через ETag и
+`If-Match`.
+
+</Reveal>

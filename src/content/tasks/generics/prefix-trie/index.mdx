@@ -1,0 +1,121 @@
+---
+title: Префиксное дерево с обходом по префиксу
+description: Trie[V] для автодополнения — ключ, который является только префиксом, нулевое значение, которое тоже значение, и итератор по ключам с префиксом в алфавитном порядке, в том числе для кириллицы.
+kind: implement
+topic: generics
+level: medium
+order: 250
+---
+
+Допишите `Trie[V]`: `Put`, `Get`, `Len` и `WithPrefix`. На нём строится
+автодополнение в поиске: пользователь ввёл «go» — показываем первые
+десять подходящих слов по алфавиту.
+
+Что проверяют скрытые тесты:
+
+- перезапись ключа, нулевое значение и пустая строка как обычный ключ;
+  `Len` не считает перезапись новым ключом;
+- `Get` не находит ключ, который есть только как префикс другого;
+- `WithPrefix` отдаёт ключи строго по возрастанию, одинаково на каждом из
+  пяти запусков, включая сам префикс; `WithPrefix("")` — все ключи;
+  несуществующий префикс — пусто;
+- кириллица: порядок как у `sort.Strings`, `break` после двух ключей.
+
+<Reveal>
+
+```go
+type trieNode[V any] struct {
+	children map[byte]*trieNode[V]
+	has      bool
+	val      V
+}
+
+type Trie[V any] struct {
+	root trieNode[V]
+	n    int
+}
+
+func (t *Trie[V]) Put(key string, v V) {
+	nd := &t.root
+	for i := 0; i < len(key); i++ {
+		if nd.children == nil {
+			nd.children = make(map[byte]*trieNode[V])
+		}
+		next := nd.children[key[i]]
+		if next == nil {
+			next = &trieNode[V]{}
+			nd.children[key[i]] = next
+		}
+		nd = next
+	}
+	if !nd.has {
+		t.n++
+	}
+	nd.has, nd.val = true, v
+}
+
+func (t *Trie[V]) find(key string) *trieNode[V] {
+	nd := &t.root
+	for i := 0; i < len(key) && nd != nil; i++ {
+		nd = nd.children[key[i]]
+	}
+	return nd
+}
+
+func (t *Trie[V]) Get(key string) (V, bool) {
+	if nd := t.find(key); nd != nil && nd.has {
+		return nd.val, true
+	}
+	var zero V
+	return zero, false
+}
+
+func (t *Trie[V]) WithPrefix(prefix string) iter.Seq2[string, V] {
+	return func(yield func(string, V) bool) {
+		nd := t.find(prefix)
+		if nd == nil {
+			return
+		}
+		walk(nd, []byte(prefix), yield)
+	}
+}
+
+func walk[V any](nd *trieNode[V], path []byte, yield func(string, V) bool) bool {
+	if nd.has && !yield(string(path), nd.val) {
+		return false
+	}
+	for _, b := range slices.Sorted(maps.Keys(nd.children)) {
+		if !walk(nd.children[b], append(path, b), yield) {
+			return false
+		}
+	}
+	return true
+}
+```
+
+**Флаг `has`, а не «значение не нулевое».** Узел `ca` существует, потому
+что через него идут `cat` и `car`, но ключом он не является. А `car`
+со значением `0` — ключ. Отличить эти случаи по `V` нельзя: у обобщённого
+`V` нет «пустого» значения, кроме нулевого, а оно тоже бывает данными.
+
+**Порядок нужно навести самому.** Дети в мапе, а обход мапы случаен,
+поэтому ключи детей сортируются на каждом шаге. Обход в глубину «сначала
+узел, потом дети по возрастанию» даёт как раз лексикографический порядок:
+`go` раньше `gob`.
+
+**Байты, а не руны.** UTF-8 устроен так, что сравнение строк по байтам
+совпадает со сравнением по кодовым точкам, поэтому `sort.Strings` и наш
+обход согласованы и для кириллицы. Узлов при этом больше (буква — два
+байта), зато ключи любые, даже невалидный UTF-8.
+
+**Рекурсивный обход и `break`.** Вспомогательная `walk` возвращает
+`false`, когда `yield` отказался, и каждый уровень рекурсии сразу выходит.
+Без этого после `break` обход продолжится и позовёт `yield` снова, а это
+паника. `append(path, b)` безопасен: в каждой ветке используется до
+возврата, а соседние ветки перезаписывают хвост уже после.
+
+**Что спросят дальше:** как сжать цепочки узлов с одним ребёнком (radix
+tree, так устроены роутеры HTTP), как хранить у узла топ-10 популярных
+продолжений и как удалить ключ, подчистив пустые ветки.
+
+</Reveal>

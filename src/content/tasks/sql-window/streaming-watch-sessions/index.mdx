@@ -1,0 +1,88 @@
+---
+title: "Сессии просмотра по heartbeat-ам"
+description: "Сессионизация: пауза больше 5 минут открывает новую сессию. Повторные heartbeat-ы, переход через полночь и пользователи без просмотров."
+kind: implement
+topic: sql-window
+level: hard
+order: 150
+ordered: true
+---
+
+Плеер раз в минуту отправляет heartbeat, пока идёт просмотр. Нужна сводка
+по сессиям просмотра для каждого пользователя.
+
+- heartbeat-ы пользователя относятся к одной сессии, пока пауза между
+  соседними **не больше 5 минут**; пауза больше — новая сессия; смена
+  фильма сессию не прерывает;
+- минуты сессии — число **различных** `ts` в ней (повторно отправленный
+  heartbeat с тем же `ts` — одна минута);
+- в отчёте все пользователи из `users`; у кого просмотров нет — нули;
+- колонки: `user_name`, `sessions`, `total_minutes`, `longest_minutes`;
+- порядок: по `user_name`.
+
+Что проверяют скрытые данные: пауза ровно 5 минут и 6 минут; повтор
+heartbeat-а; сессия, переходящая через полночь; пользователь без просмотров.
+
+<Reveal>
+
+```sql
+WITH marked AS (
+  SELECT user_id, ts,
+         CASE WHEN ts - lag(ts) OVER w <= INTERVAL '5 minutes' THEN 0 ELSE 1 END AS is_new
+  FROM heartbeats
+  WINDOW w AS (PARTITION BY user_id ORDER BY ts)
+),
+numbered AS (
+  SELECT user_id, ts,
+         sum(is_new) OVER (PARTITION BY user_id ORDER BY ts
+                           ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS session_no
+  FROM marked
+),
+sessions AS (
+  SELECT user_id, session_no, count(DISTINCT ts) AS minutes
+  FROM numbered
+  GROUP BY user_id, session_no
+)
+SELECT u.name AS user_name,
+       count(s.session_no)          AS sessions,
+       coalesce(sum(s.minutes), 0)  AS total_minutes,
+       coalesce(max(s.minutes), 0)  AS longest_minutes
+FROM users u
+LEFT JOIN sessions s ON s.user_id = u.id
+GROUP BY u.id, u.name
+ORDER BY u.name;
+```
+
+Ответ:
+
+```
+Аня | 2 | 7 | 5
+Борис | 2 | 3 | 2
+Вера | 0 | 0 | 0
+Глеб | 1 | 4 | 4
+```
+
+**Сессия — не календарный день.** У Глеба просмотр 23:58–00:01 — одна
+сессия, хотя дат две. А у Бориса два просмотра в разные дни — две сессии,
+но причина в паузе, а не в смене даты.
+
+**Флаг начала + нарастающая сумма.** `ts - lag(ts) <= interval '5 minutes'`
+— продолжение, иначе начало. Для первой строки `lag` — `NULL`, сравнение не
+истинно, и `CASE` уходит в `ELSE 1`. Граница включительная: у Ани 20:02 →
+20:07 — та же сессия, 20:08 → 20:14 — новая.
+
+**Повтор с тем же `ts` не рвёт сессию** (пауза 0), но и не должен добавлять
+минуту — поэтому `count(DISTINCT ts)`, а не `count(*)`: иначе у Ани первая
+сессия получилась бы 6 минут.
+
+**Рамка `ROWS` для номера сессии — не обязательно, но полезно.** С `RANGE`
+по умолчанию два дубликата получили бы одинаковую сумму — здесь это ничего
+не ломает, но привычка писать `ROWS` для нарастающих итогов бережёт от
+сюрпризов в задачах, где ломает.
+
+**Агрегат над агрегатом.** Сначала `GROUP BY user_id, session_no` — минуты
+каждой сессии, затем `GROUP BY` по пользователю — число сессий, сумма и
+максимум. `count(s.session_no)` после `LEFT JOIN` даёт 0 для Веры, а
+`sum`/`max` — `NULL`, отсюда `coalesce`.
+
+</Reveal>

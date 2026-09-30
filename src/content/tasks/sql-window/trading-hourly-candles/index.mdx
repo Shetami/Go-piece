@@ -1,0 +1,78 @@
+---
+title: "Часовые свечи OHLC из ленты сделок"
+description: "first_value и last_value с правильной рамкой, тай-брейк сделок в одну секунду и группировка по часу."
+kind: implement
+topic: sql-window
+level: hard
+order: 170
+ordered: true
+---
+
+Из ленты сделок постройте часовые свечи для графика.
+
+- свеча — тикер + час (`date_trunc('hour', ts)`); часы без сделок не
+  выводятся;
+- `open` — цена **первой** сделки часа, `close` — цена **последней**,
+  `high`/`low` — максимум и минимум цены, `volume` — сумма `qty`;
+- порядок сделок: по `ts`, при равном времени — по `id`;
+- колонки: `ticker`, `hour` (`'YYYY-MM-DD HH24:MI'`), `open`, `high`, `low`,
+  `close`, `volume`;
+- порядок: по `ticker`, `hour`.
+
+Что проверяют скрытые данные: последние сделки часа пришли в одну секунду;
+строки вставлены не в порядке `id`; сделка ровно в `11:00:00` и в
+`10:59:59`; час с одной сделкой.
+
+<Reveal>
+
+```sql
+WITH t AS (
+  SELECT ticker, date_trunc('hour', ts) AS hour, price, qty,
+         first_value(price) OVER w AS open,
+         last_value(price)  OVER w AS close
+  FROM trades
+  WINDOW w AS (
+    PARTITION BY ticker, date_trunc('hour', ts)
+    ORDER BY ts, id
+    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+  )
+)
+SELECT ticker,
+       to_char(hour, 'YYYY-MM-DD HH24:MI') AS hour,
+       open, max(price) AS high, min(price) AS low, close,
+       sum(qty) AS volume
+FROM t
+GROUP BY ticker, t.hour, open, close
+ORDER BY ticker, t.hour;
+```
+
+Ответ:
+
+```
+AAA | 2024-04-01 10:00 | 100.00 | 105.00 | 100.00 | 103.00 | 18
+AAA | 2024-04-01 11:00 | 102.00 | 102.00 | 98.00 | 98.00 | 13
+BBB | 2024-04-01 10:00 | 50.00 | 50.50 | 50.00 | 50.50 | 30
+BBB | 2024-04-01 12:00 | 51.00 | 51.00 | 51.00 | 51.00 | 1
+```
+
+**`last_value` с рамкой по умолчанию возвращает текущую строку.** Рамка по
+умолчанию — `RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW`, то есть
+«последняя строка рамки» — это текущая строка (и её пиры). Для «последней
+строки раздела» нужна рамка до `UNBOUNDED FOLLOWING`. `first_value` рамка по
+умолчанию не мешает — начало у неё правильное.
+
+**`min(open)` и `max(close)` — не open и close.** Это просто минимум и
+максимум цен — то же, что `low` и `high`.
+
+**Одна секунда — два разных close.** В 10:59:59 прошли сделки 3 (101) и 4
+(103). С `ORDER BY ts` они пиры, и `last_value` вернёт любую из них. `ORDER
+BY ts, id` делает порядок полным: close часа — 103.
+
+**Окно, потом `GROUP BY`.** `open` и `close` одинаковы во всех строках свечи,
+поэтому их можно добавить в `GROUP BY` — это не меняет группы. Альтернатива
+без окон — `(array_agg(price ORDER BY ts, id))[1]` и то же с `DESC`.
+
+**`date_trunc('hour', …)` — граница включительно слева.** Сделка в
+`11:00:00` открывает свечу 11:00, а `10:59:59` закрывает свечу 10:00.
+
+</Reveal>

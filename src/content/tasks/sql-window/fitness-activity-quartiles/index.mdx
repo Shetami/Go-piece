@@ -1,0 +1,75 @@
+---
+title: "Квартили активности пользователей"
+description: "NTILE и percent_rank поверх агрегата с LEFT JOIN. NULL-минуты, пользователи без тренировок и ничьи на границе квартилей."
+kind: implement
+topic: sql-window
+level: medium
+order: 180
+ordered: true
+---
+
+Фитнес-приложение делит пользователей на четыре группы по активности, чтобы
+по-разному их мотивировать.
+
+- `total_minutes` — сумма `minutes` всех тренировок; `NULL`-длительность не
+  считается; пользователь без тренировок — `0`; в отчёте **все** пользователи;
+- `quartile` — `ntile(4)` по `total_minutes` **по убыванию** (самые активные —
+  в первой группе); при равной сумме раньше тот, чьё имя раньше по алфавиту;
+- `pct_rank` — `percent_rank()` по `total_minutes` **по возрастанию**,
+  `round(…, 2)`; равные суммы получают равный `pct_rank`;
+- колонки: `name`, `total_minutes`, `quartile`, `pct_rank`;
+- порядок: по `quartile`, `total_minutes` по убыванию, `name`.
+
+Что проверяют скрытые данные: пользователь только с `NULL`-тренировкой;
+пользователь без тренировок; ничья, которая попадает на границу групп;
+число пользователей, не делящееся на 4.
+
+<Reveal>
+
+```sql
+WITH totals AS (
+  SELECT u.name, coalesce(sum(w.minutes), 0) AS total_minutes
+  FROM users u
+  LEFT JOIN workouts w ON w.user_id = u.id
+  GROUP BY u.id, u.name
+)
+SELECT name, total_minutes,
+       ntile(4) OVER (ORDER BY total_minutes DESC, name) AS quartile,
+       round(percent_rank() OVER (ORDER BY total_minutes)::numeric, 2) AS pct_rank
+FROM totals
+ORDER BY quartile, total_minutes DESC, name;
+```
+
+Ответ:
+
+```
+Аня | 300 | 1 | 1.00
+Боря | 250 | 1 | 0.67
+Вера | 250 | 2 | 0.67
+Гоша | 120 | 2 | 0.50
+Егор | 60 | 3 | 0.33
+Дина | 0 | 3 | 0.00
+Жора | 0 | 4 | 0.00
+```
+
+**`coalesce` до окна.** `sum` по одним `NULL` (Жора) или по пустой группе
+(Дина) — `NULL`, а `NULL` в `ORDER BY … DESC` в PostgreSQL идёт **первым**:
+без `coalesce` бездельники оказались бы в первом квартиле.
+
+**`ntile` раскладывает строки, а не значения.** Семь человек на четыре
+группы — размеры 2, 2, 2, 1: лишние строки достаются первым группам. Боря и
+Вера с одинаковыми 250 минутами попадают в разные квартили — это нормально
+для `ntile`, но без тай-брейка (`name`) было бы неизвестно, кто куда.
+
+**`percent_rank` = `(rank − 1) / (n − 1)`.** Ничьи получают одинаковый
+ранг, поэтому у Дины и Жоры 0.00, у Бори и Веры 0.67. Самостоятельная
+формула `rank / count` даёт другое число и никогда не даёт 0.
+
+**`percent_rank` возвращает `double precision`,** а `round(x, 2)` есть только
+для `numeric` — отсюда `::numeric`.
+
+**Что спросят дальше.** Чем `ntile` отличается от квантилей значений
+(`percentile_cont(0.25) WITHIN GROUP (ORDER BY …)`): первое делит людей на
+равные по численности группы, второе ищет пороговые значения.
+
+</Reveal>

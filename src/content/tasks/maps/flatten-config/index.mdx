@@ -1,0 +1,98 @@
+---
+title: Развернуть вложенный конфиг в пути
+description: Рекурсивный обход map[string]any и []any с type switch. Пустые контейнеры и nil, которые нельзя потерять, и конфликт путей, который надо поймать при любом порядке обхода.
+kind: implement
+topic: maps
+level: medium
+order: 290
+---
+
+Конфиги и JSON-документы часто хранят и сравнивают в плоском виде:
+`db.host=x`, `db.ports.0=5432`. Так устроены переменные окружения в Viper,
+ключи в etcd, метки в логах. Напишите `Flatten`; формат путей и правила —
+в заготовке.
+
+Что проверяют скрытые тесты:
+
+- вложенные мапы, слайсы и мапы внутри слайсов;
+- пустая мапа, пустой слайс и `nil` не пропадают — ключ есть в ответе;
+- `map[string]int` — не контейнер, а лист;
+- ключ с точкой `"a.b"` и вложенная `{"a": {"b": …}}` дают один путь —
+  ошибка на каждом из 30 запусков, в том числе когда одно из значений `nil`;
+- вход не меняется, пустой вход — пустой ответ без ошибки.
+
+<Reveal>
+
+```go
+func Flatten(doc map[string]any) (map[string]any, error) {
+	out := make(map[string]any)
+	var walk func(path string, v any) error
+	put := func(path string, v any) error {
+		if _, dup := out[path]; dup {
+			return fmt.Errorf("%w: %q", ErrKeyConflict, path)
+		}
+		out[path] = v
+		return nil
+	}
+	join := func(path, seg string) string {
+		if path == "" {
+			return seg
+		}
+		return path + "." + seg
+	}
+	walk = func(path string, v any) error {
+		switch x := v.(type) {
+		case map[string]any:
+			if len(x) == 0 {
+				return put(path, x)
+			}
+			for k, child := range x {
+				if err := walk(join(path, k), child); err != nil {
+					return err
+				}
+			}
+		case []any:
+			if len(x) == 0 {
+				return put(path, x)
+			}
+			for i, child := range x {
+				if err := walk(join(path, strconv.Itoa(i)), child); err != nil {
+					return err
+				}
+			}
+		default:
+			return put(path, x)
+		}
+		return nil
+	}
+	for k, v := range doc {
+		if err := walk(k, v); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+```
+
+**Type switch по конкретным типам.** `encoding/json` декодирует объект в
+`map[string]any`, массив — в `[]any`; только это и есть контейнеры.
+`map[string]int` — другой тип, и `case map[string]any` его не поймает:
+это лист. Разбирать произвольные мапы через `reflect` можно, но контракт
+этого не просит.
+
+**Пустой контейнер — лист.** Если просто рекурсивно обойти пустую мапу, в
+ответ не попадёт ничего, и `"features": {}` исчезнет. Обратное
+преобразование уже не узнает, что ключ был, — и, например, дифф конфигов
+его пропустит.
+
+**Конфликт — проверкой `_, dup := out[path]`.** Путь `a.b` может прийти и
+из ключа с точкой, и из вложенной мапы. Какой из них обойдём первым, решает
+случай, поэтому «последний победил» — это ответ, который меняется от запуска
+к запуску. Проверять надо **наличие** ключа: `out[path] != nil` пропустит
+конфликт, если первое значение было `nil`.
+
+**Что спросят дальше.** Экранирование точек в ключах (`a\.b`), обратное
+преобразование (следующая задача — `Unflatten`) и почему для глубоких
+документов рекурсию иногда заменяют явным стеком.
+
+</Reveal>

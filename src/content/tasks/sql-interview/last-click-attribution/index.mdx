@@ -1,0 +1,118 @@
+---
+title: "Атрибуция заказов по последнему клику"
+description: "LATERAL с LIMIT 1 для «последнего касания до события», окно в 7 дней включительно, одновременные клики и каналы без конверсий."
+kind: implement
+topic: sql-interview
+level: hard
+order: 150
+ordered: true
+---
+
+Маркетинг распределяет выручку между рекламными каналами по модели
+**last click**.
+
+**Правило атрибуции.** Оплаченный заказ приписывается каналу
+**последнего клика** пользователя, сделанного не раньше чем за 7 дней до
+заказа:
+
+- учитываются только клики (`kind = 'click'`), показы — нет;
+- клик должен быть не позже момента заказа и не раньше `created_at − 7
+  дней` — обе границы включительно;
+- клики после заказа на этот заказ не влияют;
+- если у пользователя два клика в одну и ту же секунду, побеждает кампания с
+  меньшим `campaign_id`;
+- заказ без подходящего клика относится к каналу `direct`;
+- отменённые заказы (`status = 'cancelled'`) в отчёт не идут. Один клик
+  может привести несколько заказов.
+
+Отчёт — по **каждому** каналу из `campaigns` и по `direct`, даже если
+заказов у канала нет:
+
+- колонки: `channel`, `orders`, `revenue` (0, если заказов нет),
+  `share_pct` — доля выручки канала от всей выручки оплаченных заказов,
+  `round(…, 1)`;
+- порядок: `revenue` по убыванию, затем `channel`.
+
+<Reveal>
+
+```sql
+WITH attributed AS (
+  SELECT o.id, o.amount,
+         coalesce(lc.channel, 'direct') AS channel
+  FROM orders o
+  LEFT JOIN LATERAL (
+    SELECT c.channel
+    FROM touches t
+    JOIN campaigns c ON c.id = t.campaign_id
+    WHERE t.user_id = o.user_id
+      AND t.kind = 'click'
+      AND t.ts <= o.created_at
+      AND t.ts >= o.created_at - interval '7 days'
+    ORDER BY t.ts DESC, t.campaign_id
+    LIMIT 1
+  ) lc ON true
+  WHERE o.status = 'paid'
+),
+channels AS (
+  SELECT channel FROM campaigns
+  UNION
+  SELECT 'direct'
+)
+SELECT ch.channel,
+       count(a.id)                AS orders,
+       coalesce(sum(a.amount), 0) AS revenue,
+       round(100.0 * coalesce(sum(a.amount), 0) / (SELECT sum(amount) FROM attributed), 1) AS share_pct
+FROM channels ch
+LEFT JOIN attributed a ON a.channel = ch.channel
+GROUP BY ch.channel
+ORDER BY revenue DESC, ch.channel;
+```
+
+Ответ:
+
+```
+direct    | 3 | 5500.00 | 41.7
+social    | 3 | 4700.00 | 35.6
+search    | 1 | 3000.00 | 22.7
+affiliate | 0 |       0 |  0.0
+email     | 0 |       0 |  0.0
+```
+
+**«Последнее X до события Y» — это `LATERAL … ORDER BY … LIMIT 1`.** Для
+каждого заказа подзапрос видит его колонки (`o.user_id`, `o.created_at`),
+отбирает подходящие клики, сортирует от свежего к старому и берёт один.
+`LEFT JOIN LATERAL … ON true` сохраняет заказы, для которых клика не нашлось:
+у них `channel` — `NULL`, и `coalesce` превращает его в `direct`.
+Альтернатива — `row_number() OVER (PARTITION BY o.id ORDER BY t.ts DESC,
+t.campaign_id)` поверх соединения заказов с кликами; но тогда заказы без
+кликов надо не потерять отдельным `LEFT JOIN`.
+
+**Тай-брейкер обязателен.** Гоша кликнул по VK и по Директу в одну секунду.
+Без `t.campaign_id` во втором ключе сортировки `LIMIT 1` вернёт любой из двух
+кликов — отчёт будет «плавать» между запусками. Его второй заказ через два
+дня приписывается тому же клику: одно касание может конвертироваться
+несколько раз.
+
+**Разбор остальных заказов:**
+
+- Аня, 5 июня: клики email → search → (после заказа) social. Побеждает
+  search — последний *до* заказа. Её второй заказ 20 июня — через 17 дней
+  после последнего клика до него, это `direct`;
+- Боря: клик ровно за 7 дней — ещё в окне. Показ Директа позже клика
+  ничего не меняет;
+- Вера: клик за 7 дней и 1 секунду — уже `direct`;
+- Дина кликнула по кешбэк-сервису на следующий день после заказа —
+  `direct`, а `affiliate` остаётся с нулём;
+- отменённый заказ Гоши на 9 000 не входит ни в выручку канала, ни в
+  знаменатель доли.
+
+**Пустые каналы.** Строки для `affiliate` и `email` появляются только
+благодаря справочнику каналов `channels` и `LEFT JOIN` от него.
+`UNION` (а не `UNION ALL`) заодно схлопывает две кампании канала `search`.
+
+**Что спросят дальше.** Чем плоха last click и что такое линейная,
+позиционная (40/20/40) и data-driven атрибуция. Линейную в SQL сделать
+несложно: каждому клику в окне — `amount / count(*) OVER (PARTITION BY
+o.id)`, дальше обычная группировка по каналу.
+
+</Reveal>

@@ -1,0 +1,98 @@
+---
+title: Очередь задач с плавной остановкой
+description: Пул воркеров с буфером, Submit с ожиданием места и Shutdown(ctx), который доделывает принятое и не роняет процесс, если кто-то в этот момент ещё отправляет. Гонка close против send в чистом виде.
+kind: implement
+topic: concurrency
+level: hard
+order: 250
+related: [graceful-shutdown, worker-pool, chan-close, rwmutex, backpressure]
+lecture: concurrency/coordination
+---
+
+Сервис получает SIGTERM. Нужно перестать брать новую работу, доделать
+принятую и уложиться в дедлайн оркестратора. Реализуйте `Queue` по
+контракту из заготовки.
+
+Что проверяют скрытые тесты:
+
+- все принятые задачи выполнены к возврату `Shutdown`, включая стоявшие в
+  буфере; после него `Submit` отвечает `ErrClosed`, повторный `Shutdown`
+  безопасен, воркеры завершились;
+- `Submit` в полный буфер ждёт, но уходит по своему `ctx`;
+- пять горутин висят в `Submit` на полном буфере, и в этот момент
+  начинается `Shutdown`: никаких паник, `Shutdown` не зависает, каждая
+  задача, для которой `Submit` вернул `nil`, выполнена;
+- `Shutdown` с коротким дедлайном возвращает `DeadlineExceeded`, а
+  следующий вызов с запасом времени дожидается воркеров.
+
+<Reveal>
+
+```go
+func (q *Queue) Submit(ctx context.Context, task func()) error {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+	if q.closed {
+		return ErrClosed
+	}
+	select {
+	case q.tasks <- task:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-q.quit:
+		return ErrClosed
+	}
+}
+
+func (q *Queue) Shutdown(ctx context.Context) error {
+	q.shutOnce.Do(func() {
+		close(q.quit)
+		q.mu.Lock()
+		q.closed = true
+		close(q.tasks)
+		q.mu.Unlock()
+		go func() {
+			q.wg.Wait()
+			close(q.done)
+		}()
+	})
+	select {
+	case <-q.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+```
+
+Воркеры — обычный `for task := range q.tasks`: после закрытия канала они
+дочитывают буфер и выходят.
+
+**Главная ловушка — закрыть канал, в который кто-то отправляет.** Флаг
+`closed` сам по себе не спасает: `Submit` проверил флаг, пошёл отправлять,
+а `Shutdown` в этот момент сделал `close(tasks)` — `panic: send on closed
+channel`. Отправка и закрытие должны исключать друг друга. Отсюда
+`RWMutex`: отправлять могут многие сразу (`RLock`), закрыть можно только
+когда отправляющих нет (`Lock`).
+
+**Но `Lock` будет ждать `Submit`, который висит на полном буфере.** Второй
+канал `quit` закрывается **до** `Lock`: все ждущие `Submit` просыпаются с
+`ErrClosed`, отпускают `RLock`, и `Shutdown` проходит. Без него остановка
+зависит от того, успеют ли воркеры освободить место.
+
+**`select` случаен — и это нормально.** Если одновременно готовы и
+`tasks <- task`, и `quit`, может выиграть отправка. Тогда задача принята
+до `close(tasks)` и будет выполнена — контракт соблюдён.
+
+**Ожидание — в отдельной горутине, а `Shutdown` лишь ждёт `done` или
+`ctx`.** Так дедлайн не отменяет остановку (воркеры доделывают в фоне), и
+повторный `Shutdown` может просто подождать ещё. `sync.Once` защищает от
+двойного `close`.
+
+**Что спросят дальше.** Как связать это с `http.Server.Shutdown` и
+`signal.NotifyContext`, что делать с задачами, которые не успели (сохранить
+в персистентную очередь, отдать брокеру обратно без ack), и как отменить
+выполняющиеся задачи: передавать им контекст, который отменяется, когда
+дедлайн остановки прошёл.
+
+</Reveal>

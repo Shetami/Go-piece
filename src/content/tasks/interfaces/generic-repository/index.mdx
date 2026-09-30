@@ -1,0 +1,142 @@
+---
+title: Обобщённый репозиторий с опциональными интерфейсами
+description: Repo[T Entity] в памяти — дженерик с ограничением-интерфейсом. Валидация и оптимистичная блокировка включаются, только если T реализует нужный интерфейс. Утверждение типа на параметре типа.
+kind: implement
+topic: interfaces
+level: medium
+order: 240
+---
+
+Нужен один репозиторий в памяти для любых сущностей — пользователей,
+документов, тегов. Ограничение `T Entity` гарантирует только метод `Key`. Всё
+остальное репозиторий узнаёт у значения сам: умеет сущность проверять себя
+(`Validator`) — проверить перед сохранением; есть у неё версия
+(`Versioned`) — не дать перезаписать чужое изменение.
+
+Реализуйте `Repo[T]` по контракту из заготовки.
+
+Что проверяют скрытые тесты:
+
+- `Get` несуществующего ключа — нулевое `T` и `ErrNotFound`, ключ в тексте
+  ошибки;
+- `List` — по возрастанию ключа, с фильтром и без; пустой результат — пустой
+  срез, не `nil`;
+- `chkUser` с `Validate` на значении: невалидный не сохраняется, наружу —
+  исходная ошибка через `errors.Is`;
+- `*chkDoc` (сущность — указатель) с версиями: новая — только версия 1,
+  обновление — ровно +1, устаревшая или скачущая версия — `ErrConflict`, а
+  хранимое значение не меняется;
+- тип без опциональных методов сохраняется без проверок;
+- параллельные `Save` и `List` под `-race`.
+
+<Reveal>
+
+```go
+var (
+	ErrNotFound = errors.New("not found")
+	ErrConflict = errors.New("version conflict")
+)
+
+type Entity interface {
+	Key() string
+}
+
+type Validator interface {
+	Validate() error
+}
+
+type Versioned interface {
+	Version() int
+}
+
+type Repo[T Entity] struct {
+	mu sync.RWMutex
+	m  map[string]T
+}
+
+func NewRepo[T Entity]() *Repo[T] {
+	return &Repo[T]{m: make(map[string]T)}
+}
+
+func (r *Repo[T]) Save(v T) error {
+	if val, ok := any(v).(Validator); ok {
+		if err := val.Validate(); err != nil {
+			return fmt.Errorf("repo: invalid %q: %w", v.Key(), err)
+		}
+	}
+	key := v.Key()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if nv, ok := any(v).(Versioned); ok {
+		want := 1
+		if old, exists := r.m[key]; exists {
+			want = any(old).(Versioned).Version() + 1
+		}
+		if nv.Version() != want {
+			return fmt.Errorf("repo: %q: %w", key, ErrConflict)
+		}
+	}
+	r.m[key] = v
+	return nil
+}
+
+func (r *Repo[T]) Get(key string) (T, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	v, ok := r.m[key]
+	if !ok {
+		var zero T
+		return zero, fmt.Errorf("repo: %q: %w", key, ErrNotFound)
+	}
+	return v, nil
+}
+
+func (r *Repo[T]) Delete(key string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.m[key]; !ok {
+		return fmt.Errorf("repo: %q: %w", key, ErrNotFound)
+	}
+	delete(r.m, key)
+	return nil
+}
+
+func (r *Repo[T]) List(keep func(T) bool) []T {
+	r.mu.RLock()
+	out := make([]T, 0, len(r.m))
+	for _, v := range r.m {
+		if keep == nil || keep(v) {
+			out = append(out, v)
+		}
+	}
+	r.mu.RUnlock()
+	slices.SortFunc(out, func(a, b T) int { return cmp.Compare(a.Key(), b.Key()) })
+	return out
+}
+```
+
+**`any(v).(Validator)`, а не `v.(Validator)`.** Утверждение типа применимо
+только к значению интерфейсного типа, а `v` имеет тип параметра `T`. Код
+`v.(Validator)` не компилируется. Упаковка в `any` даёт интерфейс с
+динамическим типом — конкретным `T` — и дальше работает обычная проверка.
+
+**Проверка идёт по набору методов конкретного `T`.** Для `chkUser` метод
+`Validate` на значении, и проверка срабатывает. Если бы он был на указателе,
+`Repo[chkUser]` его бы не увидел: у типа `chkUser` такого метода нет. С
+`Repo[*chkUser]` — увидел бы. Это главное, о чём спросят после решения.
+
+**Почему не ограничение `T interface{ Entity; Validator }`.** Тогда
+репозиторий не принимал бы сущности без валидации. Опциональные интерфейсы
+позволяют держать минимальное ограничение и включать возможности по факту —
+так же, как `io.Copy` ищет `WriterTo`.
+
+**Сравнение версий — под той же блокировкой, что и запись.** Если прочитать
+версию под `RLock`, отпустить и потом писать под `Lock`, два параллельных
+`Save` версии 2 оба пройдут проверку. Оптимистичная блокировка в
+репозитории — та же логика, что и `UPDATE … WHERE version = $old` в базе.
+
+**`List` сортирует явно.** Порядок обхода мапы случаен и меняется от запуска к
+запуску; `make([]T, 0, …)` гарантирует пустой, а не `nil` срез — важно, если
+результат уходит в JSON (`[]` вместо `null`).
+
+</Reveal>

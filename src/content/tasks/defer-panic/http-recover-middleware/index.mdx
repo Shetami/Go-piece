@@ -1,0 +1,93 @@
+---
+title: HTTP-middleware, которое ловит панику
+description: Recover-middleware для net/http. 500 — только если ответ ещё не начат, лог с методом и путём, а http.ErrAbortHandler пропускается дальше.
+kind: implement
+topic: defer-panic
+level: hard
+order: 240
+related: [structured-logging]
+lecture: production/go-service
+---
+
+`net/http` сам ловит паники обработчиков, но делает это грубо: рвёт
+соединение и пишет стек в `stderr`. Клиент видит `EOF` вместо ответа, а
+алерты на 5xx ничего не замечают. Реализуйте `Recover` — middleware,
+которое отвечает 500 и пишет в лог.
+
+Что проверяют скрытые тесты (через `httptest`):
+
+- без паники код и тело обработчика не меняются (в том числе `201`);
+- паника до записи ответа — `500`, тело `internal error`, одна запись в
+  логе со значением паники, методом и путём;
+- паника после `Write` — тело не дописывается, код остаётся `200`, но
+  запись в логе есть;
+- паника после `WriteHeader(202)` — тело `500` тоже не пишется;
+- `panic(http.ErrAbortHandler)` — не логируется и летит дальше.
+
+<Reveal>
+
+```go
+func Recover(logf func(msg string), next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tw := &trackingWriter{ResponseWriter: w}
+		defer func() {
+			rec := recover()
+			if rec == nil {
+				return
+			}
+			if rec == http.ErrAbortHandler {
+				panic(rec)
+			}
+			logf(fmt.Sprintf("паника в %s %s: %v", r.Method, r.URL.Path, rec))
+			if !tw.started {
+				http.Error(tw, "internal error", http.StatusInternalServerError)
+			}
+		}()
+		next.ServeHTTP(tw, r)
+	})
+}
+
+type trackingWriter struct {
+	http.ResponseWriter
+	started bool
+}
+
+func (w *trackingWriter) WriteHeader(code int) {
+	w.started = true
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *trackingWriter) Write(b []byte) (int, error) {
+	w.started = true
+	return w.ResponseWriter.Write(b)
+}
+```
+
+**Нельзя отвечать 500 поверх начатого ответа.** Заголовки уходят клиенту
+при первом `WriteHeader` или `Write`. Второй `WriteHeader` сервер
+проигнорирует с предупреждением `superfluous response.WriteHeader`, а
+`http.Error` допишет «internal error» в конец JSON — клиент получит битый
+документ с кодом 200. Поэтому нужна обёртка над `ResponseWriter`,
+которая помнит, начат ли ответ.
+
+**`http.ErrAbortHandler` — не авария.** Это документированный способ
+оборвать ответ без записи в лог сервера (так делает, например,
+`httputil.ReverseProxy`, когда бэкенд оборвал соединение). Middleware
+обязано пропустить его дальше тем же значением.
+
+**`recover` — в той же горутине.** Если обработчик сам запустил горутину и
+она запаниковала, middleware её не спасёт — процесс упадёт. Это частый
+вопрос на собеседовании.
+
+**Обёртка ломает интерфейсы.** `trackingWriter` больше не реализует
+`http.Flusher` и `http.Hijacker` исходного writer'а: стриминг и
+WebSocket через такое middleware перестанут работать. В проде добавляют
+метод `Unwrap() http.ResponseWriter` — его понимает
+`http.ResponseController` — или реализуют нужные интерфейсы явно.
+
+**Что спросят следом.** Как добавить стек (`debug.Stack`) и request id в
+лог, как посчитать паники метрикой и почему после паники с частичным
+ответом лучше всё-таки оборвать соединение (`panic(http.ErrAbortHandler)`),
+чтобы клиент не принял обрезанный ответ за полный.
+
+</Reveal>

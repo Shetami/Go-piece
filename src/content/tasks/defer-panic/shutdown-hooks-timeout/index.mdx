@@ -1,0 +1,93 @@
+---
+title: Хуки остановки с таймаутом на каждый
+description: Graceful shutdown — хуки выполняются в обратном порядке, у каждого свой таймаут, зависший хук не держит остальных, паника хука становится ошибкой, отмена общего context прерывает остановку.
+kind: implement
+topic: defer-panic
+level: hard
+order: 250
+related: [graceful-shutdown, context-cancellation, goroutine]
+lecture: production/go-service
+---
+
+По `SIGTERM` сервис должен закрыть HTTP-сервер, сбросить метрики и
+очередь, закрыть базу — именно в таком порядке, обратном запуску. У
+Kubernetes на всё есть `terminationGracePeriodSeconds`, и один зависший
+хук не должен съесть время остальных. Реализуйте `Shutdown`.
+
+Что проверяют скрытые тесты:
+
+- хуки выполняются в обратном порядке, повторный `Run` ничего не делает;
+- хук, который **игнорирует контекст** и висит, не блокирует `Run`: через
+  `perHook` его ошибка — `context.DeadlineExceeded` с именем хука, а
+  следующие хуки выполняются;
+- хук получает контекст с дедлайном;
+- паника хука — ошибка с именем и текстом паники, процесс не падает,
+  остальные выполняются; обычные ошибки тоже собираются;
+- отмена общего `ctx` посреди остановки — следующие хуки не запускаются,
+  в ошибке `context.Canceled`.
+
+<Reveal>
+
+```go
+func (s *Shutdown) Run(ctx context.Context, perHook time.Duration) error {
+	hooks := s.hooks
+	s.hooks = nil
+	var errs []error
+	for i := len(hooks) - 1; i >= 0; i-- {
+		if err := ctx.Err(); err != nil {
+			errs = append(errs, fmt.Errorf("остановка прервана: %w", err))
+			break
+		}
+		if err := runHook(ctx, hooks[i].fn, perHook); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", hooks[i].name, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func runHook(ctx context.Context, fn func(context.Context) error, d time.Duration) error {
+	hctx, cancel := context.WithTimeout(ctx, d)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				done <- fmt.Errorf("паника: %v", r)
+			}
+		}()
+		done <- fn(hctx)
+	}()
+
+	select {
+	case err := <-done:
+		return err
+	case <-hctx.Done():
+		return hctx.Err()
+	}
+}
+```
+
+**Контекст с таймаутом сам по себе хук не остановит.** Отмена в Go
+кооперативная: если хук не читает `ctx.Done()`, он будет висеть сколько
+угодно. Единственный способ «перестать ждать» — запустить хук в горутине и
+делать `select` между её результатом и `hctx.Done()`.
+
+**Паника в этой горутине — смерть процесса.** `recover` в `Run` её не
+увидит: паника раскручивает только свою горутину. Поэтому `defer` с
+`recover` стоит внутри `go func()`.
+
+**Буфер канала — против утечки.** Зависший хук когда-нибудь может
+вернуться. С небуферизованным каналом его горутина навсегда повиснет на
+отправке — читать уже некому. С буфером 1 она запишет и завершится. Сам
+зависший хук, конечно, продолжает работать — остановить чужой код в Go
+нельзя.
+
+**`defer cancel()`** освобождает таймер контекста сразу после хука, а
+не через `perHook`, — иначе `go vet` справедливо ругается на утечку.
+
+**Что спросят следом.** Общий бюджет на всю остановку вместо таймаута на
+хук, параллельная остановка независимых подсистем и почему хук HTTP-сервера
+должен вызывать `srv.Shutdown(ctx)`, а не `srv.Close()`.
+
+</Reveal>

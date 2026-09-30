@@ -1,0 +1,94 @@
+---
+title: Очередь, которая умеет отказать
+description: Ограниченная generic-очередь на канале — TryPush с ErrFull вместо ожидания, PushWait и Pop с контекстом. Сброс нагрузки, select default и приоритет готового элемента.
+kind: implement
+topic: channels
+level: medium
+order: 170
+related: [chan-buffer, load-shedding, backpressure]
+lecture: system-design/load
+---
+
+Напишите `Queue[T]`. Это входная очередь сервиса: когда она полна, новый
+запрос лучше сразу отклонить (`503`, `429`), чем копить и отвечать через
+минуту, когда клиент уже ушёл. А тому, кто может подождать, — дать
+подождать, но с дедлайном.
+
+Что проверяют скрытые тесты:
+
+- ёмкость 2: третий `TryPush` — `ErrFull` (через `errors.Is`), `Len` — 2,
+  после `Pop` место появляется, порядок — FIFO;
+- `Pop` из пустой очереди ждёт элемента, а по дедлайну возвращает нулевое
+  значение и `context.DeadlineExceeded`;
+- элемент уже лежит, а контекст отменён — `Pop` отдаёт элемент, сто раз
+  из ста;
+- `PushWait` в полную очередь ждёт места или дедлайна;
+- восемь горутин наперегонки пишут по сто элементов в очередь на 50 —
+  принято ровно 50.
+
+<Reveal>
+
+```go
+type Queue[T any] struct{ ch chan T }
+
+func NewQueue[T any](capacity int) *Queue[T] {
+	return &Queue[T]{ch: make(chan T, capacity)}
+}
+
+func (q *Queue[T]) TryPush(v T) error {
+	select {
+	case q.ch <- v:
+		return nil
+	default:
+		return ErrFull
+	}
+}
+
+func (q *Queue[T]) PushWait(ctx context.Context, v T) error {
+	select {
+	case q.ch <- v:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (q *Queue[T]) Pop(ctx context.Context) (T, error) {
+	select {
+	case v := <-q.ch:
+		return v, nil
+	default:
+	}
+	select {
+	case v := <-q.ch:
+		return v, nil
+	case <-ctx.Done():
+		var zero T
+		return zero, ctx.Err()
+	}
+}
+
+func (q *Queue[T]) Len() int { return len(q.ch) }
+```
+
+**Буферизованный канал — уже готовая очередь.** FIFO, ограничение размера
+и потокобезопасность есть из коробки. Слайс с мьютексом и `sync.Cond`
+тоже работает, но ожидание с контекстом на `Cond` не делается — пришлось
+бы городить отдельную горутину.
+
+**`select` с `default` — неблокирующая отправка.** Проверка
+«`if len(q.ch) < cap(q.ch)` — отправляем» — гонка: между проверкой и
+отправкой место займёт другая горутина, и «неблокирующий» `TryPush`
+заблокируется. Последний тест ловит именно это.
+
+**Приоритет готового элемента.** Если в `Pop` готовы обе ветки, `select`
+берёт случайную: элемент остался бы в очереди, а вызывающий получил бы
+ошибку. Первый `select` с `default` задаёт порядок.
+
+**`Len` — только для метрик.** Значение устаревает в момент возврата;
+строить на нём логику «положить, если есть место» нельзя. Что спросят
+дальше: как сделать очередь с приоритетами (два канала и приоритетный
+`select`) и почему у отказа должна быть метрика — иначе сброс нагрузки
+никто не заметит.
+
+</Reveal>

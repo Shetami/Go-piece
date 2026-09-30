@@ -1,0 +1,88 @@
+---
+title: "Максимальная просадка счёта"
+description: "Нарастающий максимум, день пика через окно над окном и худшая впадина с тай-брейком. Классика риск-отчётов."
+kind: implement
+topic: sql-window
+level: hard
+order: 130
+ordered: true
+---
+
+**Просадка** в день D — насколько баланс упал от максимума, достигнутого до
+D включительно: `(peak − balance) / peak`. Максимальная просадка — самая
+глубокая из них. Посчитайте её для каждого счёта.
+
+- `max_drawdown_pct` — в процентах, `round(…, 2)`;
+- `trough_day` — день самой глубокой просадки; при равной глубине — более
+  ранний;
+- `peak_day` — день, когда баланс **впервые** достиг того пика, от которого
+  считается эта просадка;
+- если баланс ни разу не опускался ниже предыдущего пика — `0.00`, `NULL`,
+  `NULL`;
+- колонки: `account`, `max_drawdown_pct`, `peak_day`, `trough_day`;
+- порядок: по `account`.
+
+Что проверяют скрытые данные: пик, который позже повторился тем же
+значением; счёт, который только растёт (в том числе стоит на месте);
+глобальный минимум, случившийся раньше глобального максимума.
+
+<Reveal>
+
+```sql
+WITH peaks AS (
+  SELECT account, day, balance,
+         max(balance) OVER (PARTITION BY account ORDER BY day
+                            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS peak
+  FROM equity
+),
+dd AS (
+  SELECT account, day, balance, peak,
+         min(day) OVER (PARTITION BY account, peak) AS peak_day,
+         (peak - balance) / peak AS drawdown
+  FROM peaks
+),
+worst AS (
+  SELECT account, drawdown, peak_day, day AS trough_day,
+         row_number() OVER (PARTITION BY account ORDER BY drawdown DESC, day) AS rn
+  FROM dd
+)
+SELECT account,
+       round(100 * drawdown, 2) AS max_drawdown_pct,
+       CASE WHEN drawdown > 0 THEN peak_day END   AS peak_day,
+       CASE WHEN drawdown > 0 THEN trough_day END AS trough_day
+FROM worst
+WHERE rn = 1
+ORDER BY account;
+```
+
+Ответ:
+
+```
+acc1 | 30.00 | 2024-01-04 | 2024-01-09
+acc2 | 0.00 | NULL | NULL
+acc3 | 25.00 | 2024-01-01 | 2024-01-02
+```
+
+**`max - min` — не просадка.** У acc3 минимум 150 был *до* максимума 250;
+«падение с 250 до 150» никогда не происходило. Просадка всегда отсчитывается
+от пика, который был раньше, — отсюда нарастающий максимум `max(balance)
+OVER (… ROWS UNBOUNDED PRECEDING)`.
+
+**День пика — окно над окном.** Нарастающий максимум не убывает, поэтому все
+строки с одним и тем же `peak` идут подряд и относятся к одному пику. Первый
+день этой группы — `min(day) OVER (PARTITION BY account, peak)`. У acc1
+баланс 130 был 4 и 8 января; пик — 4-е: просадка 9 января отсчитывается от
+пика, установленного тогда, а 8-е его лишь повторило.
+
+**Выбор худшей точки — `row_number` с тай-брейком по дню.** Просто
+`max(drawdown)` дал бы глубину, но потерял бы даты.
+
+**Отсутствие просадки.** У acc2 все `drawdown` равны 0; `row_number` всё
+равно выберет строку, и `CASE WHEN drawdown > 0` превращает даты в `NULL`.
+День, когда баланс равен пику (60 → 60), — не просадка.
+
+**Что спросят дальше.** Длительность просадки (от пика до восстановления)
+и «время под водой» — это уже острова: строки, где `balance < peak`,
+группируются так же, как серии в задаче про заходы.
+
+</Reveal>

@@ -1,0 +1,93 @@
+---
+title: Пул буферов для сериализации
+description: sync.Pool с bytes.Buffer — Reset при выдаче, выброс разросшихся буферов по Cap, а не по Len, и результат, который не смотрит в память чужого запроса.
+kind: implement
+topic: sync
+level: medium
+order: 200
+related: [memory-retention, slice-aliasing]
+lecture: go-runtime/memory
+---
+
+Реализуйте `BufferPool` поверх `sync.Pool` и функцию сериализации
+`FormatKV`, которая берёт буфер из пула. Так делают в логгерах и
+JSON-энкодерах: буфер на каждую строку лога — лишняя нагрузка на GC.
+
+Что проверяют скрытые тесты (с детектором гонок):
+
+- `Get` всегда отдаёт пустой буфер, даже если в пул вернули грязный;
+  `Put(nil)` не паникует;
+- буфер вырос до мегабайта, его сбросили `Reset` и вернули — такой в пул
+  попадать не должен;
+- формат `FormatKV`: порядок ключей, отрицательные числа, пустая мапа;
+- результат первого вызова `FormatKV` не меняется после двадцати
+  следующих.
+
+<Reveal>
+
+```go
+type BufferPool struct {
+	pool   sync.Pool
+	maxCap int
+}
+
+func NewBufferPool(maxCap int) *BufferPool {
+	p := &BufferPool{maxCap: maxCap}
+	p.pool.New = func() any { return new(bytes.Buffer) }
+	return p
+}
+
+func (p *BufferPool) Get() *bytes.Buffer {
+	b := p.pool.Get().(*bytes.Buffer)
+	b.Reset()
+	return b
+}
+
+func (p *BufferPool) Put(b *bytes.Buffer) {
+	if b == nil || b.Cap() > p.maxCap {
+		return
+	}
+	p.pool.Put(b)
+}
+
+func (p *BufferPool) FormatKV(m map[string]int) []byte {
+	b := p.Get()
+	defer p.Put(b)
+	for i, k := range slices.Sorted(maps.Keys(m)) {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(k)
+		b.WriteByte('=')
+		b.Write(strconv.AppendInt(b.AvailableBuffer(), int64(m[k]), 10))
+	}
+	b.WriteByte('\n')
+	return bytes.Clone(b.Bytes())
+}
+```
+
+**Ловушка первая — вернуть `b.Bytes()`.** Это слайс, смотрящий в
+внутренний массив буфера. После `Put` буфер достанется следующему вызову,
+тот сделает `Reset` и запишет своё поверх — и результат первого вызова
+тихо превратится в чужие данные. Последний тест ловит именно это. Либо
+копия (`bytes.Clone`, `b.String()`), либо писать сразу в `io.Writer` и
+возвращать буфер после записи.
+
+**Ловушка вторая — проверять `Len`, а не `Cap`.** После `Reset` длина
+ноль, а массив на мегабайт остаётся. Один большой ответ — и пул вечно
+держит мегабайтные буферы, отдавая их под строки в 50 байт. В `fmt` так
+и сделано: буфер больше 64 КБ в пул не возвращается (golang/go#23199).
+
+**Указатель в пуле.** `sync.Pool` хранит `any`; положить туда
+`bytes.Buffer` по значению — значит упаковать его в интерфейс с
+аллокацией на каждый `Put`, то есть потерять весь смысл. `staticcheck`
+ругается на это (SA6002).
+
+**Пул — не кэш.** Содержимое `sync.Pool` может исчезнуть на любой сборке
+мусора (с Go 1.13 объекты переживают одну сборку в «victim»-кэше).
+Поэтому в пул кладут только то, что не жалко потерять, и `Get` всегда
+готов получить свежий объект от `New`. Под детектором гонок пул ещё и
+намеренно выбрасывает часть `Put`, чтобы код не полагался на
+переиспользование.
+
+</Reveal>

@@ -1,0 +1,106 @@
+---
+title: Окно неподтверждённых сообщений
+description: Не больше size сообщений «в полёте» — семафор на буферизованном канале плюс мапа id под мьютексом. Повторный ack, неизвестный id и дубль, которые ломают наивное окно.
+kind: implement
+topic: channels
+level: medium
+order: 180
+related: [backpressure, semaphore, mutex]
+lecture: concurrency/coordination
+---
+
+Напишите `Window`. Так устроен поток с обратным давлением: продюсер в
+брокер, отправка по вебсокету, репликация. Отправитель занимает место в
+окне, получатель подтверждает (`ack`) — место освобождается. Медленный
+получатель притормаживает отправителя, и в памяти не копятся тысячи
+неподтверждённых сообщений.
+
+Подтверждения в реальных системах приходят как попало: дважды, с опозданием,
+на то, чего не отправляли. Окно не должно от этого разъезжаться.
+
+Что проверяют скрытые тесты:
+
+- окно на 2: третий `Acquire` ждёт — и по дедлайну возвращает
+  `DeadlineExceeded`, а после `Ack` проходит;
+- повторный `Ack` и `Ack` неизвестного id — `ErrUnknownID`, сразу, не
+  блокируясь, и окно после них не становится шире;
+- `Acquire` с id, который уже в окне, — `ErrDuplicate`, занятое место не
+  теряется;
+- двадцать горутин гоняют `Acquire`/`Ack` — в полёте никогда не больше
+  `size`, в конце окно пусто.
+
+<Reveal>
+
+```go
+type Window struct {
+	slots   chan struct{}
+	mu      sync.Mutex
+	pending map[string]struct{}
+}
+
+func NewWindow(size int) *Window {
+	return &Window{slots: make(chan struct{}, size), pending: make(map[string]struct{})}
+}
+
+func (w *Window) Acquire(ctx context.Context, id string) error {
+	w.mu.Lock()
+	_, dup := w.pending[id]
+	w.mu.Unlock()
+	if dup {
+		return ErrDuplicate
+	}
+	select {
+	case w.slots <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if _, dup := w.pending[id]; dup {
+		<-w.slots
+		return ErrDuplicate
+	}
+	w.pending[id] = struct{}{}
+	return nil
+}
+
+func (w *Window) Ack(id string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if _, ok := w.pending[id]; !ok {
+		return ErrUnknownID
+	}
+	delete(w.pending, id)
+	<-w.slots
+	return nil
+}
+
+func (w *Window) InFlight() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	ids := slices.Collect(maps.Keys(w.pending))
+	slices.Sort(ids)
+	return ids
+}
+```
+
+**Канал считает места, мапа помнит, какие именно.** Одного семафора мало:
+`Ack` без проверки id освобождал бы слот на каждый повторный ack, и окно
+тихо расширялось бы. А на пустом окне `<-w.slots` вообще заблокировался бы
+навсегда — ack-и обычно обрабатывает одна горутина, и встал бы весь поток.
+
+**Ждать места — без мьютекса.** Если `Acquire` держит `mu`, пока ждёт в
+`select`, то `Ack`, который это место освобождает, не сможет взять `mu`.
+Классический дедлок «жду под замком того, кому нужен замок».
+
+**Дубль проверяется дважды.** Первая проверка — чтобы не ждать места ради
+заведомого отказа. Вторая, под замком после получения слота, — потому что
+за это время тот же id могла занять другая горутина; тогда слот нужно
+вернуть.
+
+**Что спросят дальше:** как добавить таймаут на подтверждение и
+перепосылку (время отправки в мапе и тикер, который собирает просроченные)
+и чем окно отличается от простого ограничения частоты — оно подстраивается
+под скорость получателя, а не под часы.
+
+</Reveal>

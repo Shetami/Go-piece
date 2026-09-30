@@ -1,0 +1,129 @@
+---
+title: Длительность с днями и неделями
+description: time.ParseDuration не знает «1d» и «1w», а в конфигах TTL и ретеншна их пишут постоянно. Свой разбор — с порядком единиц, «ms» против «m» и честной проверкой переполнения.
+kind: implement
+topic: strings
+level: medium
+order: 210
+---
+
+В конфиге пишут `retention: 2w`, `ttl: 1d 12h`, а стандартный
+`time.ParseDuration` на это отвечает «unknown unit "d"». Напишите свой
+`ParseDuration` по правилам из комментария.
+
+Что проверяют скрытые тесты:
+
+- сочетания единиц, пробелы между компонентами и по краям, минус в начале;
+- `"250ms"` и `"1m30s500ms"` — `ms` не путается с `m`;
+- единицы только по убыванию и без повторов: `"5m1h"`, `"1h2h"` — ошибки;
+- число без единицы, пробел между числом и единицей, дробное число,
+  незнакомая единица, двойной минус — ошибки;
+- все ошибки — `errors.Is(err, ErrInvalidDuration)`, в тексте есть
+  исходная строка;
+- переполнение: и одной компоненты, и суммы нескольких, и числа, которое не
+  влезает даже в `int64`.
+
+<Reveal>
+
+```go
+var ErrInvalidDuration = errors.New("некорректная длительность")
+
+var units = []struct {
+	name string
+	d    time.Duration
+}{
+	{"w", 7 * 24 * time.Hour},
+	{"d", 24 * time.Hour},
+	{"h", time.Hour},
+	{"ms", time.Millisecond},
+	{"m", time.Minute},
+	{"s", time.Second},
+}
+
+var rank = map[string]int{"w": 0, "d": 1, "h": 2, "m": 3, "s": 4, "ms": 5}
+
+func ParseDuration(s string) (time.Duration, error) {
+	orig := s
+	bad := func(why string) (time.Duration, error) {
+		return 0, fmt.Errorf("%w %q: %s", ErrInvalidDuration, orig, why)
+	}
+	s = strings.TrimSpace(s)
+	neg := false
+	if rest, ok := strings.CutPrefix(s, "-"); ok {
+		neg, s = true, rest
+	}
+	if s == "0" {
+		return 0, nil
+	}
+	if s == "" {
+		return bad("пустая строка")
+	}
+	var total time.Duration
+	last := -1
+	for s != "" {
+		// Число.
+		i := 0
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+		}
+		if i == 0 {
+			return bad("ожидали число")
+		}
+		n, err := strconv.ParseInt(s[:i], 10, 64)
+		if err != nil {
+			return bad("слишком большое число")
+		}
+		s = s[i:]
+		// Единица: сначала длинные ("ms" раньше "m").
+		var unit time.Duration
+		var name string
+		for _, u := range units {
+			if strings.HasPrefix(s, u.name) {
+				unit, name = u.d, u.name
+				break
+			}
+		}
+		if name == "" {
+			return bad("нет единицы измерения")
+		}
+		if rank[name] <= last {
+			return bad("единицы должны идти от крупной к мелкой без повторов")
+		}
+		last = rank[name]
+		s = strings.TrimLeft(s[len(name):], " ")
+		// Переполнение проверяем до умножения и до сложения.
+		if n > (math.MaxInt64-int64(total))/int64(unit) {
+			return bad("переполнение")
+		}
+		total += time.Duration(n) * unit
+	}
+	if neg {
+		total = -total
+	}
+	return total, nil
+}
+```
+
+**Единицу ищем от длинной к короткой.** В таблице `ms` стоит раньше `m`.
+Если проверять в другом порядке, `"250ms"` разберётся как «250 минут» и
+хвост `s` без числа — ошибка, а `"1m30s500ms"` и вовсе упадёт на порядке
+единиц. Это та же проблема, что у любого лексера: longest match.
+
+**Порядок единиц — через ранг, а не через таблицу поиска.** Таблица
+отсортирована «удобно для поиска» (`ms` до `m`), а порядок во времени
+другой (`m` до `ms`). Смешивать эти два порядка в одном слайсе — источник
+тонкой ошибки: `"1m500ms"` отвергался бы. Отдельная мапа `rank` делает
+обе вещи явными.
+
+**Переполнение проверяем до операции.** `time.Duration(n) * unit` при
+переполнении молча заворачивается в отрицательное число — `"15251w"`
+превратится в «минус сколько-то лет», и кэш с таким TTL протухнет сразу.
+Условие `n > (MaxInt64 - total) / unit` ловит и переполнение умножения, и
+переполнение суммы (`"15250w2d"`: каждая часть влезает, вместе — нет).
+Слишком длинное число отсекает сам `strconv.ParseInt`.
+
+**Ошибка оборачивает sentinel и называет вход.** `fmt.Errorf("%w %q: …")`
+даёт и `errors.Is` для кода, и понятный текст для человека, который
+читает лог запуска сервиса: какая именно строка конфига кривая.
+
+</Reveal>

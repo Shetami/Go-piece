@@ -1,0 +1,104 @@
+---
+title: Кэш с загрузкой без stampede
+description: Кэш с TTL, который при промахе грузит значение один раз на ключ, не кэширует ошибки, уважает контекст каждого вызывающего и не даёт отмене одного сорвать загрузку для всех.
+kind: implement
+topic: sync
+level: hard
+order: 260
+related: [cache-stampede, singleflight, cache-aside, context-cancellation]
+lecture: system-design/caching
+---
+
+Реализуйте `Cache` — read-through кэш поверх медленного источника
+(база, соседний сервис). Это соседняя задача про singleflight, доведённая
+до прода: плюс время жизни записей, плюс контекст у каждого вызывающего.
+Контракт — в doc-комментарии к типу; время берите только из `now`.
+
+Что проверяют скрытые тесты (с детектором гонок):
+
+- двадцать одновременных промахов по одному ключу — один вызов `load`;
+  запись живёт ровно `ttl`, потом перезагружается;
+- ошибка `load` не кэшируется;
+- пока грузится медленный ключ, другой ключ отвечает сразу;
+- двое ждут одну загрузку, у первого (того, кто её начал) отменяют
+  контекст: он сразу получает `context.Canceled`, а второй — значение.
+
+<Reveal>
+
+```go
+type Cache[K comparable, V any] struct {
+	ttl  time.Duration
+	now  func() time.Time
+	load func(ctx context.Context, key K) (V, error)
+
+	mu       sync.Mutex
+	entries  map[K]entry[V]
+	inflight map[K]*call[V]
+}
+
+func (c *Cache[K, V]) Get(ctx context.Context, key K) (V, error) {
+	c.mu.Lock()
+	if e, ok := c.entries[key]; ok && c.now().Before(e.expires) {
+		c.mu.Unlock()
+		return e.val, nil
+	}
+	cl, ok := c.inflight[key]
+	if !ok {
+		cl = &call[V]{done: make(chan struct{})}
+		c.inflight[key] = cl
+		go c.fill(context.WithoutCancel(ctx), key, cl)
+	}
+	c.mu.Unlock()
+
+	select {
+	case <-cl.done:
+		return cl.val, cl.err
+	case <-ctx.Done():
+		var zero V
+		return zero, ctx.Err()
+	}
+}
+
+func (c *Cache[K, V]) fill(ctx context.Context, key K, cl *call[V]) {
+	cl.val, cl.err = c.load(ctx, key)
+	c.mu.Lock()
+	if cl.err == nil {
+		c.entries[key] = entry[V]{val: cl.val, expires: c.now().Add(c.ttl)}
+	}
+	delete(c.inflight, key)
+	c.mu.Unlock()
+	close(cl.done)
+}
+```
+
+**Загрузка отвязана от вызывающего.** Если грузить прямо в горутине
+первого `Get` и с его `ctx`, то его отмена (клиент закрыл вкладку)
+сорвёт загрузку для всех, кто успел встать в очередь, — они получат
+чужую ошибку `context.Canceled`. Поэтому загрузка идёт в отдельной
+горутине с `context.WithoutCancel(ctx)` (Go 1.21): значения контекста
+(trace id) сохраняются, отмена — нет. А каждый вызывающий ждёт через
+`select` и уходит по своему `ctx`, не мешая остальным.
+
+**Канал `done` вместо `WaitGroup`.** `wg.Wait()` нельзя прервать, а
+закрытый канал участвует в `select` рядом с `ctx.Done()`. Закрытие канала
+будит всех ждущих сразу и даёт happens-before: `val` и `err`, записанные
+до `close`, видны после `<-done` без мьютекса.
+
+**Порядок в `fill` важен.** Сначала положить запись в кэш и убрать
+загрузку из `inflight`, и только потом закрыть `done`. В обратном порядке
+между `close` и записью в кэш новый `Get` найдёт пустой кэш и пустой
+`inflight` — и запустит вторую загрузку.
+
+**Ошибки не кэшируем — но это решение, а не догма.** Если база лежит,
+каждый запрос будет снова бить в неё (одним `load` на ключ, но всё же).
+В проде кэшируют и отрицательный ответ на короткое время (negative
+caching) или отдают протухшее значение, пока идёт фоновое обновление
+(stale-while-revalidate).
+
+**Что спросят дальше.** Мапа `entries` растёт без предела — нужен LRU или
+чистка истёкших. Все ключи истекают одновременно, если их загрузили при
+старте, — к `ttl` добавляют случайный разброс (jitter). И горутина `fill`
+живёт, пока `load` не вернётся, — поэтому у самого `load` должен быть
+таймаут.
+
+</Reveal>

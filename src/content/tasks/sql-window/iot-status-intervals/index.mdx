@@ -1,0 +1,94 @@
+---
+title: "Интервалы онлайн/офлайн устройства"
+description: "Острова одинаковых статусов через флаг смены и нарастающую сумму, конец интервала — LEAD по островам. Повторы статуса и открытый последний интервал."
+kind: implement
+topic: sql-window
+level: hard
+order: 140
+ordered: true
+---
+
+Устройства шлют статус `online`/`offline` при изменении, а иногда повторно —
+тот же статус, что и раньше, в том числе дважды в одну и ту же секунду.
+Постройте интервалы: сколько устройство было в каждом состоянии.
+
+- подряд идущие записи с одинаковым статусом — **один интервал**; он
+  начинается с первой из них;
+- интервал заканчивается в момент начала следующего интервала этого
+  устройства; последний интервал — в момент отчёта `2024-07-01 12:00`;
+- колонки: `device`, `status`, `started_at`, `ended_at` (обе в формате
+  `'HH24:MI'`), `minutes` (целое);
+- порядок: по `device`, затем по началу интервала.
+
+Что проверяют скрытые данные: повторный статус внутри интервала; две
+одинаковые строки с одним `ts`; устройство, у которого за всё время один
+статус; единственная запись у устройства.
+
+<Reveal>
+
+```sql
+WITH flagged AS (
+  SELECT device, ts, status,
+         CASE WHEN status IS DISTINCT FROM lag(status) OVER w THEN 1 ELSE 0 END AS is_start
+  FROM device_status
+  WINDOW w AS (PARTITION BY device ORDER BY ts)
+),
+grouped AS (
+  SELECT device, ts, status,
+         sum(is_start) OVER (PARTITION BY device ORDER BY ts
+                             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS grp
+  FROM flagged
+),
+intervals AS (
+  SELECT device, status, min(ts) AS started_at
+  FROM grouped
+  GROUP BY device, grp, status
+),
+bounded AS (
+  SELECT device, status, started_at,
+         coalesce(lead(started_at) OVER (PARTITION BY device ORDER BY started_at),
+                  TIMESTAMP '2024-07-01 12:00') AS ended_at
+  FROM intervals
+)
+SELECT device, status,
+       to_char(started_at, 'HH24:MI') AS started_at,
+       to_char(ended_at,   'HH24:MI') AS ended_at,
+       (extract(epoch FROM ended_at - started_at) / 60)::int AS minutes
+FROM bounded
+ORDER BY device, bounded.started_at;
+```
+
+Ответ:
+
+```
+dev1 | online | 10:00 | 10:20 | 20
+dev1 | offline | 10:20 | 10:45 | 25
+dev1 | online | 10:45 | 11:30 | 45
+dev1 | offline | 11:30 | 12:00 | 30
+dev2 | offline | 09:00 | 12:00 | 180
+dev3 | online | 11:50 | 12:00 | 10
+```
+
+**`lead(ts)` по сырым строкам даёт не интервалы, а отрезки между
+сообщениями.** У dev1 было бы семь строк вместо четырёх, а повтор 10:20 дал
+бы интервал длиной 0.
+
+**Острова: флаг начала + нарастающая сумма.** Строка открывает новый остров,
+если её статус отличается от предыдущего (`IS DISTINCT FROM lag(status)` —
+для первой строки `lag` даёт `NULL`, и сравнение через `IS DISTINCT FROM`
+вернёт истину). `sum(is_start)` с рамкой `ROWS` нумерует острова.
+
+**Конец интервала — `lead` уже по островам.** Интервалы устройства не
+пересекаются и идут встык, поэтому конец одного — начало следующего. Для
+последнего `lead` даёт `NULL`, и `coalesce` подставляет момент отчёта.
+
+**Дубли в одну секунду безвредны**, потому что у них одинаковый статус:
+в каком бы порядке они ни стояли, флаг смены сработает на первом. Если бы
+в одну секунду пришли *разные* статусы, понадобился бы тай-брейк — например,
+порядковый номер сообщения.
+
+**Что спросят дальше.** Суммарный аптайм за сутки (сумма `minutes` по
+`online`), SLA в процентах и как обрезать интервалы по границам суток — через
+`greatest/least` с началом и концом дня.
+
+</Reveal>

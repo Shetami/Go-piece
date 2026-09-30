@@ -1,0 +1,121 @@
+---
+title: Таблица в терминал с кириллицей и числами
+description: CLI-утилита печатает отчёт колонками в io.Writer. Ширина в символах, числа по правому краю, рваные строки, хвостовые пробелы и ошибка записи.
+kind: implement
+topic: strings
+level: medium
+order: 240
+---
+
+Утилита печатает отчёт в терминал: колонки выровнены, цены — по правому
+краю, как в `kubectl get` или `docker ps`. Напишите `WriteTable` по правилам
+из комментария.
+
+Что проверяют скрытые тесты:
+
+- русские и английские ячейки в одной колонке — ширина в символах;
+- числа в данных — вправо, заголовок — всегда влево; `"v1.2"`, `"1."`,
+  `".5"`, `"1e3"` — не числа;
+- строки разной длины: колонок столько, сколько в самой длинной строке;
+- хвостовых пробелов нет ни в одной строке, в том числе там, где пустые
+  ячейки в конце;
+- пустая таблица — пустой вывод;
+- ошибка писателя возвращается, а не теряется.
+
+<Reveal>
+
+```go
+func WriteTable(w io.Writer, rows [][]string) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	ncol := 0
+	for _, r := range rows {
+		ncol = max(ncol, len(r))
+	}
+	widths := make([]int, ncol)
+	for _, r := range rows {
+		for i, c := range r {
+			widths[i] = max(widths[i], utf8.RuneCountInString(c)) // символы, не байты
+		}
+	}
+	var b strings.Builder
+	line := func(cells []string, header bool) {
+		var l strings.Builder
+		for i := range ncol {
+			if i > 0 {
+				l.WriteString("  ")
+			}
+			c := ""
+			if i < len(cells) {
+				c = cells[i] // короткая строка — недостающие ячейки пустые
+			}
+			pad := strings.Repeat(" ", widths[i]-utf8.RuneCountInString(c))
+			if !header && isNumber(c) {
+				l.WriteString(pad + c)
+			} else {
+				l.WriteString(c + pad)
+			}
+		}
+		// Последняя колонка или пустые ячейки в конце дают хвостовые пробелы.
+		b.WriteString(strings.TrimRight(l.String(), " "))
+		b.WriteByte('\n')
+	}
+	line(rows[0], true)
+	dashes := make([]string, ncol)
+	for i, wd := range widths {
+		dashes[i] = strings.Repeat("-", wd)
+	}
+	b.WriteString(strings.Join(dashes, "  ") + "\n")
+	for _, r := range rows[1:] {
+		line(r, false)
+	}
+	// Одна запись вместо десятков мелких; ошибку писателя отдаём наверх.
+	_, err := io.WriteString(w, b.String())
+	return err
+}
+
+func isNumber(s string) bool {
+	s = strings.TrimPrefix(s, "-")
+	intPart, frac, hasDot := strings.Cut(s, ".")
+	digits := func(x string) bool {
+		if x == "" {
+			return false
+		}
+		for i := 0; i < len(x); i++ {
+			if x[i] < '0' || x[i] > '9' {
+				return false
+			}
+		}
+		return true
+	}
+	return digits(intPart) && (!hasDot || digits(frac))
+}
+```
+
+**Ширина — в рунах, два прохода.** Сначала считаем ширину каждой колонки
+по всем строкам, потом печатаем. `len(c)` для «Москва» даст 12, и
+русские колонки разъедутся. `fmt.Sprintf("%-*s", w, c)` ширину считает
+в рунах, но выбирать сторону выравнивания по содержимому и срезать хвосты
+всё равно придётся самим.
+(Строго говоря, и руны — приближение: иероглифы и эмодзи занимают две
+клетки терминала, для них нужна таблица East Asian Width.)
+
+**Хвостовые пробелы режем у готовой строки.** Выравнивание дописывает
+пробелы к последней колонке и к пустым ячейкам. Проверять «последняя ли
+это непустая ячейка» по ходу — много условий; `strings.TrimRight` в конце
+строки проще и надёжнее. Хвостовые пробелы ломают golden-тесты и
+раздражают в диффах.
+
+**Число — по своему правилу, а не по `strconv.ParseFloat`.** `ParseFloat`
+охотно принимает `"1e3"`, `"Inf"`, `"NaN"` и `"0x1p-2"`. Для выравнивания
+нужно «похоже на число в отчёте», и это правило лучше написать явно.
+
+**Собираем в `strings.Builder`, пишем в `io.Writer` одним вызовом.**
+Функция работает с любым приёмником: `os.Stdout`, файлом, буфером в
+тесте, HTTP-ответом. Ошибку записи возвращаем — при записи в закрытый
+pipe или полный диск её молчаливая потеря означает обрезанный отчёт без
+единого сообщения. Для огромных таблиц пишут построчно через
+`bufio.Writer` — и тогда ошибку проверяют на `Flush`.
+
+</Reveal>

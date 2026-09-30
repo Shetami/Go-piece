@@ -1,0 +1,132 @@
+---
+title: Семафор с весами и честной очередью
+description: Acquire(ctx, n) и Release(n) как в x/sync/semaphore. Большой запрос не должен голодать за мелкими, отмена не должна терять единицы, а ушедшая голова очереди — будить следующих.
+kind: implement
+topic: concurrency
+level: hard
+order: 240
+related: [semaphore, context-cancellation, mutex, chan-close]
+lecture: concurrency/worker-pools
+---
+
+Буферизованный канал — семафор, где каждый берёт одну единицу. А если
+задачи разного веса? Экспорт отчёта съедает 8 ГБ памяти из 10, превью —
+1 ГБ. Нужен семафор с весами. Реализуйте `Weighted` по контракту из
+заготовки.
+
+Что проверяют скрытые тесты:
+
+- базовая арифметика, `TryAcquire`, запрос больше размера и лишний
+  `Release`;
+- честность: мелкий запрос не обгоняет большой, который ждёт раньше, —
+  ни через `Acquire`, ни через `TryAcquire`;
+- голова очереди уходит по отмене — тот, кто стоял за ней и кому хватает
+  свободных единиц, должен проснуться сразу;
+- шестьдесят горутин с разными весами и таймаутами: лимит никогда не
+  превышен, и после всех `Release` семафор полностью свободен.
+
+<Reveal>
+
+```go
+type Weighted struct {
+	size    int64
+	mu      sync.Mutex
+	cur     int64
+	waiters list.List
+}
+
+type waiter struct {
+	n     int64
+	ready chan struct{}
+}
+
+func (s *Weighted) Acquire(ctx context.Context, n int64) error {
+	if n > s.size {
+		return ErrTooLarge
+	}
+	s.mu.Lock()
+	if s.size-s.cur >= n && s.waiters.Len() == 0 {
+		s.cur += n
+		s.mu.Unlock()
+		return nil
+	}
+	w := &waiter{n: n, ready: make(chan struct{})}
+	elem := s.waiters.PushBack(w)
+	s.mu.Unlock()
+
+	select {
+	case <-w.ready:
+		return nil
+	case <-ctx.Done():
+		s.mu.Lock()
+		select {
+		case <-w.ready:
+			s.mu.Unlock()
+			return nil
+		default:
+		}
+		isFront := s.waiters.Front() == elem
+		s.waiters.Remove(elem)
+		if isFront {
+			s.notify()
+		}
+		s.mu.Unlock()
+		return ctx.Err()
+	}
+}
+
+func (s *Weighted) Release(n int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cur -= n
+	if s.cur < 0 {
+		panic("semaphore: released more than held")
+	}
+	s.notify()
+}
+
+func (s *Weighted) notify() {
+	for {
+		front := s.waiters.Front()
+		if front == nil {
+			return
+		}
+		w := front.Value.(*waiter)
+		if s.size-s.cur < w.n {
+			return
+		}
+		s.cur += w.n
+		s.waiters.Remove(front)
+		close(w.ready)
+	}
+}
+```
+
+**Очередь ожидающих — явная, и у каждого свой канал.** `sync.Cond` с
+`Broadcast` будит всех, и кто успел, тот и взял — при потоке мелких
+запросов большой не дождётся никогда. Здесь `Release` проходит по очереди с
+головы и выдаёт единицы по порядку. На первом, кому не хватает, он
+**останавливается**, даже если дальше стоят те, кому хватило бы. Это и
+есть защита от голодания.
+
+**Быстрый путь тоже проверяет очередь.** `Acquire` и `TryAcquire` без
+ожидания проходят, только если очередь пуста. Иначе новичок проскочит
+мимо тех, кто честно ждёт.
+
+**Гонка «выдали и отменили одновременно».** `Release` может закрыть
+`w.ready` в тот же момент, когда сработал `ctx.Done()`. Если просто вернуть
+`ctx.Err()`, выданные единицы пропадут навсегда: вызывающий их не
+освободит, он же «не получил». Поэтому под мьютексом ещё раз проверяем
+`ready`, и если единицы уже наши, возвращаем успех.
+
+**Ушедшая голова очереди должна разбудить следующих.** Большой запрос
+сдерживал очередь. Он ушёл, свободных единиц не прибавилось, но
+следующему в очереди их может уже хватать. Без `notify()` при отмене тот
+будет ждать до чьего-нибудь `Release`, а его может и не случиться.
+
+**Что спросят дальше.** Когда вес лучше, чем пул фиксированного размера
+(память, соединения к разным базам). Почему `Acquire(n > size)` в
+настоящей библиотеке ждёт `ctx.Done()`, а не падает сразу. И как этот же
+механизм делают через `errgroup.SetLimit`, который по сути семафор с весом 1.
+
+</Reveal>

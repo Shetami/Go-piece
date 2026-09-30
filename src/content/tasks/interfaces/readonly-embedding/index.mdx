@@ -1,0 +1,129 @@
+---
+title: Обёртки хранилища через встраивание
+description: ReadOnly и Prefixed поверх интерфейса Store. Встраивание интерфейса продвигает все методы — в том числе те, которые вы забыли переопределить. Композиция обёрток и чужая мапа в аргументе.
+kind: implement
+topic: interfaces
+level: medium
+order: 280
+---
+
+`MapStore` уже готов. Нужны две обёртки, которые сами реализуют `Store`:
+
+- `ReadOnly(s)` — вид только для чтения, например для плагинов;
+- `Prefixed(s, prefix)` — пространство имён внутри общего хранилища: каждый
+  модуль видит только свои ключи.
+
+Удобный приём — встроить `Store` в структуру и переопределить нужные методы:
+остальные достанутся «бесплатно». Именно в этом «бесплатно» и ловушка.
+
+Что проверяют скрытые тесты:
+
+- через `ReadOnly` ничего не меняется — ни `Set`, ни `Delete`, ни
+  **`SetMany`**; при этом новые ключи хранилища сразу видны;
+- `Prefixed` пишет с префиксом, `Keys` возвращает только свои ключи и без
+  префикса, `Get` не видит чужие;
+- `SetMany` не меняет мапу, которую передал вызывающий;
+- `Prefixed(Prefixed(s, "a/"), "b/")` пишет в `a/b/…`, а `ReadOnly` поверх
+  такой пары по-прежнему ничего не пропускает.
+
+<Reveal>
+
+```go
+var ErrReadOnly = errors.New("store is read-only")
+
+type Store interface {
+	Get(key string) (string, bool)
+	Set(key, val string) error
+	SetMany(kv map[string]string) error
+	Delete(key string) error
+	Keys() []string
+}
+
+type MapStore struct{ m map[string]string }
+
+func NewMapStore() *MapStore { return &MapStore{m: map[string]string{}} }
+
+func (s *MapStore) Get(k string) (string, bool) { v, ok := s.m[k]; return v, ok }
+func (s *MapStore) Set(k, v string) error       { s.m[k] = v; return nil }
+func (s *MapStore) Delete(k string) error       { delete(s.m, k); return nil }
+func (s *MapStore) SetMany(kv map[string]string) error {
+	for k, v := range kv {
+		s.Set(k, v)
+	}
+	return nil
+}
+func (s *MapStore) Keys() []string {
+	keys := make([]string, 0, len(s.m))
+	for k := range s.m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+type readOnly struct{ Store }
+
+func (readOnly) Set(string, string) error         { return ErrReadOnly }
+func (readOnly) SetMany(map[string]string) error { return ErrReadOnly }
+func (readOnly) Delete(string) error             { return ErrReadOnly }
+
+func ReadOnly(s Store) Store { return readOnly{s} }
+
+type prefixed struct {
+	s      Store
+	prefix string
+}
+
+func (p prefixed) Get(k string) (string, bool) { return p.s.Get(p.prefix + k) }
+func (p prefixed) Set(k, v string) error       { return p.s.Set(p.prefix+k, v) }
+func (p prefixed) Delete(k string) error       { return p.s.Delete(p.prefix + k) }
+
+func (p prefixed) SetMany(kv map[string]string) error {
+	pk := make(map[string]string, len(kv))
+	for k, v := range kv {
+		pk[p.prefix+k] = v
+	}
+	return p.s.SetMany(pk)
+}
+
+func (p prefixed) Keys() []string {
+	var out []string
+	for _, k := range p.s.Keys() {
+		if rest, ok := strings.CutPrefix(k, p.prefix); ok {
+			out = append(out, rest)
+		}
+	}
+	return out
+}
+
+func Prefixed(s Store, prefix string) Store { return prefixed{s, prefix} }
+```
+
+**Встраивание продвигает всё.** `struct{ Store }` получает весь набор
+методов `Store`. Если переопределить `Set` и `Delete`, но забыть `SetMany`,
+вызов `ro.SetMany(…)` уйдёт прямо в хранилище. Компилятор не предупредит:
+для него это корректная программа. При добавлении в интерфейс нового
+изменяющего метода — например, `Clear` — `readOnly` молча начнёт его
+пропускать. Поэтому для обёрток «запретить всё, кроме…» встраивание опасно,
+а для обёрток «изменить одно, остальное как есть» — удобно.
+
+**Переопределение не перехватывает внутренние вызовы.** `MapStore.SetMany`
+внутри вызывает `s.Set` — но это `Set` самого `MapStore`, а не обёртки. В Go
+нет виртуальных методов: встроенное значение не знает, что его обернули.
+Даже если бы `readOnly.Set` что-то логировал, при `SetMany` лог бы не
+сработал.
+
+**`Prefixed` — без встраивания.** Здесь каждый метод должен преобразовать
+ключ; забытый метод работал бы с чужим пространством имён. Явная структура
+с полем `s Store` заставляет компилятор требовать все пять методов.
+
+**Чужая мапа — только для чтения.** Переписать ключи прямо в `kv` проще, но
+вызывающий получит мапу с префиксами. Это та же ошибка, что изменять
+переданный срез: общая память не видна в сигнатуре.
+
+Что спросят дальше: как проверить при компиляции, что тип реализует
+интерфейс (`var _ Store = readOnly{}`), и как с помощью встраивания
+вернуть из обёртки опциональный интерфейс, если он есть у исходного
+хранилища.
+
+</Reveal>

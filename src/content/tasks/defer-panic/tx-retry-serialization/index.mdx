@@ -1,0 +1,96 @@
+---
+title: Транзакция с повтором при конфликте сериализации
+description: Обёртка, которая повторяет транзакцию при serialization failure, откатывает на ошибке и панике, не откатывает после Commit, собирает ошибку отката и уважает context.
+kind: implement
+topic: defer-panic
+level: hard
+order: 200
+related: [serialization-failure, transaction, retry-backoff]
+lecture: databases/transactions
+---
+
+На уровне `SERIALIZABLE` PostgreSQL иногда отвечает `40001` — конфликт,
+транзакцию надо повторить **целиком**. Реализуйте `RunInTx`: одна
+попытка — отдельная транзакция со своим откатом, повторы — только для
+конфликтов.
+
+Что проверяют скрытые тесты (по журналу вызовов `begin`/`commit`/`rollback`):
+
+- конфликт из `fn` — откат и вторая попытка;
+- конфликт на `Commit` — вторая попытка, но `Rollback` после `Commit` не
+  вызывается;
+- попытки кончились — наружу конфликт, каждая попытка откатана;
+- обычная ошибка — без повторов, а если откат тоже упал, в результате обе
+  ошибки;
+- паника в `fn` — откат, паника летит дальше с тем же значением, повторов
+  нет;
+- `ctx` отменили во время попытки — следующей нет, в ошибке и
+  `context.Canceled`, и причина попытки.
+
+<Reveal>
+
+```go
+func RunInTx(ctx context.Context, db Beginner, maxAttempts int, fn func(context.Context, Tx) error) error {
+	var lastErr error
+	for range max(maxAttempts, 1) {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(lastErr, err)
+		}
+		lastErr = attempt(ctx, db, fn)
+		if !errors.Is(lastErr, ErrSerialization) {
+			return lastErr
+		}
+	}
+	return lastErr
+}
+
+func attempt(ctx context.Context, db Beginner, fn func(context.Context, Tx) error) (err error) {
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		if rbErr := tx.Rollback(); rbErr != nil {
+			err = errors.Join(err, fmt.Errorf("rollback: %w", rbErr))
+		}
+	}()
+
+	if err := fn(ctx, tx); err != nil {
+		return err
+	}
+	committed = true
+	return tx.Commit()
+}
+```
+
+**Попытка — отдельная функция.** `defer` срабатывает при выходе из
+функции, а не из итерации цикла. Если поставить `defer tx.Rollback()`
+прямо в цикл, все откаты выполнятся в конце `RunInTx` — пачкой и уже
+после новых `Begin`.
+
+**Флаг `committed` вместо `recover`.** Отложенная функция откатывает всё,
+что не дошло до `Commit`: и ошибку, и панику. Перехватывать панику не
+нужно — после `defer` она полетит дальше сама, с исходным стеком. А раз
+её никто не перехватил, цикл повторов прерывается: повторять транзакцию
+после бага в коде бессмысленно.
+
+**Откат после `Commit` — ошибка.** `Commit`, вернувший ошибку, уже
+завершил транзакцию; `Rollback` вернёт `ErrTxDone` или, для своего
+интерфейса, сделает что-то неожиданное. Флаг ставится **до** `Commit`.
+
+**Ошибка отката — через `errors.Join`.** Она важна (соединение, скорее
+всего, мёртвое), но причина — ошибка `fn`. `Join` сохраняет обе, и
+`errors.Is(err, ErrSerialization)` по-прежнему работает — повтор не
+ломается.
+
+**Что спросят следом.** Backoff с джиттером между попытками (через
+`select` по `ctx.Done()` и таймеру) и почему `fn` обязана быть
+идемпотентной вне базы: повтор выполнит её побочные эффекты — HTTP-вызовы,
+отправку писем — ещё раз.
+
+</Reveal>

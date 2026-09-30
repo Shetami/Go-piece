@@ -1,0 +1,101 @@
+---
+title: Группа горутин, которую не роняет паника
+description: Аналог errgroup, где паника задачи становится ошибкой со стеком, все ошибки собираются в одну, а errors.As находит исходную ошибку, с которой паниковали.
+kind: implement
+topic: defer-panic
+level: hard
+order: 160
+related: [waitgroup, goroutine, errgroup]
+lecture: concurrency/coordination
+---
+
+Паника в любой горутине без `recover` роняет весь процесс — `recover` в
+`main` её не видит. Реализуйте `Group`: каждая задача запускается в своей
+горутине, её паника превращается в `*PanicError`, а `Wait` возвращает все
+ошибки сразу.
+
+Что проверяют скрытые тесты:
+
+- пустая группа — `Wait` возвращает `nil` и не зависает;
+- `Wait` возвращается только после того, как закончились **все** задачи,
+  даже медленные;
+- ошибки нескольких задач находятся через `errors.Is` в результате `Wait`;
+- паника строкой — ошибка, из которой `errors.As` достаёт `*PanicError` с
+  исходным значением, а в `Stack` видна функция, **где** случилась паника;
+- паника значением-ошибкой и паника рантайма (запись в `nil`-мапу)
+  находятся через `errors.As` как исходные типы;
+- всё это — чисто под `-race`.
+
+<Reveal>
+
+```go
+type PanicError struct {
+	Value any
+	Stack []byte
+}
+
+func (e *PanicError) Error() string { return fmt.Sprintf("паника: %v", e.Value) }
+
+func (e *PanicError) Unwrap() error {
+	err, _ := e.Value.(error)
+	return err
+}
+
+type Group struct {
+	wg   sync.WaitGroup
+	mu   sync.Mutex
+	errs []error
+}
+
+func (g *Group) Go(fn func() error) {
+	g.wg.Add(1)
+	go func() {
+		defer g.wg.Done()
+		if err := callSafe(fn); err != nil {
+			g.mu.Lock()
+			g.errs = append(g.errs, err)
+			g.mu.Unlock()
+		}
+	}()
+}
+
+func callSafe(fn func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = &PanicError{Value: r, Stack: debug.Stack()}
+		}
+	}()
+	return fn()
+}
+
+func (g *Group) Wait() error {
+	g.wg.Wait()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return errors.Join(g.errs...)
+}
+```
+
+**`recover` — в той же горутине, что и паника.** Паника раскручивает стек
+только своей горутины. Поэтому `defer`/`recover` должен стоять внутри
+функции, которую запускает `go`, а не вокруг вызова `g.Go`.
+
+**Стек снимается в отложенной функции.** Пока выполняются отложенные
+вызовы, кадры паникующей функции ещё не сняты, и `debug.Stack()` показывает
+место паники. Если сохранить только значение, а стек снимать позже — в логе
+будет `Wait`, а не виновник.
+
+**`Unwrap` отдаёт исходную ошибку.** `panic(err)` — обычное дело в коде с
+`Must`-хелперами; вызывающий должен по-прежнему уметь проверить
+`errors.As(err, &myErr)` или `runtime.Error`. Для не-ошибок `Unwrap`
+возвращает `nil`, и цепочка просто заканчивается.
+
+**`wg.Add` — до `go`.** Если сделать `Add` внутри горутины, `Wait` может
+выполниться раньше, чем горутина стартует, и вернуться с пустым списком.
+
+**Что спросят следом.** Отмена остальных задач по первой ошибке через
+`context` (как в `errgroup.WithContext`), ограничение параллелизма
+(`SetLimit`) и почему свежий `errgroup` не глотает панику, а перебрасывает
+её в `Wait`.
+
+</Reveal>

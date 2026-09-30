@@ -1,0 +1,133 @@
+---
+title: Дерево поиска с итератором по диапазону
+description: Tree[K cmp.Ordered, V] с Put, Get, Delete и двумя итераторами. Удаление узла с двумя детьми, полуинтервал [lo, hi) и отсечение поддеревьев, без которого узкий диапазон обходит всё дерево.
+kind: implement
+topic: generics
+level: hard
+order: 260
+---
+
+Допишите `Tree[K, V]`. Так устроены упорядоченные индексы: «все заказы с
+id от 1000 до 2000», «события за последний час» — и в ответ нужны только
+ключи из диапазона, по порядку, без обхода остальных.
+
+Что проверяют скрытые тесты:
+
+- перезапись ключа, `All` по возрастанию, `break` в обходе;
+- удаление листа, узла с одним ребёнком, корня с двумя детьми и
+  отсутствующего ключа; значения после этого на месте;
+- 3000 случайных `Put`/`Delete` сверяются с мапой, `Range` — с фильтром
+  отсортированных ключей;
+- `Range(2, 4)` включает `2` и не включает `4`, диапазон правее всех
+  ключей пуст;
+- 20 000 узких `Range` на дереве из 100 000 ключей — быстрее двух секунд.
+
+<Reveal>
+
+```go
+func (t *Tree[K, V]) Put(key K, val V) {
+	p := &t.root
+	for *p != nil {
+		switch c := cmp.Compare(key, (*p).key); {
+		case c < 0:
+			p = &(*p).left
+		case c > 0:
+			p = &(*p).right
+		default:
+			(*p).val = val
+			return
+		}
+	}
+	*p = &bstNode[K, V]{key: key, val: val}
+	t.n++
+}
+
+func (t *Tree[K, V]) Delete(key K) bool {
+	p := &t.root
+	for *p != nil {
+		nd := *p
+		switch c := cmp.Compare(key, nd.key); {
+		case c < 0:
+			p = &nd.left
+		case c > 0:
+			p = &nd.right
+		default:
+			switch {
+			case nd.left == nil:
+				*p = nd.right
+			case nd.right == nil:
+				*p = nd.left
+			default:
+				s := &nd.right
+				for (*s).left != nil {
+					s = &(*s).left
+				}
+				succ := *s
+				*s = succ.right
+				succ.left, succ.right = nd.left, nd.right
+				*p = succ
+			}
+			t.n--
+			return true
+		}
+	}
+	return false
+}
+
+func (t *Tree[K, V]) Range(lo, hi K) iter.Seq2[K, V] {
+	return func(yield func(K, V) bool) {
+		t.root.walk(&lo, &hi, yield)
+	}
+}
+
+func (nd *bstNode[K, V]) walk(lo, hi *K, yield func(K, V) bool) bool {
+	if nd == nil {
+		return true
+	}
+	goLeft := lo == nil || cmp.Compare(*lo, nd.key) < 0
+	goRight := hi == nil || cmp.Compare(nd.key, *hi) < 0
+	inRange := (lo == nil || cmp.Compare(*lo, nd.key) <= 0) && goRight
+
+	if goLeft && !nd.left.walk(lo, hi, yield) {
+		return false
+	}
+	if inRange && !yield(nd.key, nd.val) {
+		return false
+	}
+	if goRight {
+		return nd.right.walk(lo, hi, yield)
+	}
+	return true
+}
+```
+
+`Get` — тот же спуск, что в `Put`, а `All` — `walk(nil, nil, yield)`.
+
+**`cmp.Ordered` и `cmp.Compare`.** Ограничение пускает все типы с `<`,
+включая свои `type UserID int64`. `cmp.Compare` возвращает -1/0/+1 и
+одним вызовом различает три ветки. К тому же он определён и для `NaN`
+(считает его меньше всех), а с голыми `<` и `==` ключ-`NaN` не нашёлся
+бы никогда.
+
+**Указатель на ссылку вместо родителя.** `p := &t.root`, дальше
+`p = &nd.left`: запись `*p = …` одинаково меняет и корень, и ребёнка
+любого узла. Удаление без этого приёма обрастает веткой «а если это
+корень».
+
+**Узел с двумя детьми** заменяется преемником — самым левым узлом
+правого поддерева. У преемника нет левого ребёнка, поэтому его легко
+вырезать: на его место встаёт его правое поддерево. Ошибка «просто
+подвесить левое поддерево куда-нибудь» обычно ломает порядок, и
+случайный тест это ловит.
+
+**Отсечение — весь смысл `Range`.** Фильтр поверх `All` даёт правильный
+ответ за `O(n)`. Отсечение не заходит влево, если узел не больше `lo`, и
+вправо, если узел не меньше `hi`, — и узкий диапазон стоит `O(h + k)`.
+Полуинтервал `[lo, hi)` — соглашение, как у срезов: соседние диапазоны
+не пересекаются.
+
+**Что спросят дальше:** что будет на отсортированном входе (дерево
+выродится в список — нужны красно-чёрное дерево, AVL или B-дерево, как в
+индексах баз), и как написать итератор без рекурсии на явном стеке.
+
+</Reveal>

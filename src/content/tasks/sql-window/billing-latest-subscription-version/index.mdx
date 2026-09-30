@@ -1,0 +1,81 @@
+---
+title: "MRR по последней версии подписки"
+description: "Дедупликация истории изменений: последняя версия на клиента с тай-брейкером, затем LEFT JOIN к справочнику тарифов."
+kind: implement
+topic: sql-window
+level: medium
+order: 90
+ordered: true
+---
+
+Каждое изменение подписки пишет в `subscription_versions` новую строку —
+таблица хранит историю, а не текущее состояние. Посчитайте текущий MRR по
+тарифам.
+
+- у клиента действует **последняя** версия: с максимальным `updated_at`, при
+  равном времени — с большим `id`;
+- если последняя версия `cancelled` — клиент сейчас ничего не платит и не
+  считается, даже если раньше был активен;
+- в отчёте **все тарифы** из `plans`, тарифы без клиентов — с `0` и `0.00`;
+- колонки: `name`, `customers`, `mrr` (сумма `monthly_price`, `round(…, 2)`);
+- порядок: по `mrr` по убыванию, затем по `name`.
+
+Что проверяют скрытые данные: две версии в одну и ту же секунду; `id`,
+идущие не в порядке времени; клиент, который отменил подписку и вернулся;
+клиент, чья последняя версия — отмена; тариф без клиентов.
+
+<Reveal>
+
+```sql
+WITH latest AS (
+  SELECT customer_id, plan_code, status,
+         row_number() OVER (
+           PARTITION BY customer_id
+           ORDER BY updated_at DESC, id DESC
+         ) AS rn
+  FROM subscription_versions
+),
+current_active AS (
+  SELECT customer_id, plan_code
+  FROM latest
+  WHERE rn = 1 AND status = 'active'
+)
+SELECT p.name,
+       count(c.customer_id)                  AS customers,
+       round(coalesce(sum(p.monthly_price) FILTER (WHERE c.customer_id IS NOT NULL), 0), 2) AS mrr
+FROM plans p
+LEFT JOIN current_active c ON c.plan_code = p.code
+GROUP BY p.code, p.name
+ORDER BY mrr DESC, p.name;
+```
+
+Ответ:
+
+```
+Team | 1 | 100.00
+Pro | 2 | 60.00
+Basic | 2 | 20.00
+Legacy | 0 | 0.00
+```
+
+**Дедупликация — `row_number` с полным ключом сортировки.** `ORDER BY
+updated_at DESC, id DESC` делает «последнюю версию» однозначной. Без `id`
+клиент 3 случайно оказывался бы то на Basic, то на Team.
+
+**Фильтр статуса — после выбора версии, а не до.** Если отфильтровать
+`status = 'active'` раньше `row_number`, клиент 2 «воскреснет» на Pro по
+старой версии: отмена просто выпадет из выборки. Порядок шагов меняет смысл.
+
+**`max(updated_at)` + JOIN обратно — хуже.** Он возвращает обе версии,
+записанные в одну секунду, и клиент считается дважды.
+
+**`LEFT JOIN` от справочника и `count(c.customer_id)`.** `count(*)` для
+Legacy вернул бы 1 — строка от `LEFT JOIN` есть, хоть и пустая. Сумма по
+пустой группе — `NULL`, поэтому `coalesce(…, 0)`.
+
+**Что спросят дальше.** В PostgreSQL то же самое пишут через `DISTINCT ON
+(customer_id) … ORDER BY customer_id, updated_at DESC, id DESC`. А в проде
+историю и «текущее состояние» часто разделяют: последняя версия лежит в
+отдельной таблице и обновляется триггером или приложением.
+
+</Reveal>

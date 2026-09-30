@@ -1,0 +1,106 @@
+---
+title: errgroup, который переносит панику в Wait
+description: Группа горутин с общей отменой. Первая ошибка или паника отменяет контекст, Wait дожидается всех и перебрасывает панику в горутину вызывающего — где её можно поймать.
+kind: implement
+topic: defer-panic
+level: hard
+order: 260
+related: [errgroup, context-cancellation, fan-out-fan-in]
+lecture: concurrency/coordination
+---
+
+Scatter-gather: запрос к пяти шардам параллельно, если один упал — остальные
+отменяем. Со стандартным подходом паника в одной горутине роняет весь
+процесс, и `recover` в обработчике запроса её не видит. Реализуйте `Group`,
+которая перебрасывает панику туда, где её ждут, — в `Wait`.
+
+Что проверяют скрытые тесты:
+
+- без ошибок `Wait` возвращает `nil`, а контекст группы после него
+  отменён;
+- первая ошибка отменяет контекст, `Wait` возвращает именно её, а не
+  `context.Canceled` соседей;
+- паника отменяет контекст, `Wait` **дожидается остальных** и паникует
+  тем же значением в своей горутине;
+- если были и ошибка, и паника — побеждает паника;
+- паника рантайма доходит до `Wait` как `runtime.Error`.
+
+<Reveal>
+
+```go
+type Group struct {
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+
+	mu       sync.Mutex
+	err      error
+	panicked bool
+	pval     any
+}
+
+func WithContext(ctx context.Context) (*Group, context.Context) {
+	ctx, cancel := context.WithCancel(ctx)
+	return &Group{cancel: cancel}, ctx
+}
+
+func (g *Group) Go(fn func() error) {
+	g.wg.Add(1)
+	go func() {
+		defer g.wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				g.mu.Lock()
+				if !g.panicked {
+					g.panicked, g.pval = true, r
+				}
+				g.mu.Unlock()
+				g.cancel()
+			}
+		}()
+		if err := fn(); err != nil {
+			g.mu.Lock()
+			if g.err == nil {
+				g.err = err
+			}
+			g.mu.Unlock()
+			g.cancel()
+		}
+	}()
+}
+
+func (g *Group) Wait() error {
+	g.wg.Wait()
+	g.cancel()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.panicked {
+		panic(g.pval)
+	}
+	return g.err
+}
+```
+
+**Паника — не ошибка, но и не повод падать в чужой горутине.** Превратить
+панику в обычную ошибку — значит спрятать баг. Уронить процесс из фоновой
+горутины — значит лишить вызывающего шанса обработать её (например,
+`Recover`-middleware ответит 500 и не убьёт весь сервер). Перенос в
+`Wait` — золотая середина.
+
+**Порядок `defer`.** `wg.Done` отложен первым, значит выполнится
+последним — после того, как паника записана. Иначе `Wait` мог бы
+проснуться раньше, чем появится `pval`, и вернуть `nil`.
+
+**Первая ошибка, а не последняя.** Остальные горутины после отмены
+возвращают `context.Canceled` — это следствие, а не причина. Поэтому
+записывается только первая.
+
+**`panicked` отдельно от `pval`.** С Go 1.21 `panic(nil)` превращается в
+`*runtime.PanicNilError`, но отдельный флаг всё равно честнее, чем
+проверка `pval != nil`.
+
+**Что спросят следом.** Ограничение параллелизма (`SetLimit` на семафоре),
+как сохранить стек исходной паники (при повторной `panic` он теряется —
+его кладут в обёртку) и что делать с `runtime.Goexit` в горутине
+(`t.FailNow` из горутины теста).
+
+</Reveal>

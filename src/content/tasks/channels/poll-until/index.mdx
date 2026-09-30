@@ -1,0 +1,78 @@
+---
+title: Опрос до готовности
+description: Спрашивать ресурс раз в interval, пока он не готов, — тикер в select с контекстом, немедленная первая попытка, классификация ошибок и два %w в итоговой ошибке.
+kind: implement
+topic: channels
+level: medium
+order: 190
+related: [time-ticker, select, context-cancellation]
+lecture: concurrency/time
+---
+
+Напишите `PollUntil`. Так ждут, пока поднимется база в интеграционном
+тесте, пока задача в очереди перейдёт в `done`, пока реплика догонит
+мастера. Нужен тикер, контекст и аккуратная работа с ошибками: «ещё не
+готово» и «всё сломалось» — разные вещи.
+
+Что проверяют скрытые тесты:
+
+- если ресурс готов сразу, `PollUntil` возвращается с первого вызова,
+  даже при `interval` в час;
+- обёрнутая `ErrNotReady` (`fmt.Errorf("…: %w", ErrNotReady)`) — тоже
+  «не готов»: опрос идёт, пока не будет успеха;
+- любая другая ошибка останавливает опрос сразу;
+- по дедлайну ошибка одновременно `context.DeadlineExceeded` и последняя
+  причина «не готов», а опрос за это время действительно повторялся;
+- контекст отменён заранее — `check` не вызывается.
+
+<Reveal>
+
+```go
+func PollUntil[T any](ctx context.Context, interval time.Duration, check func(context.Context) (T, error)) (T, error) {
+	var zero T
+	if err := ctx.Err(); err != nil {
+		return zero, err
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	var lastErr error
+	for {
+		v, err := check(ctx)
+		switch {
+		case err == nil:
+			return v, nil
+		case !errors.Is(err, ErrNotReady):
+			return zero, err
+		}
+		lastErr = err
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			return zero, fmt.Errorf("poll: %w: %w", ctx.Err(), lastErr)
+		}
+	}
+}
+```
+
+**Сначала попытка, потом ожидание.** Классическая ошибка — цикл
+`for range ticker.C { check() }`: первая проверка случается только через
+`interval`, и готовый ресурс ждёт зря. Второй минус такого цикла — он не
+слышит контекст.
+
+**`errors.Is`, а не `==`.** Реальный `check` почти всегда оборачивает
+ошибку контекстом («job 17: not ready»), и сравнение через `==` приняло
+бы её за фатальную.
+
+**Два `%w` в одной ошибке.** С Go 1.20 `fmt.Errorf` умеет оборачивать
+несколько ошибок, и `errors.Is` находит каждую. В логе видно и «истёк
+дедлайн», и почему не дождались — без этого разбирать инцидент приходится
+по косвенным признакам.
+
+**Тикер, а не `time.Sleep`.** Тикер отмеряет интервалы от старта, а не от
+конца `check`, и не копит пропущенные тики: в `ticker.C` буфер на один.
+`defer ticker.Stop()` освобождает его при любом выходе. Что спросят
+дальше: как добавить экспоненциальный backoff с джиттером — тогда вместо
+тикера нужен таймер, который перезаводится с новой длительностью.
+
+</Reveal>
