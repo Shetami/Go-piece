@@ -1,0 +1,178 @@
+---
+title: Конечный автомат заказа на интерфейсе состояния
+description: Паттерн State — каждое состояние отдельный тип, переходы решает оно само. Опциональные хуки Enter и Exit, переход на месте, типизированная ошибка перехода и неизменность при ошибке.
+kind: implement
+topic: interfaces
+level: hard
+order: 300
+---
+
+Заказ проходит путь `new → paid → shipped → delivered`, его можно отменить
+до отправки, а отмена оплаченного — это возврат денег. Вместо большого
+`switch` по строке-статусу каждое состояние — отдельный тип с методом
+`On`: он сам решает, какие события допустимы и куда ведут. Хуки входа и
+выхода — опциональные интерфейсы.
+
+Напишите `Fire`, методы `TransitionError`, шесть типов состояний и
+`NewOrder`. Контракты и схема переходов — в заготовке.
+
+Что проверяют скрытые тесты:
+
+- `Fire` на тестовых состояниях: переход «на место» (то же имя) — без хуков и
+  без записи в историю; `Exit` видит старое состояние, `Enter` — уже новое;
+  `On` вернул `(nil, nil)` — `ErrNilState`, заказ не тронут; ошибка `On`
+  возвращается как есть;
+- `pay, ship, deliver` дают историю `new,paid,shipped,delivered`;
+- отмена отправленного — `*TransitionError{shipped, cancel}` с текстом
+  `cannot cancel in shipped`, через `errors.Is` и `errors.As`; состояние и
+  история не меняются;
+- отмена неоплаченного — `cancelled` без возврата; оплаченного — `refunded`
+  и `Refunded = true`, выставленный хуком `Enter`.
+
+<Reveal>
+
+```go
+type Event string
+
+const (
+	Pay     Event = "pay"
+	Ship    Event = "ship"
+	Deliver Event = "deliver"
+	Cancel  Event = "cancel"
+)
+
+type State interface {
+	Name() string
+	On(e Event, o *Order) (State, error)
+}
+
+type Enterer interface{ Enter(o *Order) }
+type Exiter interface{ Exit(o *Order) }
+
+type Order struct {
+	ID       string
+	State    State
+	History  []string
+	Refunded bool
+}
+
+var (
+	ErrInvalidTransition = errors.New("invalid transition")
+	ErrNilState          = errors.New("state returned nil")
+)
+
+type TransitionError struct {
+	State string
+	Event Event
+}
+
+func (e *TransitionError) Error() string {
+	return fmt.Sprintf("cannot %s in %s", e.Event, e.State)
+}
+
+func (e *TransitionError) Is(target error) bool { return target == ErrInvalidTransition }
+
+func (o *Order) Fire(e Event) error {
+	next, err := o.State.On(e, o)
+	if err != nil {
+		return err
+	}
+	if next == nil {
+		return ErrNilState
+	}
+	if next.Name() == o.State.Name() {
+		o.State = next
+		return nil
+	}
+	if x, ok := o.State.(Exiter); ok {
+		x.Exit(o)
+	}
+	o.State = next
+	o.History = append(o.History, next.Name())
+	if en, ok := next.(Enterer); ok {
+		en.Enter(o)
+	}
+	return nil
+}
+
+type (
+	stNew       struct{}
+	stPaid      struct{}
+	stShipped   struct{}
+	stDelivered struct{}
+	stCancelled struct{}
+	stRefunded  struct{}
+)
+
+func invalid(s State, e Event) error { return &TransitionError{State: s.Name(), Event: e} }
+
+func (s stNew) Name() string { return "new" }
+func (s stNew) On(e Event, _ *Order) (State, error) {
+	switch e {
+	case Pay:
+		return stPaid{}, nil
+	case Cancel:
+		return stCancelled{}, nil
+	}
+	return nil, invalid(s, e)
+}
+
+func (s stPaid) Name() string { return "paid" }
+func (s stPaid) On(e Event, _ *Order) (State, error) {
+	switch e {
+	case Ship:
+		return stShipped{}, nil
+	case Cancel:
+		return stRefunded{}, nil
+	}
+	return nil, invalid(s, e)
+}
+
+func (s stShipped) Name() string { return "shipped" }
+func (s stShipped) On(e Event, _ *Order) (State, error) {
+	if e == Deliver {
+		return stDelivered{}, nil
+	}
+	return nil, invalid(s, e)
+}
+
+func (s stDelivered) Name() string                        { return "delivered" }
+func (s stDelivered) On(e Event, _ *Order) (State, error) { return nil, invalid(s, e) }
+func (s stCancelled) Name() string                        { return "cancelled" }
+func (s stCancelled) On(e Event, _ *Order) (State, error) { return nil, invalid(s, e) }
+func (s stRefunded) Name() string                         { return "refunded" }
+func (s stRefunded) On(e Event, _ *Order) (State, error)  { return nil, invalid(s, e) }
+func (s stRefunded) Enter(o *Order)                       { o.Refunded = true }
+
+func NewOrder(id string) *Order {
+	return &Order{ID: id, State: stNew{}, History: []string{"new"}}
+}
+```
+
+**Состояние решает само.** Добавить новое состояние — значит, написать новый
+тип и поменять `On` только у тех, кто в него ведёт. Большой `switch
+status` в одном методе с ростом числа состояний превращается в матрицу, где
+легко забыть клетку. Состояния без полей — пустые структуры: они ничего не
+весят и сравниваются по значению.
+
+**Хуки — опциональные интерфейсы.** Только `refunded` что-то делает при
+входе; заставлять остальные пять писать пустой `Enter` незачем. `Fire`
+проверяет `next.(Enterer)` в момент перехода.
+
+**Порядок имеет значение.** `Exit` — пока заказ ещё в старом состоянии,
+`Enter` — когда уже в новом: хук входа может, например, отправить
+уведомление с актуальным статусом. Смена состояния посередине, а не в конце,
+— частая ошибка: тогда `Enter` видит старое имя.
+
+**Ошибка не оставляет следов.** Всё, что меняет заказ, происходит после
+всех проверок. Если сначала записать историю, а потом проверить `nil`,
+заказ окажется в странном промежуточном виде. `On(nil, nil)` — не
+«остаться на месте», а ошибка реализации состояния: переход на месте явно
+возвращает само состояние.
+
+Что спросят дальше: как сохранить такой заказ в базу (состояние хранится
+строкой, при чтении — таблица «имя → значение состояния») и как защититься
+от гонки двух событий для одного заказа — мьютекс в `Order` или
+`UPDATE … WHERE state = $old`.
+
+</Reveal>

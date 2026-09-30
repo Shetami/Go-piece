@@ -63,8 +63,8 @@ func TestGlobNoExponent(t *testing.T) {
 		if ok {
 			t.Fatalf("Match(%q, 200×\"a\") = true, ожидали false", pattern)
 		}
-	case <-time.After(3 * time.Second):
-		t.Fatalf("Match на шаблоне a*a*…*b думает дольше 3 секунд — экспоненциальный перебор")
+	case <-time.After(2 * time.Second):
+		t.Fatalf("Match на шаблоне a*a*…*b думает дольше 2 секунд — экспоненциальный перебор")
 	}
 	if ok, _ := Match(strings.Repeat("*a", 50), strings.Repeat("a", 5000)); !ok {
 		t.Fatalf("Match(\"*a\"×50, 5000×\"a\") = false, ожидали true")

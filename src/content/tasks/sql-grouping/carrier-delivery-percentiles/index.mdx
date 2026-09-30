@@ -1,4 +1,82 @@
 ---
+title: "Медиана и p90 сроков доставки"
+description: "percentile_cont по времени доставки, NULL у недоставленных и почему среднее здесь врёт."
 kind: implement
+topic: sql-grouping
+level: medium
+order: 130
 ordered: true
 ---
+
+Отдел логистики сравнивает перевозчиков. Среднее время доставки не
+подходит — одна потерявшаяся на неделю посылка портит всю картину. Нужны
+медиана и 90-й перцентиль.
+
+У посылок в пути `delivered_at` — `NULL`.
+
+- `carrier`;
+- `shipments` — всего отправлений;
+- `delivered` — доставленных;
+- `median_h` — медиана времени доставки в часах по доставленным,
+  `percentile_cont`, `round(…, 1)`;
+- `p90_h` — 90-й перцентиль так же, `round(…, 1)`.
+
+Перевозчик без доставленных посылок в отчёте нужен, его перцентили — `NULL`.
+
+Порядок: по `carrier`.
+
+Что проверяют скрытые тесты: интерполяция между значениями (а не ближайшее
+значение), посылки в пути не участвуют в перцентилях, но считаются в
+`shipments`, перевозчик без доставок не пропадает.
+
+<Reveal>
+
+```sql
+WITH t AS (
+  SELECT carrier, delivered_at,
+         extract(epoch FROM delivered_at - shipped_at) / 3600 AS hours
+  FROM shipments
+)
+SELECT carrier,
+       count(*)            AS shipments,
+       count(delivered_at) AS delivered,
+       round(percentile_cont(0.5) WITHIN GROUP (ORDER BY hours)::numeric, 1) AS median_h,
+       round(percentile_cont(0.9) WITHIN GROUP (ORDER BY hours)::numeric, 1) AS p90_h
+FROM t
+GROUP BY carrier
+ORDER BY carrier;
+```
+
+Ответ:
+
+```
+Быстрый | 5 | 4 | 25.0 | 149.0
+Надёжный | 3 | 3 | 24.0 | 43.2
+Новый | 2 | 0 | NULL | NULL
+```
+
+**Упорядоченные агрегаты — `WITHIN GROUP (ORDER BY …)`.**
+`percentile_cont(0.5)` — медиана с линейной интерполяцией: у «Быстрого»
+значения 10, 20, 30, 200, и медиана — 25, середина между 20 и 30.
+`percentile_disc` вернул бы одно из существующих значений (20). Среднее
+здесь — 65 часов, и именно поэтому им сроки не меряют.
+
+**Как считается p90.** Позиция `0.9 × (n − 1)` = 2.7 для четырёх значений:
+между третьим (30) и четвёртым (200), на 70% пути — 149.0.
+
+**`NULL` перцентили пропускают, как и `avg`.** Поэтому фильтровать
+недоставленные в `WHERE` не нужно — и нельзя: тогда из отчёта пропадёт
+`shipments` честного размера и «Новый» перевозчик целиком. Для группы, где
+все значения `NULL`, `percentile_cont` возвращает `NULL`.
+
+**Типы.** `extract(epoch …)` даёт `numeric`, `percentile_cont` работает с
+`double precision` — отсюда `::numeric` перед `round` с точностью. Можно
+передать и сам `interval`: `percentile_cont(0.5) WITHIN GROUP (ORDER BY
+delivered_at - shipped_at)`.
+
+**Что спросят дальше.** Это точный перцентиль, он сортирует всю группу. На
+метриках сервиса так не считают — там гистограммы с бакетами и
+приближённые оценки, и `histogram_quantile` в Prometheus устроен как раз
+так.
+
+</Reveal>

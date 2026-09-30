@@ -1,4 +1,96 @@
 ---
+title: "Нагрузка команд поддержки по дням"
+description: "Сетка команды × дни через CROSS JOIN, дни без тикетов, самый загруженный день с тай-брейком."
 kind: implement
+topic: sql-grouping
+level: hard
+order: 210
 ordered: true
 ---
+
+Руководитель поддержки смотрит нагрузку команд за неделю 1–7 июля 2024.
+Тикеты без команды (ещё не распределены) не учитываются.
+
+Для каждой команды:
+
+- `team` — название;
+- `tickets` — тикетов за неделю;
+- `zero_days` — сколько дней недели без единого тикета;
+- `busiest_day` — день с наибольшим числом тикетов, тип `date`; при
+  равенстве — более ранний; `NULL`, если тикетов не было;
+- `busiest_count` — сколько тикетов в этот день; `0`, если тикетов не было.
+
+Команды без тикетов тоже нужны.
+
+Порядок: по `team`.
+
+Что проверяют скрытые тесты: границы недели (`23:59` последнего дня
+июня, полночь 8 июля), ничья между днями, команда без тикетов, тикеты без
+команды.
+
+<Reveal>
+
+```sql
+WITH grid AS (
+  SELECT t.id AS team_id, t.name, d.day::date AS day
+  FROM teams t
+  CROSS JOIN generate_series(date '2024-07-01', date '2024-07-07', interval '1 day') AS d(day)
+),
+daily AS (
+  SELECT g.team_id, g.name, g.day, count(k.id) AS cnt
+  FROM grid g
+  LEFT JOIN tickets k
+         ON k.team_id = g.team_id
+        AND k.created_at >= g.day
+        AND k.created_at <  g.day + 1
+  GROUP BY g.team_id, g.name, g.day
+),
+ranked AS (
+  SELECT *, row_number() OVER (PARTITION BY team_id ORDER BY cnt DESC, day) AS rn
+  FROM daily
+)
+SELECT name AS team,
+       sum(cnt)                                     AS tickets,
+       count(*) FILTER (WHERE cnt = 0)              AS zero_days,
+       max(day) FILTER (WHERE rn = 1 AND cnt > 0)   AS busiest_day,
+       max(cnt)                                     AS busiest_count
+FROM ranked
+GROUP BY team_id, name
+ORDER BY name;
+```
+
+Ответ:
+
+```
+Биллинг | 4 | 5 | 2024-07-01 | 2
+Возвраты | 0 | 7 | NULL | 0
+Доставка | 5 | 4 | 2024-07-05 | 3
+```
+
+**Сетка «команда × день» — `CROSS JOIN` справочника с
+`generate_series`.** Без неё дней без тикетов просто нет, и `zero_days`
+пришлось бы вычислять как «7 минус число дней с тикетами» — формула,
+которая ломается при первом изменении периода. С сеткой это
+`count(*) FILTER (WHERE cnt = 0)`.
+
+**Интервал дня — `[day, day + 1)`.** `k.created_at >= day AND created_at <
+day + 1` (к `date` прибавляется целое число дней) аккуратно ловит `23:59` и
+не ловит полночь следующего дня. К тому же такое условие может
+использовать индекс по `created_at`, а `created_at::date = day` — только
+индекс по выражению.
+
+**Лучший день — окно поверх дневной группировки.** `row_number() OVER
+(PARTITION BY team ORDER BY cnt DESC, day)` даёт ровно один лучший день с
+тай-брейком «раньше». У Биллинга 1 и 3 июля по два тикета — выигрывает
+первое. `max(day) FILTER (WHERE rn = 1 AND cnt > 0)` вытаскивает этот день в
+итоговую группировку и оставляет `NULL` для команды без тикетов.
+
+**Три уровня: сетка → день → команда.** Это типичная форма отчётных
+запросов: сначала честно построить все клетки, потом сворачивать.
+Группировать по `team_id`, а не только по имени, — два отдела с одинаковым
+названием не должны склеиться.
+
+**Что спросят дальше.** Нагрузка в часах работы, а не по календарным дням:
+тогда сетка строится из рабочего календаря, а не из `generate_series`.
+
+</Reveal>

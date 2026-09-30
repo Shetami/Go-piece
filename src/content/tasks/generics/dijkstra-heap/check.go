@@ -48,8 +48,8 @@ func TestDijkstraStaleEntries(t *testing.T) {
 	}
 	g.AddEdge(9, 10, 1)
 	p, d, ok := g.ShortestPath(0, 10)
-	if !ok || d != 16 || !reflect.DeepEqual(p, []int{0, 1, 9, 10}) {
-		t.Fatalf("0→10 = %v, %d; ожидали [0 1 9 10], 16", p, d)
+	if !ok || d != 85 || !reflect.DeepEqual(p, []int{0, 8, 9, 10}) {
+		t.Fatalf("0→10 = %v, %d; ожидали [0 8 9 10], 85", p, d)
 	}
 }
 

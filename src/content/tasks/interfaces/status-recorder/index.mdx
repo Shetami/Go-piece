@@ -1,0 +1,147 @@
+---
+title: Обёртка ResponseWriter без потери возможностей
+description: Middleware для метрик записывает статус и размер ответа. Обёртка должна реализовать Flusher и io.ReaderFrom ровно тогда, когда их реализует оригинал, — четыре комбинации типов. Неявный статус 200 и повторный WriteHeader.
+kind: implement
+topic: interfaces
+level: hard
+order: 360
+---
+
+Middleware для метрик и логов почти всегда оборачивает `ResponseWriter`,
+чтобы узнать статус и размер ответа. Наивная обёртка ломает сервер
+незаметно: у неё нет `Flush`, и стриминг (SSE, долгие ответы) начинает
+буферизоваться; нет `ReadFrom` — и отдача файлов теряет `sendfile`. А если
+добавить эти методы всегда, код, который проверяет `w.(http.Flusher)`,
+решит, что сбрасывать буфер можно, хотя исходный writer этого не умеет.
+
+Здесь сети нет: `ResponseWriter` и `Flusher` — свои упрощённые интерфейсы.
+Напишите `Wrap` по контракту из заготовки.
+
+Что проверяют скрытые тесты:
+
+- первый `WriteHeader` задаёт статус и уходит дальше, повторный — нет;
+- `Write` до `WriteHeader` — статус 200, поздний `WriteHeader(503)` в
+  исходный writer не попадает;
+- частичная запись: `Bytes` растёт на реально записанное;
+- для четырёх исходных writer'ов (без всего, только `Flush`, только
+  `ReadFrom`, оба) обёртка реализует ровно те же опциональные интерфейсы, и
+  у всех есть `Unwrap`;
+- `Flush` до заголовка фиксирует 200; `ReadFrom` учитывается в `Bytes`.
+
+<Reveal>
+
+```go
+type ResponseWriter interface {
+	Write(p []byte) (int, error)
+	WriteHeader(code int)
+}
+
+type Flusher interface {
+	Flush()
+}
+
+type Recorder struct {
+	Status int
+	Bytes  int64
+}
+
+type recorder struct {
+	w   ResponseWriter
+	rec *Recorder
+}
+
+func (r *recorder) begin() {
+	if r.rec.Status == 0 {
+		r.rec.Status = 200
+	}
+}
+
+func (r *recorder) WriteHeader(code int) {
+	if r.rec.Status != 0 {
+		return
+	}
+	r.rec.Status = code
+	r.w.WriteHeader(code)
+}
+
+func (r *recorder) Write(p []byte) (int, error) {
+	r.begin()
+	n, err := r.w.Write(p)
+	r.rec.Bytes += int64(n)
+	return n, err
+}
+
+func (r *recorder) Unwrap() ResponseWriter { return r.w }
+
+func (r *recorder) flush() {
+	r.begin()
+	r.w.(Flusher).Flush()
+}
+
+func (r *recorder) readFrom(src io.Reader) (int64, error) {
+	r.begin()
+	n, err := r.w.(io.ReaderFrom).ReadFrom(src)
+	r.rec.Bytes += n
+	return n, err
+}
+
+type flusher struct{ *recorder }
+
+func (f flusher) Flush() { f.flush() }
+
+type readerFrom struct{ *recorder }
+
+func (rf readerFrom) ReadFrom(src io.Reader) (int64, error) { return rf.readFrom(src) }
+
+type flusherReaderFrom struct{ *recorder }
+
+func (x flusherReaderFrom) Flush()                                { x.flush() }
+func (x flusherReaderFrom) ReadFrom(src io.Reader) (int64, error) { return x.readFrom(src) }
+
+func Wrap(w ResponseWriter, rec *Recorder) ResponseWriter {
+	r := &recorder{w: w, rec: rec}
+	_, canFlush := w.(Flusher)
+	_, canReadFrom := w.(io.ReaderFrom)
+	switch {
+	case canFlush && canReadFrom:
+		return flusherReaderFrom{r}
+	case canFlush:
+		return flusher{r}
+	case canReadFrom:
+		return readerFrom{r}
+	}
+	return r
+}
+```
+
+**Набор методов — свойство типа, а не значения.** Один тип обёртки не
+может «иногда» иметь `Flush`: либо метод есть, либо нет. Поэтому на каждую
+комбинацию опциональных интерфейсов — свой тип, а `Wrap` выбирает нужный по
+возможностям `w`. С двумя интерфейсами — четыре типа, с пятью (как у
+настоящего `http.ResponseWriter`: `Flusher`, `Hijacker`, `CloseNotifier`,
+`ReaderFrom`, `Pusher`) — 32; поэтому существует библиотека `httpsnoop`,
+которая генерирует их кодом.
+
+**Комбинацию нельзя собрать из двух обёрток.** Хочется написать
+`struct{ flusher; readerFrom }` — но оба поля продвигают `Write` и
+`WriteHeader` на одной глубине, селектор становится неоднозначным, и тип
+перестаёт реализовывать `ResponseWriter`: компилятор это отвергнет. Поэтому
+каждая комбинация встраивает `*recorder` напрямую, а общая логика `Flush` и
+`ReadFrom` вынесена в методы `recorder`, чтобы не дублировать её.
+
+**Нижний вызов — через утверждение типа.** `r.w.(Flusher).Flush()` не
+паникует: тип с методом `Flush` создаётся только если `w` — `Flusher`.
+Инвариант держит `Wrap`, а не каждый метод.
+
+**`Unwrap` — стандарт для обёрток.** `http.ResponseController` (Go 1.20)
+вызывает `Unwrap()`, пока не найдёт writer с нужным методом. Это второй
+способ решить проблему: не повторять методы, а дать возможность до них
+докопаться.
+
+**Статус 200 неявный.** По контракту `net/http` первый `Write` без
+`WriteHeader` отправляет 200, и после этого `WriteHeader` ничего не меняет
+(сервер пишет в лог «superfluous WriteHeader call»). Метрика должна видеть
+то же, что увидел клиент, — поэтому поздние вызовы игнорируются и не
+передаются дальше.
+
+</Reveal>

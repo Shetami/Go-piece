@@ -1,0 +1,96 @@
+---
+title: Своя мультиошибка с Append
+description: MultiError с Unwrap() []error и функция Append, которая схлопывает вложенность, не возвращает типизированный nil и не портит чужой слайс.
+kind: implement
+topic: errors
+level: medium
+order: 280
+related: [slice-aliasing]
+lecture: go-runtime/slices
+---
+
+`errors.Join` хорош, но вложенные `Join` дают вложенное дерево, а текст
+разбит переводами строк. Во многих кодовых базах (как в `go.uber.org/multierr`)
+есть своя плоская мультиошибка с `Append`, удобной в циклах и `defer`:
+`err = Append(err, f.Close())`.
+
+Реализуйте `MultiError` и `Append` по контракту в заготовке.
+
+Что проверяют скрытые тесты:
+
+- нет ни одной ошибки — `Append` возвращает `nil`, который действительно
+  равен `nil`, даже если на вход пришёл `(*MultiError)(nil)`;
+- одна ошибка возвращается как есть;
+- вложенные `MultiError` схлопываются в плоский список, а `errors.Join` —
+  нет; текст `ошибок: 4: a; b; c; d`; `errors.Is` находит каждую;
+- два `Append` к одному и тому же `MultiError` с запасом ёмкости не
+  затирают друг друга и не меняют исходный.
+
+<Reveal>
+
+```go
+func (m *MultiError) Error() string {
+	if len(m.Errs) == 1 {
+		return m.Errs[0].Error()
+	}
+	parts := make([]string, len(m.Errs))
+	for i, e := range m.Errs {
+		parts[i] = e.Error()
+	}
+	return fmt.Sprintf("ошибок: %d: %s", len(m.Errs), strings.Join(parts, "; "))
+}
+
+func (m *MultiError) Unwrap() []error { return m.Errs }
+
+func Append(err error, errs ...error) error {
+	var out []error
+	add := func(e error) {
+		if m, ok := e.(*MultiError); ok {
+			if m != nil {
+				out = append(out, m.Errs...)
+			}
+		} else if e != nil {
+			out = append(out, e)
+		}
+	}
+	add(err)
+	for _, e := range errs {
+		add(e)
+	}
+	switch len(out) {
+	case 0:
+		return nil
+	case 1:
+		return out[0]
+	}
+	return &MultiError{Errs: out}
+}
+```
+
+**Типизированный `nil` — главная ловушка своих ошибок.** Функция с
+результатом `*MultiError`, возвращённым как `error`, отдаёт интерфейс с
+типом внутри, даже если указатель `nil`. `err != nil` истинно, и успешная
+операция выглядит как сбой. Поэтому результат — `error`, и в пустом
+случае возвращается литерал `nil`. Та же беда с входом:
+`(*MultiError)(nil)` в интерфейсе не равен `nil`, его надо узнать по типу и
+пропустить.
+
+**`Unwrap() []error` — и `errors.Is` работает бесплатно.** С Go 1.20
+`Is` и `As` обходят все элементы. Раньше мультиошибкам приходилось
+писать свои `Is`/`As`.
+
+**Алиасинг слайсов.** Наивное `m.Errs = append(m.Errs, e)` или
+`append(m.Errs, …)` в новую структуру пишет в общий backing array, если у
+него есть запас ёмкости. Два `Append` от одной базы тогда пишут в одну и
+ту же ячейку, и первая ошибка молча подменяется второй. Собирая результат
+в свой слайс, мы никогда не пишем в чужую память.
+
+**Одна ошибка — без обёртки.** Тогда `err == io.EOF` и утверждения типа у
+вызывающего продолжают работать, а текст не обрастает префиксом
+«ошибок: 1».
+
+**Что спросят дальше.** Чем это лучше `errors.Join` (плоскость, текст в
+одну строку для логов) и хуже (своя зависимость), и как написать
+`defer func() { err = Append(err, f.Close()) }()`.
+
+</Reveal>

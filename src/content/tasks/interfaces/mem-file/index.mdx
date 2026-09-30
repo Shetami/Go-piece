@@ -1,0 +1,122 @@
+---
+title: Файл в памяти с Seek и ReadAt
+description: Один тип реализует io.Reader, io.Writer, io.Seeker и io.ReaderAt — и работает со стандартными io.ReadAll, fmt.Fprintf и io.SectionReader. Позиция за концом, дыра из нулей и строгий контракт ReaderAt.
+kind: implement
+topic: interfaces
+level: medium
+order: 370
+---
+
+Для тестов кода, который работает с файлами, удобен файл в памяти: такой же
+`io.ReadWriteSeeker`, как `*os.File`, но без диска. `bytes.Buffer` не
+подходит — он не умеет `Seek`, а `bytes.Reader` не умеет писать. Напишите
+`File` по контракту из заготовки.
+
+Что проверяют скрытые тесты:
+
+- `*File` реализует `io.ReadWriteSeeker` и `io.ReaderAt` (проверка при
+  компиляции);
+- запись через `fmt.Fprintf`, `Read` в конце — `0, io.EOF`, чтение с
+  середины через `io.ReadAll`, перезапись хвоста с удлинением;
+- `Seek` за конец не меняет размер; запись после него заполняет промежуток
+  нулями; `Bytes` — копия;
+- `Seek` в отрицательную позицию и с неизвестным `whence` — ошибка, позиция
+  прежняя;
+- `ReadAt` не трогает позицию и у конца файла возвращает `n < len(p)`
+  **вместе с** `io.EOF`; `io.NewSectionReader` поверх `File` работает.
+
+<Reveal>
+
+```go
+var (
+	ErrNegativeOffset = errors.New("negative offset")
+	ErrWhence         = errors.New("invalid whence")
+)
+
+type File struct {
+	data []byte
+	pos  int64
+}
+
+func (f *File) Read(p []byte) (int, error) {
+	if f.pos >= int64(len(f.data)) {
+		return 0, io.EOF
+	}
+	n := copy(p, f.data[f.pos:])
+	f.pos += int64(n)
+	return n, nil
+}
+
+func (f *File) Write(p []byte) (int, error) {
+	end := f.pos + int64(len(p))
+	if end > int64(len(f.data)) {
+		f.data = append(f.data, make([]byte, end-int64(len(f.data)))...)
+	}
+	n := copy(f.data[f.pos:], p)
+	f.pos += int64(n)
+	return n, nil
+}
+
+func (f *File) Seek(offset int64, whence int) (int64, error) {
+	var base int64
+	switch whence {
+	case io.SeekStart:
+	case io.SeekCurrent:
+		base = f.pos
+	case io.SeekEnd:
+		base = int64(len(f.data))
+	default:
+		return f.pos, ErrWhence
+	}
+	next := base + offset
+	if next < 0 {
+		return f.pos, ErrNegativeOffset
+	}
+	f.pos = next
+	return next, nil
+}
+
+func (f *File) ReadAt(p []byte, off int64) (int, error) {
+	if off < 0 {
+		return 0, ErrNegativeOffset
+	}
+	if off >= int64(len(f.data)) {
+		return 0, io.EOF
+	}
+	n := copy(p, f.data[off:])
+	if n < len(p) {
+		return n, io.EOF
+	}
+	return n, nil
+}
+
+func (f *File) Bytes() []byte { return slices.Clone(f.data) }
+```
+
+**Маленькие интерфейсы складываются.** `io.ReadWriteSeeker` — это просто
+встраивание трёх однометодных интерфейсов. Реализовав четыре метода, тип
+сразу подходит для `io.ReadAll`, `fmt.Fprintf`, `io.Copy`,
+`io.NewSectionReader`, `archive/zip.NewReader` (нужен `ReaderAt`) и любого
+кода, который принимает эти интерфейсы, — без адаптеров.
+
+**Контракт `ReaderAt` строже, чем у `Reader`.** `Read` может вернуть меньше
+`len(p)` без ошибки — «приходи ещё». `ReadAt` так не может: меньше `len(p)`
+только вместе с ошибкой. Поэтому `n, nil` у конца файла — нарушение,
+на котором ломаются `SectionReader` и парсеры форматов.
+
+**Позиция за концом — законна.** Как у настоящих файлов: `Seek` только
+двигает курсор, размер меняет лишь запись. Запись с позиции за концом
+создаёт «дыру» из нулей (в файловых системах — разреженный файл).
+Выращивание через `append(f.data, make(…)…)` делает это автоматически.
+
+**Ошибочный `Seek` ничего не меняет.** Позицию обновляем только после всех
+проверок. Отрицательную позицию `os.File` тоже отвергает, а неверный
+`whence` — ошибка программиста, но паниковать из-за неё библиотеке не
+пристало.
+
+Что спросят дальше: как сделать `File` безопасным для параллельных `ReadAt`
+(контракт `ReaderAt` это разрешает — нужен `RWMutex` против параллельной
+записи) и почему `Read` и `Write` с общей позицией параллельно использовать
+бессмысленно.
+
+</Reveal>

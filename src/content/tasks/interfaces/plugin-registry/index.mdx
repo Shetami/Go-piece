@@ -1,0 +1,171 @@
+---
+title: Реестр плагинов с откатом запуска
+description: Фабрики регистрируются по имени, плагины создаются по списку и запускаются, если умеют. Опциональные Starter и io.Closer, откат в обратном порядке, errors.Join и отменённый контекст.
+kind: implement
+topic: interfaces
+level: hard
+order: 290
+related: [graceful-shutdown]
+---
+
+Сервис собирается из модулей: база, кэш, HTTP-сервер, фоновые задачи. Каждый
+регистрирует свою фабрику, а при старте сервис загружает нужные по списку
+из конфига. Обязательный интерфейс минимальный — `Name()`; запуск и
+остановка — опциональные интерфейсы `Starter` и `io.Closer`: плагину без
+состояния их реализовывать незачем.
+
+Реализуйте `Registry` и `Set` по контракту из заготовки.
+
+Что проверяют скрытые тесты:
+
+- повторное имя — `ErrDuplicate`, пустое имя и `nil`-фабрика — ошибка,
+  `Names` отсортированы;
+- успешная загрузка: запуск по порядку списка, закрытие в обратном и
+  один раз; плагин без `Start`/`Close` просто лежит в наборе;
+- неизвестное имя в конце списка — ни одна фабрика не вызвана;
+- `Start` третьего плагина падает: закрываются все три, **включая упавший**,
+  в обратном порядке; ошибка содержит и причину запуска, и ошибку закрытия;
+- ошибка фабрики — откат уже созданных;
+- отменённый контекст — `Start` не вызывается, ошибка `context.Canceled`;
+- параллельные `Register` под `-race`.
+
+<Reveal>
+
+```go
+type Plugin interface {
+	Name() string
+}
+
+type Starter interface {
+	Start(ctx context.Context) error
+}
+
+type Factory func(cfg map[string]string) (Plugin, error)
+
+var (
+	ErrDuplicate = errors.New("plugin already registered")
+	ErrUnknown   = errors.New("unknown plugin")
+)
+
+type Registry struct {
+	mu        sync.RWMutex
+	factories map[string]Factory
+}
+
+func NewRegistry() *Registry {
+	return &Registry{factories: map[string]Factory{}}
+}
+
+func (r *Registry) Register(name string, f Factory) error {
+	if name == "" || f == nil {
+		return errors.New("register: empty name or nil factory")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.factories[name]; ok {
+		return fmt.Errorf("register %q: %w", name, ErrDuplicate)
+	}
+	r.factories[name] = f
+	return nil
+}
+
+func (r *Registry) Names() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	names := make([]string, 0, len(r.factories))
+	for n := range r.factories {
+		names = append(names, n)
+	}
+	slices.Sort(names)
+	return names
+}
+
+type Set struct {
+	plugins []Plugin
+	once    sync.Once
+}
+
+func (s *Set) Plugins() []Plugin { return s.plugins }
+
+func (s *Set) Close() error {
+	var err error
+	s.once.Do(func() { err = closeAll(s.plugins) })
+	return err
+}
+
+func closeAll(ps []Plugin) error {
+	var errs []error
+	for _, p := range slices.Backward(ps) {
+		if c, ok := p.(io.Closer); ok {
+			if err := c.Close(); err != nil {
+				errs = append(errs, fmt.Errorf("close %s: %w", p.Name(), err))
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (r *Registry) Load(ctx context.Context, names []string, cfg map[string]map[string]string) (*Set, error) {
+	r.mu.RLock()
+	fs := make([]Factory, len(names))
+	for i, n := range names {
+		fs[i] = r.factories[n]
+	}
+	r.mu.RUnlock()
+	for i, f := range fs {
+		if f == nil {
+			return nil, fmt.Errorf("load %q: %w", names[i], ErrUnknown)
+		}
+	}
+
+	var created []Plugin
+	fail := func(err error) (*Set, error) {
+		return nil, errors.Join(err, closeAll(created))
+	}
+	for i, f := range fs {
+		p, err := f(cfg[names[i]])
+		if err != nil {
+			return fail(fmt.Errorf("create %s: %w", names[i], err))
+		}
+		created = append(created, p)
+		if s, ok := p.(Starter); ok {
+			if err := ctx.Err(); err != nil {
+				return fail(fmt.Errorf("start %s: %w", names[i], err))
+			}
+			if err := s.Start(ctx); err != nil {
+				return fail(fmt.Errorf("start %s: %w", names[i], err))
+			}
+		}
+	}
+	return &Set{plugins: created}, nil
+}
+```
+
+**Опциональные интерфейсы вместо толстого `Plugin`.** Если бы `Plugin`
+требовал `Start` и `Close`, каждый простой плагин писал бы пустые методы.
+Проверка `p.(Starter)` в момент загрузки даёт те же возможности без
+обязательств — так же `database/sql` проверяет у драйвера
+`driver.ConnBeginTx` и десятки других интерфейсов.
+
+**Откат — зеркало запуска.** Плагины часто зависят от предыдущих: HTTP-сервер
+использует кэш и базу. Закрывать нужно в обратном порядке, как `defer`.
+`slices.Backward` (Go 1.23) делает это без ручной арифметики индексов.
+
+**Упавший на `Start` тоже закрывается.** Фабрика могла уже открыть файлы или
+соединения; `Start` мог запустить горутину до ошибки. «Создан — значит,
+закрыть» — простое правило, которое не требует знать, что именно успел
+сделать плагин. `Close` у плагина поэтому должен быть безопасен для
+частично инициализированного состояния.
+
+**Ошибки не теряются.** `errors.Join(причина, ошибки закрытия)` сохраняет
+всё; `errors.Is` находит каждую ветку. Возвращать только последнюю ошибку —
+значит, в логах увидеть «flush failed» и не понять, что сервис не стартовал
+из-за занятого порта.
+
+**Проверить имена до создания.** Если список проверять по ходу, при опечатке
+в последнем имени первые плагины успеют создаться и открыть соединения —
+только чтобы тут же их закрыть. Мьютекс реестра держим только на чтение
+фабрик, а не на время запуска: `Start` может быть долгим и не должен
+блокировать `Register`.
+
+</Reveal>

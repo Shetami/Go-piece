@@ -1,4 +1,105 @@
 ---
+title: "Главная причина отмен по тарифам"
+description: "Дедупликация повторных отмен, самая частая причина с тай-брейком и доля — вместо ненадёжного mode()."
 kind: implement
+topic: sql-grouping
+level: hard
+order: 170
 ordered: true
 ---
+
+Команда удержания хочет знать, почему уходят клиенты каждого тарифа.
+
+Пользователь может отменить подписку несколько раз (передумал и указал
+другую причину) — в счёт идёт только **последняя** отмена подписки по
+`cancelled_at`. Причина указывается не всегда.
+
+Для каждого тарифа из `plans`:
+
+- `plan`;
+- `cancelled` — сколько подписок отменено;
+- `with_reason` — у скольких из них в последней отмене указана причина;
+- `top_reason` — самая частая причина среди указанных; при равенстве —
+  первая по алфавиту; `NULL`, если причин нет;
+- `top_pct` — доля `top_reason` среди отмен с причиной, в процентах,
+  `round(…, 1)`; `NULL`, если причин нет.
+
+Тарифы без отмен тоже нужны, с нулями.
+
+Порядок: по `plan`.
+
+Что проверяют скрытые тесты: повторная отмена считается один раз и с
+последней причиной, ничья между причинами, отмена без причины входит в
+`cancelled`, но не в выбор причины, тариф без отмен.
+
+<Reveal>
+
+```sql
+WITH last_cancel AS (
+  SELECT DISTINCT ON (subscription_id) subscription_id, reason
+  FROM cancellations
+  ORDER BY subscription_id, cancelled_at DESC, id DESC
+),
+per_sub AS (
+  SELECT s.plan_code, l.reason
+  FROM last_cancel l
+  JOIN subscriptions s ON s.id = l.subscription_id
+),
+totals AS (
+  SELECT plan_code, count(*) AS cancelled, count(reason) AS with_reason
+  FROM per_sub
+  GROUP BY plan_code
+),
+reasons AS (
+  SELECT plan_code, reason, count(*) AS cnt,
+         row_number() OVER (PARTITION BY plan_code ORDER BY count(*) DESC, reason) AS rn
+  FROM per_sub
+  WHERE reason IS NOT NULL
+  GROUP BY plan_code, reason
+)
+SELECT p.code AS plan,
+       coalesce(t.cancelled, 0)   AS cancelled,
+       coalesce(t.with_reason, 0) AS with_reason,
+       r.reason                   AS top_reason,
+       round(100.0 * r.cnt / t.with_reason, 1) AS top_pct
+FROM plans p
+LEFT JOIN totals t  ON t.plan_code = p.code
+LEFT JOIN reasons r ON r.plan_code = p.code AND r.rn = 1
+ORDER BY p.code;
+```
+
+Ответ:
+
+```
+basic | 5 | 4 | bugs | 50.0
+pro | 3 | 3 | switch | 66.7
+team | 0 | 0 | NULL | NULL
+```
+
+**Сначала дедупликация, потом статистика.** `DISTINCT ON
+(subscription_id) … ORDER BY subscription_id, cancelled_at DESC` оставляет
+последнюю отмену подписки. Без этого у `basic` лидировала бы `price` (3
+против 2), а на деле подписка 1 ушла с причиной `bugs`, и у причин ничья
+2:2.
+
+**`mode()` — не ответ на собеседовании.** `mode() WITHIN GROUP (ORDER BY
+reason)` возвращает самое частое значение, но при равенстве документация
+обещает «произвольное». Условие требует детерминированный тай-брейк,
+поэтому явно: `count(*)` по `(plan, reason)` и `row_number() OVER (PARTITION
+BY plan ORDER BY count(*) DESC, reason)`. Окно здесь стоит в том же
+`SELECT`, что и `GROUP BY`, — оно считается после группировки и видит
+агрегаты.
+
+**`NULL`-причина — отдельная история.** В `cancelled` она входит, в
+`with_reason` (`count(reason)`) — нет, а из выбора лидера отсекается
+`WHERE reason IS NOT NULL` — иначе `NULL` мог бы оказаться «самой частой
+причиной».
+
+**Тариф без отмен — `LEFT JOIN` от справочника.** Итоги и лидер собираются
+отдельными CTE и присоединяются к `plans`; у `team` оба — `NULL`, и
+`coalesce` превращает счётчики в нули, а `top_pct` остаётся `NULL`.
+
+**Что спросят дальше.** Как вывести не одну, а все причины-лидеры при
+ничьей — `rank()` вместо `row_number()` и `string_agg` по `rn = 1`.
+
+</Reveal>

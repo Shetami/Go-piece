@@ -1,0 +1,108 @@
+---
+title: Подстрахованный запрос
+description: Hedged request — если ответа нет за delay, отправить ту же просьбу другой реплике, первый успех выигрывает. Таймер от последнего запуска, мгновенная подстраховка после ошибки, отмена проигравших и буфер против утечек.
+kind: implement
+topic: channels
+level: hard
+order: 330
+related: [hedged-request, tail-latency, goroutine-leak]
+lecture: system-design/resilience
+---
+
+Напишите `Hedge`. Приём из статьи Google «The Tail at Scale»: медленные
+ответы обычно — случайность конкретной реплики (GC, соседи по диску), и
+вместо того чтобы ждать p99, через `delay` (обычно около p95) отправляют
+ту же просьбу другой реплике. Отличие от «спросить всех сразу» — лишняя
+нагрузка появляется только для медленных запросов.
+
+Что проверяют скрытые тесты:
+
+- первая попытка ответила сразу — вторая при `delay` в час не
+  запускается вовсе;
+- первая висит — через `delay` запускается вторая и выигрывает; первая
+  получает отмену, и все горутины завершаются;
+- первая упала — вторая запускается сразу, не дожидаясь часового `delay`;
+- упали все — ошибка содержит каждую, склеенные в порядке `fetchers`;
+  без `fetchers` — `ErrNoFetchers`;
+- дедлайн родительского контекста — `DeadlineExceeded`, даже если
+  попытки висят.
+
+<Reveal>
+
+```go
+func Hedge[T any](ctx context.Context, delay time.Duration, fetchers ...func(context.Context) (T, error)) (T, error) {
+	var zero T
+	if len(fetchers) == 0 {
+		return zero, ErrNoFetchers
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	type result struct {
+		i   int
+		v   T
+		err error
+	}
+	results := make(chan result, len(fetchers))
+	errs := make([]error, len(fetchers))
+	launched, failed := 0, 0
+	var timer <-chan time.Time
+	launch := func() {
+		i := launched
+		launched++
+		go func() {
+			v, err := fetchers[i](ctx)
+			results <- result{i, v, err}
+		}()
+		timer = nil
+		if launched < len(fetchers) {
+			timer = time.After(delay)
+		}
+	}
+	launch()
+	for {
+		select {
+		case r := <-results:
+			if r.err == nil {
+				return r.v, nil
+			}
+			errs[r.i] = r.err
+			failed++
+			if failed == len(fetchers) {
+				return zero, errors.Join(errs...)
+			}
+			if launched < len(fetchers) {
+				launch()
+			}
+		case <-timer:
+			launch()
+		case <-ctx.Done():
+			return zero, ctx.Err()
+		}
+	}
+}
+```
+
+**Буфер на все попытки — главная защита от утечки.** Мы возвращаемся на
+первом успехе, и читать остальные результаты больше некому. С
+небуферизованным каналом каждая проигравшая горутина навсегда застрянет
+на отправке. С буфером `len(fetchers)` она кладёт результат и
+завершается.
+
+**`defer cancel()` отменяет проигравших.** Без отмены висящая попытка
+продолжала бы держать соединение и нагружать реплику, ради которой всё
+и затевалось. Отмена — это и есть «не ждать, но не бросать».
+
+**Таймер — `nil`-канал, когда запускать больше нечего.** Иначе `case
+<-timer` сработал бы после последнего запуска и вызвал `launch` за
+пределами слайса. Таймер заводится от последнего запуска, поэтому
+попытки идут лесенкой, а не все разом.
+
+**Ошибки — по индексу, а не в порядке прихода.** `errs[r.i]` и
+`errors.Join` в конце дают стабильное сообщение: в логах и тестах оно не
+зависит от того, кто упал раньше. Что спросят дальше: почему подстраховка
+допустима только для идемпотентных запросов и как ограничить её долю
+(бюджет — не больше 5% запросов), чтобы в час пик она не удвоила
+нагрузку.
+
+</Reveal>

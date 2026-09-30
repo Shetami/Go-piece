@@ -1,4 +1,116 @@
 ---
+title: "Что дозаказать на склады"
+description: "Сетка «склад × товар», два один-ко-многим без размножения, правило склада поверх общего и последняя версия правила среди дублей."
 kind: implement
+topic: sql-joins
+level: hard
+order: 210
 ordered: true
 ---
+
+Сеть складов каждое утро формирует заказ поставщику. Нужно найти пары
+«активный склад × активный товар», где **остаток плюс то, что уже едет**,
+ниже минимума, и посчитать, сколько дозаказать.
+
+- **остаток** `on_hand` — сумма по всем ячейкам склада (`stock`); нет строк —
+  `0`;
+- **в пути** `in_transit` — сумма открытых (`status = 'open'`) заказов
+  поставщику на этот склад и товар;
+- **правило** `reorder_rules`: общее правило (`warehouse_id` пуст)
+  действует на всех складах, правило конкретного склада его **заменяет**.
+  Правила правят, не удаляя старые строки: из нескольких строк для одного
+  склада (или общего) и товара действует последняя по `updated_at`. Товар без
+  правил не дозаказывается;
+- дозаказ нужен, если `on_hand + in_transit < min_qty`; объём —
+  `target_qty − on_hand − in_transit`.
+
+- колонки: `warehouse`, `sku`, `on_hand`, `in_transit`, `order_qty`;
+- порядок: по `warehouse`, затем по `sku`.
+
+Что проверяют скрытые данные: товар в нескольких ячейках и с несколькими
+открытыми заказами одновременно, товар, которого на складе нет совсем,
+полученный (не открытый) заказ, правило склада поверх общего, старые версии
+правил, неактивные склад и товар.
+
+<Reveal>
+
+```sql
+WITH rules AS (
+  SELECT DISTINCT ON (warehouse_id, sku) warehouse_id, sku, min_qty, target_qty
+  FROM reorder_rules
+  ORDER BY warehouse_id, sku, updated_at DESC
+),
+on_hand AS (
+  SELECT warehouse_id, sku, sum(qty) AS qty
+  FROM stock
+  GROUP BY warehouse_id, sku
+),
+transit AS (
+  SELECT warehouse_id, sku, sum(qty) AS qty
+  FROM purchase_orders
+  WHERE status = 'open'
+  GROUP BY warehouse_id, sku
+),
+grid AS (
+  SELECT w.id AS warehouse_id, w.name, p.sku,
+         coalesce(own.min_qty, dflt.min_qty)       AS min_qty,
+         coalesce(own.target_qty, dflt.target_qty) AS target_qty,
+         coalesce(h.qty, 0) AS on_hand,
+         coalesce(t.qty, 0) AS in_transit
+  FROM warehouses w
+  CROSS JOIN products p
+  LEFT JOIN rules own  ON own.warehouse_id = w.id AND own.sku = p.sku
+  LEFT JOIN rules dflt ON dflt.warehouse_id IS NULL AND dflt.sku = p.sku
+  LEFT JOIN on_hand h  ON h.warehouse_id = w.id AND h.sku = p.sku
+  LEFT JOIN transit t  ON t.warehouse_id = w.id AND t.sku = p.sku
+  WHERE w.is_active AND p.is_active
+)
+SELECT name AS warehouse, sku, on_hand, in_transit,
+       target_qty - on_hand - in_transit AS order_qty
+FROM grid
+WHERE on_hand + in_transit < min_qty
+ORDER BY name, sku;
+```
+
+Ответ:
+
+```
+Москва | BOLT | 55 | 0 | 45
+Москва | PIPE | 0 | 0 | 15
+Тверь | BOLT | 70 | 0 | 50
+Тверь | PIPE | 3 | 0 | 12
+```
+
+**Нулевой остаток — это отсутствие строки, поэтому начинать надо с сетки.**
+PIPE в Москве нет ни в одной ячейке — именно его и надо заказывать в первую
+очередь, но запрос «от остатков» его не увидит. `CROSS JOIN` активных
+складов и товаров задаёт все клетки, остальное присоединяется к ним `LEFT`.
+
+**Два один-ко-многим — только после свёртки.** У гаек в Москве одна ячейка и
+два открытых заказа, у болтов — две ячейки. Если присоединить `stock` и
+`purchase_orders` к одной строке сырыми, каждая ячейка повторится на каждый
+заказ: `sum(stock.qty)` и `sum(po.qty)` умножатся друг на друга по числу
+строк. Каждый источник сворачивается до зерна «склад × товар» в своём CTE —
+тогда к клетке сетки присоединяется не больше одной строки из каждого.
+
+**Дубли в справочнике правил — «последняя версия на ключ».** `DISTINCT ON
+(warehouse_id, sku) … ORDER BY …, updated_at DESC` оставляет по одной строке
+на склад (или общее правило — `NULL` в `DISTINCT ON` образует свою группу) и
+товар. У PIPE действует общее правило от февраля (минимум 5), у Твери по
+болтам — собственное мартовское (минимум 80).
+
+**Переопределение — два `LEFT JOIN` и `coalesce`.** Условие
+`warehouse_id = w.id OR warehouse_id IS NULL` нашло бы для Твери обе строки
+правила и удвоило бы клетку. Порядок аргументов `coalesce` и есть
+приоритет: своё, иначе общее. Товар без правил получает `min_qty = NULL`, и
+сравнение `< NULL` его отсеивает.
+
+**Что в пути, а что уже нет.** Полученный заказ PIPE в Твери уже лежит в
+остатке — если учесть его ещё и как «в пути», дозаказа не будет.
+
+**Что спросят дальше.** «Как не заказать дважды, если отчёт запустят два
+раза?» — открытый заказ, созданный первым запуском, сразу попадает в
+`in_transit` второго; но между чтением и записью нужна блокировка или
+уникальный ключ на «открытый заказ по складу и товару».
+
+</Reveal>

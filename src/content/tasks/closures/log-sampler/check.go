@@ -1,6 +1,8 @@
 package main
 
-func chkT(ms int) time.Time { return time.Unix(1_700_000_000, 0).Add(time.Duration(ms) * time.Millisecond) }
+func chkT(ms int) time.Time {
+	return time.Unix(1_700_000_000, 0).Add(time.Duration(ms) * time.Millisecond)
+}
 
 func chkPassed(allow func(string, time.Time) bool, key string, n int, at time.Time) []int {
 	var out []int

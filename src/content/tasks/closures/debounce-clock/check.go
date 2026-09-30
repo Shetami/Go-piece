@@ -1,6 +1,8 @@
 package main
 
-func chkAt(ms int) time.Time { return time.Unix(1_700_000_000, 0).Add(time.Duration(ms) * time.Millisecond) }
+func chkAt(ms int) time.Time {
+	return time.Unix(1_700_000_000, 0).Add(time.Duration(ms) * time.Millisecond)
+}
 
 func TestDebounceLastValue(t *testing.T) {
 	var got []string

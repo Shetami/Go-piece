@@ -44,7 +44,10 @@ func TestConfigContinuation(t *testing.T) {
 
 func TestConfigLongLine(t *testing.T) {
 	long := strings.Repeat("я", 100_000) // 200 КБ — больше буфера bufio.Scanner по умолчанию
-	got := chkParseCfg(t, "key "+long+"\nnext 1\n")
+	got, err := ParseConfig(strings.NewReader("key " + long + "\nnext 1\n"))
+	if err != nil {
+		t.Fatalf("строка в 200 КБ: неожиданная ошибка %v", err)
+	}
 	if len(got) != 2 || len(got[0].Args) != 1 || got[0].Args[0] != long || got[1].Line != 2 {
 		t.Fatalf("длинная строка разобрана неверно: %d директив", len(got))
 	}

@@ -1,0 +1,154 @@
+---
+title: Разбор и группировка дампа горутин
+description: Распарсить вывод runtime.Stack(all) или SIGQUIT — id, состояние, минуты ожидания, верхняя функция, кто создал — и сгруппировать одинаковые стеки, как это делает pprof goroutine.
+kind: implement
+topic: runtime
+level: hard
+order: 300
+related: [goroutine-leak, goroutine, gopark]
+lecture: go-runtime/scheduler
+---
+
+Сервис завис, вы сняли дамп (`kill -QUIT` или `/debug/pprof/goroutine?debug=2`),
+а в нём 40 000 горутин. Читать глазами бесполезно. Нужно понять, что
+**30 000 из них висят в одном и том же месте**, и сколько минут. Напишите
+разбор дампа и группировку, как у `pprof -top` и `panicparse`.
+
+Что проверяют скрытые тесты:
+
+- заголовки `[running]`, `[chan receive, 3 minutes]`,
+  `[select, 1 minutes, locked to thread]`, `[chan receive (nil chan)]`;
+- имя функции без аргументов, в том числе у методов с указателем
+  `main.(*Server).worker(0xc0…, {0x1, 0x2})`, у встроенных вызовов `(...)`
+  и у дженериков `main.stuck[...](...)`;
+- `created by` в новом формате (`… in goroutine 1`) и в старом (без
+  хвоста), у главной горутины — пусто;
+- некорректный заголовок даёт ошибку;
+- группы упорядочены по размеру, затем по `State` и `Top`, id внутри
+  группы — по возрастанию;
+- настоящий дамп `runtime.Stack(buf, true)` с тремя горутинами на канале
+  разбирается, и они попадают в одну группу.
+
+<Reveal>
+
+```go
+func ParseStacks(dump string) ([]Goroutine, error) {
+	var out []Goroutine
+	for _, block := range strings.Split(strings.TrimSpace(dump), "\n\n") {
+		lines := strings.Split(strings.TrimSpace(block), "\n")
+		if len(lines) == 0 || lines[0] == "" {
+			continue
+		}
+		g, err := parseHeader(lines[0])
+		if err != nil {
+			return nil, err
+		}
+		for _, l := range lines[1:] {
+			if strings.HasPrefix(l, "\t") {
+				continue
+			}
+			if rest, ok := strings.CutPrefix(l, "created by "); ok {
+				g.CreatedBy, _, _ = strings.Cut(rest, " in goroutine ")
+				continue
+			}
+			if g.Top == "" && !strings.HasPrefix(l, "...") {
+				g.Top = funcName(l)
+			}
+		}
+		out = append(out, g)
+	}
+	return out, nil
+}
+
+func parseHeader(h string) (Goroutine, error) {
+	var g Goroutine
+	rest, ok := strings.CutPrefix(h, "goroutine ")
+	open := strings.IndexByte(rest, '[')
+	if !ok || open < 0 || !strings.HasSuffix(rest, "]:") {
+		return g, fmt.Errorf("некорректный заголовок %q", h)
+	}
+	id, err := strconv.Atoi(strings.TrimSpace(rest[:open]))
+	if err != nil {
+		return g, fmt.Errorf("некорректный id в %q", h)
+	}
+	g.ID = id
+	parts := strings.Split(rest[open+1:len(rest)-2], ", ")
+	g.State = parts[0]
+	for _, p := range parts[1:] {
+		if n, ok := strings.CutSuffix(p, " minutes"); ok {
+			if m, err := strconv.Atoi(n); err == nil {
+				g.Wait = time.Duration(m) * time.Minute
+			}
+		}
+	}
+	return g, nil
+}
+
+func funcName(line string) string {
+	if strings.HasSuffix(line, ")") {
+		if i := strings.LastIndexByte(line, '('); i > 0 {
+			return line[:i]
+		}
+	}
+	return line
+}
+
+func GroupStacks(gs []Goroutine) []Group {
+	type key struct{ state, top string }
+	idx := map[key]int{}
+	var out []Group
+	for _, g := range gs {
+		k := key{g.State, g.Top}
+		i, ok := idx[k]
+		if !ok {
+			i = len(out)
+			idx[k] = i
+			out = append(out, Group{State: g.State, Top: g.Top})
+		}
+		out[i].IDs = append(out[i].IDs, g.ID)
+	}
+	for i := range out {
+		slices.Sort(out[i].IDs)
+	}
+	slices.SortFunc(out, func(a, b Group) int {
+		return cmp.Or(
+			cmp.Compare(len(b.IDs), len(a.IDs)),
+			cmp.Compare(a.State, b.State),
+			cmp.Compare(a.Top, b.Top),
+		)
+	})
+	return out
+}
+```
+
+**Состояние — это то, на чём горутина запаркована.** `chan receive`,
+`select`, `sync.Mutex.Lock`, `IO wait`, `sleep` — это `waitReason`
+рантайма, строка, которую передают в `gopark`. Минуты появляются только
+у горутин, ждущих дольше минуты. Это первый признак утечки: здоровые
+горутины так долго не ждут, а если ждут, то в `IO wait` на keep-alive
+соединениях.
+
+**Последняя открывающая скобка, а не первая.** `main.(*Server).worker(0xc…)`
+содержит скобки в самом имени метода. `strings.Index(line, "(")` отрежет
+`main.` и сгруппирует все методы всех типов вместе. Аргументы всегда
+идут последними, поэтому нужна `LastIndexByte`. У встроенных функций
+вместо аргументов стоит `(...)`, у дженериков в имени есть `[...]`.
+
+**Формат меняется между версиями.** С Go 1.21 в `created by` добавилось
+`in goroutine N`. Раньше его не было, и старые дампы тоже приходится
+разбирать. Поэтому разбор терпимый: неизвестные части в скобках
+заголовка игнорируются, а строгой проверке подвергается только сама
+форма заголовка. Именно по ней видно, что на вход пришло что-то не то.
+
+**Группировка по `(State, Top)` грубовата.** 30 000 горутин в
+`chan receive` в `worker` могут висеть на **разных** каналах. `panicparse`
+группирует по полному стеку и по аргументам (адресам каналов). Хорошее
+развитие задачи: добавить ключ по всему стеку и объяснить, что даёт
+адрес канала в аргументах.
+
+**Что спросят дальше.** Чем `debug=1` в `/debug/pprof/goroutine` отличается
+от `debug=2`: первый уже сгруппирован рантаймом и дешевле, второй —
+полный дамп, как здесь. И почему `runtime.Stack(buf, true)` вызывает
+остановку мира: чтобы стеки всех горутин были согласованы на один момент.
+
+</Reveal>

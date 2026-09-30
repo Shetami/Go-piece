@@ -23,12 +23,17 @@ func chkResult(t *testing.T, ch <-chan error, what string) error {
 func TestWatchdogKicksKeepAlive(t *testing.T) {
 	kicks := make(chan struct{})
 	res := Watchdog(context.Background(), 60*time.Millisecond, kicks)
+	if res == nil {
+		t.Fatal("Watchdog вернул nil-канал")
+	}
 	for i := range 20 {
 		time.Sleep(10 * time.Millisecond)
 		select {
 		case kicks <- struct{}{}:
 		case err := <-res:
 			t.Fatalf("kick %d каждые 10 мс при timeout 60 мс, а watchdog сработал: %v (таймер не перезаводится?)", i, err)
+		case <-time.After(time.Second):
+			t.Fatalf("kick %d: Watchdog не читает kicks", i)
 		}
 	}
 	if err := chkResult(t, res, "после прекращения kick"); !errors.Is(err, ErrIdle) {
@@ -46,7 +51,11 @@ func TestWatchdogIdleFromStart(t *testing.T) {
 func TestWatchdogStopAndCancel(t *testing.T) {
 	kicks := make(chan struct{})
 	res := Watchdog(context.Background(), time.Hour, kicks)
-	kicks <- struct{}{}
+	select {
+	case kicks <- struct{}{}:
+	case <-time.After(time.Second):
+		t.Fatal("Watchdog не читает kicks")
+	}
 	close(kicks)
 	if err := chkResult(t, res, "после закрытия kicks"); err != nil {
 		t.Fatalf("kicks закрыт, результат %v, ожидали nil", err)

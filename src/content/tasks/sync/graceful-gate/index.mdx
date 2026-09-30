@@ -1,0 +1,92 @@
+---
+title: Шлюз с graceful-закрытием
+description: Перестать пускать новые операции, дождаться начатых, один раз освободить ресурс. Mutex + WaitGroup + Once — и гонка между Add и Wait, на которой падает наивное решение.
+kind: implement
+topic: sync
+level: hard
+order: 290
+related: [graceful-shutdown, waitgroup, sync-once]
+lecture: production/go-service
+---
+
+Реализуйте `Gate` — обёртку над ресурсом (соединение, продюсер Kafka,
+файл лога), которая закрывается аккуратно: новые операции получают
+`ErrClosed`, начатые спокойно доделываются, и только потом ресурс
+закрывается. Такой кусок есть в каждом клиенте с методом `Close`.
+Контракт — в doc-комментариях.
+
+Что проверяют скрытые тесты (с детектором гонок):
+
+- `Close` не возвращается, пока идёт начатая операция, а новые `Do` в
+  это время получают `ErrClosed` и не вызывают `fn`;
+- десять одновременных `Close` и ещё один после: `onClose` вызван один
+  раз, все получили её ошибку;
+- восемь горутин непрерывно вызывают `Do`, пока идёт `Close`: ни одна
+  операция не выполняется одновременно с `onClose` или после него.
+
+<Reveal>
+
+```go
+type Gate struct {
+	mu       sync.Mutex
+	closed   bool
+	inflight sync.WaitGroup
+
+	onClose  func() error
+	once     sync.Once
+	closeErr error
+}
+
+func (g *Gate) Do(fn func() error) error {
+	g.mu.Lock()
+	if g.closed {
+		g.mu.Unlock()
+		return ErrClosed
+	}
+	g.inflight.Add(1)
+	g.mu.Unlock()
+
+	defer g.inflight.Done()
+	return fn()
+}
+
+func (g *Gate) Close() error {
+	g.once.Do(func() {
+		g.mu.Lock()
+		g.closed = true
+		g.mu.Unlock()
+		g.inflight.Wait()
+		g.closeErr = g.onClose()
+	})
+	return g.closeErr
+}
+```
+
+**Главная ловушка — `atomic.Bool` для флага и отдельно `WaitGroup`.**
+`if closed.Load() { return ErrClosed }; wg.Add(1)` — между проверкой и
+`Add` успевает пройти весь `Close`: флаг выставлен, `Wait` увидел ноль и
+вернулся, ресурс закрыт. А `Do` делает `Add` и лезет в закрытое
+соединение. Документация `WaitGroup` прямо требует: `Add` с нуля не
+должен гоняться с `Wait`. Проверка флага и `Add` должны быть атомарны
+относительно установки флага — отсюда общий мьютекс.
+
+**Мьютекс не держится во время `fn`.** Под ним только «проверить и
+записаться»; сама операция идёт без блокировки, иначе операции шли бы по
+одной. `RWMutex` с `RLock` на время `fn` тоже работает (`Close` берёт
+`Lock` и тем самым ждёт всех), но тогда долгая операция не даёт даже
+выставить флаг, и новые `Do` продолжают проходить, пока писатель ждёт.
+
+**`sync.Once` решает сразу две задачи.** `onClose` вызывается ровно раз,
+а одновременные `Close` ждут внутри `once.Do`, пока первый не закончит.
+Поэтому `closeErr` читается без мьютекса: завершение `Once` happens-before
+возврата из любого `once.Do`.
+
+**`defer g.inflight.Done()`.** Если `fn` запаникует, без `defer` счётчик
+никогда не опустится до нуля, и `Close` зависнет навсегда.
+
+**Что спросят дальше.** `Close` с таймаутом: `Close(ctx)` ждёт
+`inflight.Wait()` в отдельной горутине и выходит по `ctx.Done()` — так
+`http.Server.Shutdown` не даёт одному зависшему запросу держать
+остановку пода дольше `terminationGracePeriodSeconds`.
+
+</Reveal>

@@ -1,4 +1,86 @@
 ---
+title: "Статусы отправлений по неделям"
+description: "Pivot статусов через FILTER, недели без отправлений и грязные статусы от разных перевозчиков."
 kind: implement
+topic: sql-grouping
+level: medium
+order: 90
 ordered: true
 ---
+
+Логистике нужна сводная таблица: сколько отправлений создано за каждую
+неделю и в каком они статусе. Статусы приходят от разных перевозчиков как
+есть — в разном регистре и с пробелами по краям, иногда статуса нет вовсе.
+
+Неделя начинается с понедельника. Нужны недели, начинающиеся с 1 по 29
+апреля 2024 года (пять недель), — все, даже если отправлений не было.
+Неделя 29 апреля продолжается до 5 мая включительно.
+
+- `week` — понедельник недели, тип `date`;
+- `total` — отправлений за неделю;
+- `delivered`, `in_transit`, `lost` — по статусам после приведения к нижнему
+  регистру и обрезки пробелов;
+- `other` — все остальные, **включая отправления без статуса**.
+
+Порядок: по `week`.
+
+Что проверяют скрытые тесты: границы недель (воскресенье, соседние месяцы),
+пустая неделя с нулями, статусы в разном регистре, `NULL`-статус в `other`.
+
+<Reveal>
+
+```sql
+WITH norm AS (
+  SELECT id,
+         date_trunc('week', created_at::timestamp)::date AS week,
+         lower(trim(status)) AS st
+  FROM shipments
+)
+SELECT w.week::date AS week,
+       count(n.id) AS total,
+       count(n.id) FILTER (WHERE n.st = 'delivered')  AS delivered,
+       count(n.id) FILTER (WHERE n.st = 'in_transit') AS in_transit,
+       count(n.id) FILTER (WHERE n.st = 'lost')       AS lost,
+       count(n.id) FILTER (WHERE n.st IS NULL
+                              OR n.st NOT IN ('delivered', 'in_transit', 'lost')) AS other
+FROM generate_series(date '2024-04-01', date '2024-04-29', interval '1 week') AS w(week)
+LEFT JOIN norm n ON n.week = w.week::date
+GROUP BY w.week
+ORDER BY w.week;
+```
+
+Ответ:
+
+```
+2024-04-01 | 3 | 2 | 1 | 0 | 0
+2024-04-08 | 3 | 0 | 0 | 1 | 2
+2024-04-15 | 0 | 0 | 0 | 0 | 0
+2024-04-22 | 2 | 1 | 1 | 0 | 0
+2024-04-29 | 2 | 1 | 0 | 1 | 0
+```
+
+**Pivot — это условная агрегация.** Каждая колонка — свой `count(…)
+FILTER (WHERE …)` над одной и той же группой. В PostgreSQL нет `PIVOT`, а
+`crosstab` из `tablefunc` для фиксированного набора колонок не нужен.
+
+**`NOT IN` и `NULL`.** `NULL NOT IN ('delivered', …)` — это `NULL`, а не
+`true`, и `FILTER` такую строку отбросит. Отправление без статуса пропадёт
+из всех колонок, и сумма колонок не сойдётся с `total`. Поэтому явное `st
+IS NULL OR …`.
+
+**`count(n.id)`, а не `count(*)`, после `LEFT JOIN` с сеткой.** Для пустой
+недели соединение даёт одну строку, где все колонки справа — `NULL`.
+`count(*)` посчитал бы её как отправление, `count(n.id)` — нет.
+
+**Неделя — это `date_trunc('week', …)`, а не `BETWEEN`.** Фильтр
+`created_at BETWEEN '2024-04-01' AND '2024-04-29'` отрезает хвост последней
+недели (30 апреля — 5 мая). Сетка из `generate_series` сама ограничивает
+период: 31 марта и 6 мая в неё не попадают. `date_trunc` над `date`
+приводит аргумент к `timestamptz` — явное `::timestamp` убирает зависимость
+от часового пояса сессии.
+
+**Нормализация — в CTE, один раз.** `lower(trim(status))` в каждом `FILTER`
+тоже работает, но читается хуже и легко забыть в одном месте. В проде такие
+значения чистят при записи или хранят в `enum`/справочнике.
+
+</Reveal>

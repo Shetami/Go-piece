@@ -1,0 +1,116 @@
+---
+title: Типизированный конвейер из этапов
+description: Stage[T, U] как тип-функция, Map, Filter и Batch поверх каналов и Then, который склеивает этапы с проверкой типов при компиляции. Хвостовая пачка, пачки без общей памяти и выход без утечек, когда потребитель ушёл.
+kind: implement
+topic: generics
+level: hard
+order: 310
+related: [pipeline, goroutine-leak, context-cancellation, chan-close]
+lecture: concurrency/pipelines
+---
+
+Допишите `MapStage`, `FilterStage`, `BatchStage` и `Then`. Конвейер
+импорта: строки → фильтр пустых → разбор → пачки по 500 для
+`INSERT`. С `chan any` каждый этап начинается с приведения типа, а
+ошибка соединения видна только в рантайме.
+
+Что проверяют скрытые тесты:
+
+- `Then(Then(Filter, Map), Batch)` собирается, меняя типы
+  `string → int → []int`, и выдаёт правильные пачки;
+- остаток уходит последней пачкой, пустой хвост и пустой вход не дают
+  пустых пачек, правка одной пачки не меняет другую;
+- все выходы закрываются;
+- потребитель прочитал две пачки и отменил контекст — через немного
+  времени не остаётся ни одной горутины конвейера.
+
+<Reveal>
+
+```go
+type Stage[T, U any] func(ctx context.Context, in <-chan T) <-chan U
+
+func send[T any](ctx context.Context, out chan<- T, v T) bool {
+	select {
+	case out <- v:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func MapStage[T, U any](f func(T) U) Stage[T, U] {
+	return func(ctx context.Context, in <-chan T) <-chan U {
+		out := make(chan U)
+		go func() {
+			defer close(out)
+			for v := range in {
+				if !send(ctx, out, f(v)) {
+					return
+				}
+			}
+		}()
+		return out
+	}
+}
+
+func BatchStage[T any](n int) Stage[T, []T] {
+	return func(ctx context.Context, in <-chan T) <-chan []T {
+		out := make(chan []T)
+		go func() {
+			defer close(out)
+			batch := make([]T, 0, n)
+			for v := range in {
+				batch = append(batch, v)
+				if len(batch) == n {
+					if !send(ctx, out, batch) {
+						return
+					}
+					batch = make([]T, 0, n)
+				}
+			}
+			if len(batch) > 0 && ctx.Err() == nil {
+				send(ctx, out, batch)
+			}
+		}()
+		return out
+	}
+}
+
+func Then[A, B, C any](first Stage[A, B], second Stage[B, C]) Stage[A, C] {
+	return func(ctx context.Context, in <-chan A) <-chan C {
+		return second(ctx, first(ctx, in))
+	}
+}
+```
+
+`FilterStage` устроен как `MapStage`, только отправляет `v`, когда
+`keep(v)` истинно.
+
+**Обобщённый тип-функция.** `Stage[T, U]` — просто именованная
+сигнатура, но с ней `Then[A, B, C]` проверяет стыковку на этапе
+компиляции: выход первого этапа обязан совпасть со входом второго, иначе
+`B` не выведется. Трёх параметров типа хватает на цепочку любой длины —
+`Then` вкладывается.
+
+**Каждая отправка — через `select` с `ctx.Done()`.** Утечка в конвейерах
+почти всегда одна и та же: потребитель ушёл, а этап навсегда встал на
+`out <- v`. Одно чтение `in` проблему не решает, потому что этап
+блокируется на записи. Хелпер `send` делает правильный вариант
+единственным.
+
+**`defer close(out)` в каждом этапе.** Закрытие — сигнал «данных больше
+нет» для следующего `range`. Закрывает всегда тот, кто пишет, и ровно
+один раз. Раз все этапы выходят по отмене, закрытия каскадом доходят до
+конца конвейера.
+
+**Пачка после отправки принадлежит получателю.** Соблазн переиспользовать
+буфер через `batch = batch[:0]` приводит к тому, что следующая пачка
+перезаписывает уже отданную. Отсюда новый `make` после каждой отправки.
+Хвост отправляем только непустым.
+
+**Что спросят дальше:** как распараллелить `MapStage` на `k` воркеров и
+сохранить порядок, как добавить в `BatchStage` отправку по таймеру
+(«500 штук или раз в секунду») и как протащить ошибки — отдельным
+каналом, `Result[T]` в потоке или `errgroup`.
+
+</Reveal>

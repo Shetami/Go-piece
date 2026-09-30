@@ -1,0 +1,90 @@
+---
+title: Валидаторы и адаптер функции к интерфейсу
+description: ValidatorFunc в стиле http.HandlerFunc, пара готовых проверок и комбинатор All, который собирает все ошибки через errors.Join. Длина в символах, а не в байтах, и nil среди валидаторов.
+kind: implement
+topic: interfaces
+level: easy
+order: 320
+---
+
+Интерфейс с одним методом удобно реализовывать обычной функцией — через
+тип-адаптер, как `http.HandlerFunc`. Напишите:
+
+- `ValidatorFunc.Validate`;
+- `MinLen` и `NotBlank` — готовые проверки;
+- `All` — комбинатор: проверяет всеми и возвращает все ошибки сразу.
+  Пользователю формы удобнее увидеть все проблемы, а не исправлять по одной.
+
+Что проверяют скрытые тесты:
+
+- функция, приведённая к `ValidatorFunc`, реализует `Validator`;
+- `MinLen(6)` пропускает «привет»: шесть букв, хотя двенадцать байт;
+- `NotBlank` отвергает строку из пробелов и переводов строк;
+- `All` пропускает `nil`-валидаторы, ошибки идут в исходном порядке,
+  `All()` без валидаторов ничего не запрещает, `All` вкладывается в `All`.
+
+<Reveal>
+
+```go
+type Validator interface {
+	Validate(s string) error
+}
+
+type ValidatorFunc func(s string) error
+
+func (f ValidatorFunc) Validate(s string) error { return f(s) }
+
+func MinLen(n int) Validator {
+	return ValidatorFunc(func(s string) error {
+		if l := utf8.RuneCountInString(s); l < n {
+			return fmt.Errorf("length %d is less than %d", l, n)
+		}
+		return nil
+	})
+}
+
+func NotBlank() Validator {
+	return ValidatorFunc(func(s string) error {
+		if strings.TrimSpace(s) == "" {
+			return errors.New("blank")
+		}
+		return nil
+	})
+}
+
+func All(vs ...Validator) Validator {
+	return ValidatorFunc(func(s string) error {
+		var errs []error
+		for _, v := range vs {
+			if v == nil {
+				continue
+			}
+			if err := v.Validate(s); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		return errors.Join(errs...)
+	})
+}
+```
+
+**Метод у функционального типа.** `ValidatorFunc` — именованный тип над
+`func(string) error`, и у него может быть метод. `ValidatorFunc(f)` —
+преобразование, не вызов, поэтому любая подходящая функция становится
+`Validator` без обёрточной структуры. `MinLen`, `NotBlank` и `All` так и
+возвращают замыкания.
+
+**`len(s)` — это байты.** Для кириллицы `len("привет") == 12`, и проверка
+«минимум 6 символов» пропустила бы трёхбуквенное слово. Символы считает
+`utf8.RuneCountInString`.
+
+**`All` сам — `Validator`.** Поэтому он вкладывается сам в себя и в любой
+код, который принимает `Validator`. Это паттерн «компоновщик»: группа
+выглядит для внешнего кода как один элемент.
+
+**`errors.Join` без особых случаев.** Он пропускает `nil`-ошибки и
+возвращает `nil`, если непустых нет, — отдельная проверка «были ли ошибки»
+не нужна. Текст — сообщения через перевод строки, а `errors.Is` и
+`errors.As` видят каждую ошибку по отдельности.
+
+</Reveal>

@@ -1,0 +1,98 @@
+---
+title: "Перевод из листа ожидания"
+description: "WITH … UPDATE FROM RETURNING: свободные места через агрегат, очередь окном, переполненные события и итог, который нельзя перечитать из таблицы."
+kind: implement
+topic: sql-subqueries
+level: hard
+order: 260
+ordered: true
+---
+
+После отмен на мероприятиях освободились места. Одной командой переведите
+людей из листа ожидания в подтверждённые и верните, кого перевели.
+
+- свободных мест у события — `capacity` минус число регистраций со статусом
+  `'confirmed'`; отменённые (`'cancelled'`) мест не занимают;
+- из листа ожидания (`'waitlist'`) переводятся первые по очереди: раньше
+  `created_at`, при равном времени — меньший `id`; переводится не больше
+  людей, чем свободных мест;
+- если мест нет или событие переполнено, никого не переводят.
+
+- колонки: `title`, `person`, `position` — место человека в очереди своего
+  события (1, 2, …), `confirmed_after` — сколько подтверждённых у события
+  **после** перевода;
+- порядок: по `title`, затем по `position`.
+
+Что проверяют скрытые данные: отменённую регистрацию, двух ожидающих с
+одинаковым временем, событие, где подтверждённых больше вместимости,
+очередь короче числа свободных мест, событие без очереди.
+
+Каждый прогон откатывается, так что данные задачи не пострадают.
+
+<Reveal>
+
+```sql
+WITH free AS (
+  SELECT e.id AS event_id,
+         count(r.id) FILTER (WHERE r.status = 'confirmed') AS confirmed,
+         e.capacity - count(r.id) FILTER (WHERE r.status = 'confirmed') AS seats
+  FROM events e
+  LEFT JOIN registrations r ON r.event_id = e.id
+  GROUP BY e.id, e.capacity
+),
+queue AS (
+  SELECT id, event_id,
+         row_number() OVER (PARTITION BY event_id ORDER BY created_at, id) AS pos
+  FROM registrations
+  WHERE status = 'waitlist'
+),
+promoted AS (
+  UPDATE registrations r
+  SET status = 'confirmed'
+  FROM queue q
+  JOIN free f ON f.event_id = q.event_id
+  WHERE r.id = q.id
+    AND q.pos <= f.seats
+  RETURNING r.event_id, r.person, q.pos, f.confirmed
+)
+SELECT e.title,
+       p.person,
+       p.pos AS position,
+       p.confirmed + count(*) OVER (PARTITION BY p.event_id) AS confirmed_after
+FROM promoted p
+JOIN events e ON e.id = p.event_id
+ORDER BY e.title, p.pos;
+```
+
+Ответ:
+
+```
+Go-митап | Даша | 1 | 3
+Хакатон | Нина | 1 | 3
+Хакатон | Мира | 2 | 3
+```
+
+**Сначала посчитать, потом менять.** Свободные места (`free`) и очередь
+(`queue`) считаются в CTE до `UPDATE`, и `UPDATE … FROM` соединяет
+регистрацию с её местом в очереди и числом мест. Условие `pos <= seats`
+само справляется с краями: на переполненном SQL-воркшопе `seats = -1`, и
+никто не проходит; на Хакатоне мест 4, а в очереди двое — переводятся оба.
+
+**Что занимает место.** Заготовка считает «всё, кроме листа ожидания» и
+записывает отменившуюся Веру в занятые места — на Go-митап никто не
+попадает. Нужен ровно `status = 'confirmed'`.
+
+**Тай-брейкер в очереди.** Даша и Гоша записались в одну секунду; мест одно.
+Без `id` в `ORDER BY` окна выбор между ними зависит от физического порядка
+строк — перевести могут любого, и повторный прогон даст другой ответ.
+
+**Итог — только через `RETURNING`.** Основной `SELECT` видит
+`registrations` в состоянии *до* `UPDATE`, поэтому пересчитать
+подтверждённых запросом к таблице нельзя — получится старое число (так
+ошибается заготовка). Правильно: «было» из `free`, протащенное через
+`RETURNING`, плюс число переведённых — окно по строкам `promoted`. Спросят
+дальше: «а если два таких запроса запустят одновременно?» — оба посчитают
+одни и те же свободные места и переполнят событие; нужен `SELECT … FOR
+UPDATE` на строке события или уровень изоляции `SERIALIZABLE`.
+
+</Reveal>

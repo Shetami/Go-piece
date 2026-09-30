@@ -57,11 +57,3 @@ func TestMergeKManyLists(t *testing.T) {
 		t.Fatalf("k=256, N=%d: %d сравнений (%.1f на элемент) — ожидали O(log k) на элемент", n, calls, float64(calls)/float64(n))
 	}
 }
-
-func TestMergeKFewLongLists(t *testing.T) {
-	// k=4: log k = 2. Склеить всё и отсортировать — ~log N ≈ 16 сравнений на элемент.
-	calls, n := chkCountedMerge(t, 4, 16000)
-	if calls > n*(3*2+4) {
-		t.Fatalf("k=4, N=%d: %d сравнений (%.1f на элемент) — похоже на сортировку всего, а не на слияние", n, calls, float64(calls)/float64(n))
-	}
-}

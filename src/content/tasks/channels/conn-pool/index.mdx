@@ -1,0 +1,124 @@
+---
+title: Пул соединений на каналах
+description: Свободные соединения в буферизованном канале, лимит открытых — семафором. Приоритет свободного над новым, место после неудачного dial, сломанные соединения и закрытие пула.
+kind: implement
+topic: channels
+level: hard
+order: 290
+related: [connection-pool, semaphore, select]
+lecture: production/connections
+---
+
+Напишите `Pool`. Так устроены пулы в драйверах баз данных, HTTP-клиенте,
+клиентах Redis: соединения дорогие, их переиспользуют, а число открытых
+ограничено — база не выдержит тысячу подключений от одного сервиса.
+
+Что проверяют скрытые тесты:
+
+- сто раз `Get` + `Put` подряд — открыто одно соединение: свободное
+  всегда берётся раньше, чем открывается новое;
+- пул на 2 выдал оба — третий `Get` ждёт и по дедлайну возвращает
+  `DeadlineExceeded`; после `Put(conn, broken = true)` открывается новое,
+  а сломанное закрыто;
+- ошибка `dial` возвращается вызывающему и не занимает место навсегда;
+- двадцать горутин берут и возвращают соединения, часть — сломанными:
+  открыто никогда не больше `max`;
+- `Close` будит ждущий `Get` с `ErrPoolClosed`, двойной `Close` не
+  паникует, соединения, возвращённые после `Close`, закрываются — в итоге
+  не остаётся ни одного открытого.
+
+<Reveal>
+
+```go
+type Pool struct {
+	dial      func(context.Context) (*Conn, error)
+	closeConn func(*Conn)
+	idle      chan *Conn
+	slots     chan struct{}
+	mu        sync.Mutex
+	closed    bool
+	closedCh  chan struct{}
+}
+
+func (p *Pool) Get(ctx context.Context) (*Conn, error) {
+	select {
+	case <-p.closedCh:
+		return nil, ErrPoolClosed
+	default:
+	}
+	select {
+	case c := <-p.idle:
+		return c, nil
+	default:
+	}
+	select {
+	case c := <-p.idle:
+		return c, nil
+	case p.slots <- struct{}{}:
+		c, err := p.dial(ctx)
+		if err != nil {
+			<-p.slots
+			return nil, err
+		}
+		return c, nil
+	case <-p.closedCh:
+		return nil, ErrPoolClosed
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (p *Pool) Put(c *Conn, broken bool) {
+	p.mu.Lock()
+	if broken || p.closed {
+		p.mu.Unlock()
+		p.closeConn(c)
+		<-p.slots
+		return
+	}
+	p.idle <- c
+	p.mu.Unlock()
+}
+
+func (p *Pool) Close() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return
+	}
+	p.closed = true
+	close(p.closedCh)
+	for {
+		select {
+		case c := <-p.idle:
+			p.closeConn(c)
+			<-p.slots
+		default:
+			return
+		}
+	}
+}
+```
+
+**Два канала — два разных вопроса.** `idle` отвечает «какие соединения
+свободны», `slots` — «сколько открыто». Одним каналом не обойтись: занятое
+соединение не лежит в `idle`, но место занимает.
+
+**Приоритет свободного — отдельным `select` с `default`.** Если
+«взять свободное» и «открыть новое» стоят в одном `select`, при свободном
+соединении и свободном месте выбор случаен — пул открывает лишние
+соединения, пока не упрётся в `max`. Первый тест это ловит.
+
+**Каждый выход из `Get`, кроме успеха, возвращает место.** Неудачный
+`dial` без `<-p.slots` навсегда съедает слот: после `max` сетевых ошибок
+пул мёртв, хотя база уже поднялась. Сломанное соединение тоже
+освобождает место, иначе пул медленно усыхает.
+
+**`Put` и `Close` — под одним мьютексом.** Без него `Put` проверил
+«не закрыт», `Close` вычистил `idle`, и `Put` положил соединение, которое
+уже никто не закроет, — утечка сокета. Что спросят дальше: как добавить
+проверку «живости» при выдаче, максимальное время жизни соединения и
+закрытие простаивающих — это то, что настраивают `SetConnMaxLifetime` и
+`SetMaxIdleConns` в `database/sql`.
+
+</Reveal>

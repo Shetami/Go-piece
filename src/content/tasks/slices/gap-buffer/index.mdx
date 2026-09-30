@@ -1,0 +1,108 @@
+---
+title: Текстовый буфер с дырой
+description: Gap buffer — структура редакторов, где набор в середине текста стоит O(1). Рост с переносом хвоста, перемещение курсора copy с перекрытием и курсор в символах, а не в байтах.
+kind: implement
+topic: slices
+level: hard
+order: 390
+related: [growslice]
+lecture: go-runtime/slices
+---
+
+Напишите методы `Editor`. Вставка в середину слайса — O(n) на сдвиг
+хвоста; набор текста — тысячи таких вставок в одном и том же месте.
+Gap buffer (так хранят текст Emacs и многие поля ввода) держит «дыру» у
+курсора: вставка просто заполняет дыру, а сдвиг происходит, только когда
+курсор перемещают.
+
+Что проверяют скрытые тесты:
+
+- вставка, перемещение, `Backspace` и `Delete` с обрезкой по границам;
+  отрицательные `n` ничего не удаляют; нулевое значение `Editor` готово
+  к работе;
+- курсор и удаление считаются в символах: кириллица и эмодзи;
+- пять тысяч случайных операций сверяются с моделью на `[]rune`;
+- двести тысяч нажатий в середине стотысячного текста — быстро.
+
+<Reveal>
+
+```go
+func (e *Editor) grow(need int) {
+	if e.gapEnd-e.gapStart >= need {
+		return
+	}
+	used := len(e.buf) - (e.gapEnd - e.gapStart)
+	size := max(2*len(e.buf), used+need, 16)
+	nb := make([]rune, size)
+	copy(nb, e.buf[:e.gapStart])
+	tail := len(e.buf) - e.gapEnd
+	copy(nb[size-tail:], e.buf[e.gapEnd:])
+	e.buf, e.gapEnd = nb, size-tail
+}
+
+func (e *Editor) Insert(s string) {
+	rs := []rune(s)
+	e.grow(len(rs))
+	e.gapStart += copy(e.buf[e.gapStart:], rs)
+}
+
+func (e *Editor) Backspace(n int) int {
+	k := min(max(n, 0), e.gapStart)
+	e.gapStart -= k
+	return k
+}
+
+func (e *Editor) Delete(n int) int {
+	k := min(max(n, 0), len(e.buf)-e.gapEnd)
+	e.gapEnd += k
+	return k
+}
+
+func (e *Editor) Move(d int) {
+	if d < 0 {
+		k := min(-d, e.gapStart)
+		copy(e.buf[e.gapEnd-k:e.gapEnd], e.buf[e.gapStart-k:e.gapStart])
+		e.gapStart -= k
+		e.gapEnd -= k
+	} else {
+		k := min(d, len(e.buf)-e.gapEnd)
+		copy(e.buf[e.gapStart:e.gapStart+k], e.buf[e.gapEnd:e.gapEnd+k])
+		e.gapStart += k
+		e.gapEnd += k
+	}
+}
+
+func (e *Editor) Cursor() int { return e.gapStart }
+
+func (e *Editor) String() string {
+	return string(e.buf[:e.gapStart]) + string(e.buf[e.gapEnd:])
+}
+```
+
+**Один массив, три зоны.** `buf[:gapStart]` — текст до курсора,
+`buf[gapEnd:]` — после, между ними — мусор, который можно затирать.
+`Insert` пишет в дыру и сдвигает `gapStart`, `Backspace` и `Delete`
+вообще ничего не копируют — просто расширяют дыру.
+
+**Перемещение курсора — перенос k символов через дыру.** При движении
+влево последние k символов перед дырой переезжают в её конец. Если дыра
+меньше k, источник и приёмник **перекрываются** — встроенный `copy`
+работает как `memmove` и это переживает, а самописный цикл «от начала к
+концу» затрёт ещё не скопированные символы. Стоимость — O(|d|), поэтому
+редакторы и держат дыру у курсора.
+
+**Рост — не `append`.** Когда дыра кончилась, нужен массив больше, но
+хвост после курсора должен оказаться **в конце** нового массива, а не
+сразу за началом, — иначе дыра окажется после текста. Удвоение размера
+даёт амортизированное O(1) на символ, как у `append`.
+
+**Руны, а не байты.** Курсор пользователя двигается по символам. В `[]byte`
+`Backspace(1)` после «ж» оставил бы половину UTF-8 последовательности.
+`[]rune` тратит 4 байта на символ, но делает индексы честными; настоящие
+редакторы идут дальше и считают графемы (эмодзи с модификаторами).
+
+**Что спросят дальше.** Чем отличаются rope и piece table (VS Code) и когда
+они лучше; отмена действий поверх gap buffer; почему `String()` за O(n)
+на каждое нажатие — плохая идея для большого файла.
+
+</Reveal>

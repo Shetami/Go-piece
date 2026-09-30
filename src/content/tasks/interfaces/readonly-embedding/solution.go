@@ -44,7 +44,7 @@ func (s *MapStore) Keys() []string {
 // а все изменяющие методы переопределены. Все — включая SetMany.
 type readOnly struct{ Store }
 
-func (readOnly) Set(string, string) error         { return ErrReadOnly }
+func (readOnly) Set(string, string) error        { return ErrReadOnly }
 func (readOnly) SetMany(map[string]string) error { return ErrReadOnly }
 func (readOnly) Delete(string) error             { return ErrReadOnly }
 

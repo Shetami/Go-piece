@@ -1,0 +1,85 @@
+---
+title: Где именно случилась паника
+description: recover говорит, что упало, но не где. Найдите в стеке место паники — функцию, файл и строку — и для явного panic, и для паники рантайма, и для паники внутри defer.
+kind: implement
+topic: defer-panic
+level: hard
+order: 320
+related: [structured-logging]
+---
+
+Для алерта или структурного лога полный `debug.Stack()` слишком тяжёл:
+нужно одно поле `panic_at=handler.go:42`. Реализуйте `PanicSite`: он
+перехватывает панику и возвращает место, где она случилась.
+
+Что проверяют скрытые тесты:
+
+- `panic` на третьем уровне вложенности — функция и строка вызова `panic`,
+  а не вызывающие;
+- паника рантайма (запись в `nil`-мапу, деление на ноль) — строка
+  пользовательского кода, а не `runtime.mapassign` или
+  `runtime.panicdivide`;
+- паника в отложенной функции во время другой паники — место второй,
+  той, что вернул `recover`;
+- без паники — нули и `panicked = false`.
+
+<Reveal>
+
+```go
+func PanicSite(fn func()) (loc Location, value any, panicked bool) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			return
+		}
+		value, panicked = r, true
+		loc = panicLocation()
+	}()
+	fn()
+	return Location{}, nil, false
+}
+
+func panicLocation() Location {
+	pcs := make([]uintptr, 128)
+	n := runtime.Callers(0, pcs)
+	frames := runtime.CallersFrames(pcs[:n])
+	afterPanic := false
+	for {
+		f, more := frames.Next()
+		if f.Function == "runtime.gopanic" {
+			afterPanic = true
+		} else if afterPanic && !strings.HasPrefix(f.Function, "runtime.") {
+			return Location{Func: f.Function, File: f.File, Line: f.Line}
+		}
+		if !more {
+			return Location{}
+		}
+	}
+}
+```
+
+**Стек ещё на месте.** Пока выполняется отложенная функция, стек не
+раскручен: сверху — наш `defer`, под ним `runtime.gopanic`, ещё ниже —
+функция, которая паниковала, и все её вызывающие. `recover` только
+останавливает панику, а кадры снимаются уже после возврата из `defer`.
+
+**Фиксированный `skip` не работает.** `runtime.Caller(3)` угадает место
+явного `panic`, но для паники рантайма между `gopanic` и вашим кодом
+окажутся `runtime.panicmem`, `runtime.mapassign_faststr` или
+`runtime.sigpanic`, а их число зависит от вида ошибки и версии Go. Надёжно
+только «найти `gopanic` и пропустить всё `runtime.*`».
+
+**Самый верхний `gopanic`.** При панике в `defer` во время другой паники в
+стеке два `gopanic`. Верхний (первый при обходе) — последняя паника, её
+значение и вернул `recover`. Поиск «самого глубокого» указал бы на первую,
+уже заменённую.
+
+**`CallersFrames`, а не `FuncForPC`.** Функции могут быть встроены
+компилятором; `CallersFrames` разворачивает инлайн-кадры и даёт честные
+имя и строку.
+
+**Что спросят следом.** Как сделать из этого поле в `slog` и метку метрики
+(без номера строки — иначе кардинальность), и чем `runtime.Callers`
+дешевле `debug.Stack` — нет форматирования в текст.
+
+</Reveal>

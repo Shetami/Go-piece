@@ -1,0 +1,76 @@
+---
+title: "Покупают и онлайн, и в магазине"
+description: "Два EXISTS вместо двух JOIN: подсчёт клиентов без размножения строк, доля по городам и города без нужных клиентов."
+kind: implement
+topic: sql-subqueries
+level: medium
+order: 200
+ordered: true
+---
+
+Отдел лояльности считает «омниканальных» клиентов — тех, кто покупал **и**
+онлайн (`channel = 'online'`), **и** в офлайн-магазине (`'store'`).
+
+По каждому городу:
+
+- `customers` — сколько всего клиентов из этого города (с покупками и без);
+- `omni` — сколько из них омниканальные;
+- `omni_pct` — `omni / customers` в процентах, `round(…, 1)`.
+
+В отчёт попадают все города, где есть клиенты.
+
+- колонки: `city`, `customers`, `omni`, `omni_pct`;
+- порядок: по `city`.
+
+Что проверяют скрытые данные: клиента с несколькими покупками в каждом
+канале, клиентов только одного канала, клиентов без покупок, город, где нет
+ни одного омниканального.
+
+<Reveal>
+
+```sql
+SELECT c.city,
+       count(*) AS customers,
+       count(*) FILTER (
+         WHERE EXISTS (SELECT 1 FROM purchases p WHERE p.customer_id = c.id AND p.channel = 'online')
+           AND EXISTS (SELECT 1 FROM purchases p WHERE p.customer_id = c.id AND p.channel = 'store')
+       ) AS omni,
+       round(100.0 * count(*) FILTER (
+         WHERE EXISTS (SELECT 1 FROM purchases p WHERE p.customer_id = c.id AND p.channel = 'online')
+           AND EXISTS (SELECT 1 FROM purchases p WHERE p.customer_id = c.id AND p.channel = 'store')
+       ) / count(*), 1) AS omni_pct
+FROM customers c
+GROUP BY c.city
+ORDER BY c.city;
+```
+
+Ответ:
+
+```
+Казань | 3 | 2 | 66.7
+Москва | 2 | 1 | 50.0
+Пермь | 2 | 0 | 0.0
+Томск | 1 | 0 | 0.0
+```
+
+**Два `LEFT JOIN` к покупкам — декартово произведение.** У Ани две онлайн- и
+две офлайн-покупки: соединения дают 2 × 2 = 4 строки, и `count(*)` по городу
+вырастает с 3 до 6. Заготовка показывает в Казани 6 клиентов и 5 омниканальных
+— из трёх человек.
+
+**`EXISTS` отвечает «да/нет» и строк не добавляет.** Внешний запрос идёт по
+клиентам, одна строка на человека, а каждое условие — отдельный коррелированный
+подзапрос, который останавливается на первой найденной покупке. `FILTER`
+считает только тех, для кого оба условия истинны.
+
+**Города без омниканальных остаются сами.** Группировка идёт по
+`customers`, а не по покупкам, поэтому Пермь и Томск с нулями не пропадают, а
+Жора без покупок честно входит в знаменатель.
+
+**Как ещё.** Предагрегат по клиенту: `SELECT customer_id, bool_or(channel =
+'online') AS o, bool_or(channel = 'store') AS s FROM purchases GROUP BY
+customer_id` и `LEFT JOIN` к клиентам — один проход по покупкам вместо двух
+подзапросов на клиента. Спросят дальше: «а если каналов пять и нужно "хотя бы
+три"?» — `count(DISTINCT channel) >= 3` в таком предагрегате.
+
+</Reveal>

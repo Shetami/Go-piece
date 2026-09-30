@@ -1,4 +1,83 @@
 ---
+title: "Выручка по вебхукам с дублями"
+description: "At-least-once доставка событий: дедупликация по event_id, затем дневная выручка с возвратами."
 kind: implement
+topic: sql-grouping
+level: medium
+order: 230
 ordered: true
 ---
+
+Платёжный провайдер присылает вебхуки с гарантией at-least-once: одно и
+то же событие (`event_id`) может прийти несколько раз. Всё сохранено в
+`payment_events` как есть.
+
+Нужна дневная выручка (день — по дате `received_at`). Учитываются события
+со статусами `succeeded` и `refunded`; дни, где их нет, в отчёт не
+попадают.
+
+- `day` — тип `date`;
+- `payments` — сколько разных платежей прошло успешно в этот день;
+- `gross` — сумма успешных платежей;
+- `refunds` — сумма возвратов за день;
+- `net` — `gross - refunds`.
+
+Где сумм нет — `0`.
+
+Порядок: по `day`.
+
+Что проверяют скрытые тесты: повторно доставленные события, день только с
+возвратом, неуспешные и незавершённые платежи.
+
+<Reveal>
+
+```sql
+WITH ev AS (
+  SELECT DISTINCT ON (event_id) *
+  FROM payment_events
+  ORDER BY event_id, received_at
+)
+SELECT received_at::date AS day,
+       count(DISTINCT payment_id) FILTER (WHERE status = 'succeeded')  AS payments,
+       coalesce(sum(amount) FILTER (WHERE status = 'succeeded'), 0)   AS gross,
+       coalesce(sum(amount) FILTER (WHERE status = 'refunded'), 0)    AS refunds,
+       coalesce(sum(amount) FILTER (WHERE status = 'succeeded'), 0)
+         - coalesce(sum(amount) FILTER (WHERE status = 'refunded'), 0) AS net
+FROM ev
+WHERE status IN ('succeeded', 'refunded')
+GROUP BY received_at::date
+ORDER BY day;
+```
+
+Ответ:
+
+```
+2024-09-01 | 2 | 1500 | 0 | 1500
+2024-09-02 | 1 | 300 | 500 | -200
+2024-09-03 | 0 | 0 | 400 | -400
+```
+
+**Дедупликация — первым шагом.** Повторы события считаются один раз,
+поэтому сначала `DISTINCT ON (event_id)`, и только потом любые агрегаты.
+Без этого 1 сентября насчитает 2500 вместо 1500, а возврат 2 сентября —
+1000 вместо 500. Раз дубли здесь побайтно одинаковые, подошёл бы и `SELECT
+DISTINCT *`, но `DISTINCT ON` с явным ключом переживёт дубли, отличающиеся,
+например, временем получения.
+
+**`sum` пустого набора — `NULL`.** 3 сентября нет успешных платежей, и
+`sum(…) FILTER (WHERE status = 'succeeded')` — `NULL`, а `NULL - 400` —
+тоже `NULL`. Поэтому `coalesce` у каждого слагаемого, а не у результата.
+
+**`payments` — разные платежи.** `count(DISTINCT payment_id)` страхует от
+того же платежа, пришедшего под другим `event_id`. `count(*)` после
+дедупликации сработал бы на этих данных, но смысл «платежей» — именно
+разные `payment_id`.
+
+**Фильтр статусов в `WHERE`.** Незавершённый платёж 3 сентября не должен
+создавать день в отчёте; 3 сентября остаётся только благодаря возврату.
+
+**Что спросят дальше.** Правильное место для дедупликации — запись: `event_id
+PRIMARY KEY` и `INSERT … ON CONFLICT DO NOTHING`. Тогда отчёт считает
+чистые данные, а обработчик вебхука становится идемпотентным.
+
+</Reveal>

@@ -1,0 +1,117 @@
+---
+title: Досылка непринятых из пачки
+description: Пакетная отправка с частичными отказами — BatchError с индексами текущей пачки, повтор только временных неудач, лимит попыток на элемент и ItemError для каждого проигравшего.
+kind: implement
+topic: errors
+level: hard
+order: 370
+related: [retry-backoff, idempotency-key, poison-message]
+lecture: system-design/resilience
+---
+
+Пакетные API (отправка пушей, запись в Elasticsearch `_bulk`, Kinesis
+`PutRecords`) отвечают не «да/нет», а «эти приняты, эти нет, и вот
+почему». Повторять всю пачку нельзя — получатся дубли. Повторять всё
+непринятое тоже нельзя — невалидный элемент не пройдёт никогда.
+
+Напишите `SendAll` по контракту в заготовке.
+
+Что проверяют скрытые тесты:
+
+- частичный отказ, даже обёрнутый через `%w`, — в следующую пачку идут
+  только временно непринятые; индексы `Failed` относятся к текущей пачке,
+  а не к исходному списку;
+- постоянная ошибка элемента — сразу окончательная, без повторов;
+- ошибка всей пачки — временная повторяется целиком, постоянная даёт
+  неудачу каждому элементу;
+- лимит попыток считается для каждого элемента отдельно, и в `ItemError`
+  честное число отправок;
+- итоговая ошибка — по одной на элемент, в исходном порядке;
+- отмена контекста останавливает досылку; пустой вход — `send` не
+  вызывается.
+
+<Reveal>
+
+```go
+func SendAll(ctx context.Context, items []Item, maxAttempts int, send func(context.Context, []Item) error) error {
+	final := make([]error, len(items))
+	attempts := make([]int, len(items))
+	pending := make([]int, len(items))
+	for i := range pending {
+		pending[i] = i
+	}
+
+	for len(pending) > 0 {
+		if err := ctx.Err(); err != nil {
+			for _, i := range pending {
+				final[i] = &ItemError{ID: items[i].ID, Attempts: attempts[i], Err: err}
+			}
+			break
+		}
+		batch := make([]Item, len(pending))
+		for j, i := range pending {
+			batch[j] = items[i]
+			attempts[i]++
+		}
+
+		err := send(ctx, batch)
+		var be *BatchError
+		isBatch := errors.As(err, &be)
+
+		var next []int
+		for j, i := range pending {
+			var ierr error
+			switch {
+			case err == nil:
+			case isBatch:
+				ierr = be.Failed[j]
+			default:
+				ierr = err
+			}
+			if ierr == nil {
+				continue
+			}
+			if isTemporary(ierr) && attempts[i] < maxAttempts {
+				next = append(next, i)
+			} else {
+				final[i] = &ItemError{ID: items[i].ID, Attempts: attempts[i], Err: ierr}
+			}
+		}
+		pending = next
+	}
+	return errors.Join(final...)
+}
+
+func isTemporary(err error) bool {
+	var t interface{ Temporary() bool }
+	return errors.As(err, &t) && t.Temporary()
+}
+```
+
+**Две системы индексов.** Пачка на втором круге — уже не исходный
+список, и `Failed[0]` в ней — это `b`, а не `a`. Храним `pending` как
+индексы исходного списка и переводим «индекс в пачке → индекс в
+исходнике» при разборе ответа. Перепутать их — значит объявить принятым
+непринятый элемент и потерять данные без единой ошибки в логе.
+
+**Ошибка — это ещё и данные.** `*BatchError` — не повод сдаться, а
+структурированный ответ; его достаём через `errors.As`, потому что
+клиент API почти всегда оборачивает его своим контекстом. Всё остальное
+— ошибка уровня транспорта, и она относится к каждому элементу.
+
+**Классификация на уровне элемента.** Временность проверяется у ошибки
+конкретного элемента: в одной пачке может быть и «перегружен», и
+«невалидный payload». Бесконечно повторять второй — значит «ядовитое
+сообщение» будет ходить по кругу и занимать место в каждой пачке.
+
+**Результат — по элементу.** Вызывающему нужно знать, *какие* элементы
+не доехали, чтобы положить их в DLQ или показать пользователю. Слайс
+`final` по индексу даёт исходный порядок, а `errors.Join` пропускает
+`nil` принятых.
+
+**Что спросят дальше.** Паузы между кругами (backoff, `Retry-After`),
+идемпотентность повторов (ключ на элемент, иначе при потерянном ответе
+будут дубли), ограничение размера пачки и куда девать окончательные
+неудачи.
+
+</Reveal>

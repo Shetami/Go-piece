@@ -1,0 +1,87 @@
+---
+title: "Удаление дублей контактов"
+description: "WITH … DELETE USING с ранжированием окном: нормализация email, NULLS LAST при сортировке по убыванию, тай-брейкер и отчёт из RETURNING."
+kind: implement
+topic: sql-subqueries
+level: medium
+order: 190
+ordered: true
+---
+
+После слияния двух CRM в `contacts` появились дубли. Удалите их **одной
+командой** и верните отчёт.
+
+- дубли — контакты с одинаковым email **без учёта регистра и пробелов по
+  краям**;
+- в группе остаётся контакт с самым свежим `updated_at`; пустой
+  `updated_at` (импорт из старой CRM) считается самым старым; при равных датах
+  остаётся контакт с большим `id`;
+- контакты без email не дубли друг другу и не удаляются.
+
+- колонки: `email` — нормализованный (`lower(trim(email))`), `kept_id` — id
+  оставшегося контакта, `removed` — сколько удалено;
+- только группы, где что-то удалено; порядок: по `email`.
+
+Что проверяют скрытые данные: разный регистр и пробелы, контакт без даты
+среди датированных, группу, где даты нет ни у кого, две одинаковые даты,
+контакты без email.
+
+Каждый прогон откатывается, так что данные задачи не пострадают.
+
+<Reveal>
+
+```sql
+WITH ranked AS (
+  SELECT id,
+         lower(trim(email)) AS email,
+         row_number() OVER (PARTITION BY lower(trim(email))
+                            ORDER BY updated_at DESC NULLS LAST, id DESC) AS rn
+  FROM contacts
+  WHERE email IS NOT NULL
+),
+removed AS (
+  DELETE FROM contacts c
+  USING ranked r
+  WHERE c.id = r.id
+    AND r.rn > 1
+  RETURNING c.id
+)
+SELECT r.email,
+       max(r.id) FILTER (WHERE r.rn = 1) AS kept_id,
+       count(d.id)                       AS removed
+FROM ranked r
+LEFT JOIN removed d ON d.id = r.id
+GROUP BY r.email
+HAVING count(d.id) > 0
+ORDER BY r.email;
+```
+
+Ответ:
+
+```
+anna@mail.ru | 2 | 2
+boris@ya.ru | 5 | 1
+vera@gmail.com | 7 | 1
+```
+
+**`DESC` ставит `NULL` первым.** В Postgres `NULL` считается больше любого
+значения, поэтому `ORDER BY updated_at DESC` поднимет наверх контакт Анны без
+даты и удалит два датированных. Нужно явно `NULLS LAST`. Это одна из самых
+частых незаметных ошибок в дедупликации.
+
+**Ранжирование — окно, удаление — по номеру.** `row_number()` с полным
+порядком (`updated_at`, потом `id`) даёт ровно одного победителя в группе,
+даже когда у Бориса даты совпадают, а у Веры их нет вовсе. Решение через
+`EXISTS (есть запись свежее)` на этих ничьих либо удаляет обе строки, либо
+не удаляет ни одной.
+
+**Нормализация в ключе группы.** `'Anna@Mail.ru '` и `' ANNA@mail.ru'` —
+тот же адрес. `NULL`-email отсеяны до окна: иначе `PARTITION BY` собрал бы
+все пустые адреса в одну группу, и Глеба «задедуплицировали» бы.
+
+**Отчёт — из `ranked` и `RETURNING`.** Основной запрос видит `contacts` до
+удаления, поэтому «сколько удалено» считается по строкам `removed`, а не
+повторным запросом к таблице. Спросят дальше: «как не допустить дублей
+снова?» — уникальный индекс по выражению `lower(trim(email))`.
+
+</Reveal>

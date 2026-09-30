@@ -34,13 +34,13 @@ func chkKVPos(t *testing.T, in string, wantPos int) {
 }
 
 func TestKVErrorPositions(t *testing.T) {
-	chkKVPos(t, "a=1 bc", 6)        // строка кончилась, '=' нет
-	chkKVPos(t, "a=1 b c=2", 5)     // пробел в ключе
-	chkKVPos(t, "a=1 =2", 4)        // пустой ключ
-	chkKVPos(t, `a=x"y`, 3)         // кавычка в значении без кавычек
-	chkKVPos(t, `a=1 b="abc`, 6)    // незакрытая — позиция открывающей
-	chkKVPos(t, `a="x\ny"`, 4)      // неизвестное экранирование
-	chkKVPos(t, `a="x"y b=1`, 5)    // мусор за кавычкой
+	chkKVPos(t, "a=1 bc", 6)     // строка кончилась, '=' нет
+	chkKVPos(t, "a=1 b c=2", 5)  // пробел в ключе
+	chkKVPos(t, "a=1 =2", 4)     // пустой ключ
+	chkKVPos(t, `a=x"y`, 3)      // кавычка в значении без кавычек
+	chkKVPos(t, `a=1 b="abc`, 6) // незакрытая — позиция открывающей
+	chkKVPos(t, `a="x\ny"`, 4)   // неизвестное экранирование
+	chkKVPos(t, `a="x"y b=1`, 5) // мусор за кавычкой
 	chkKVPos(t, `a="x \"" b=2 c`, 14)
 }
 

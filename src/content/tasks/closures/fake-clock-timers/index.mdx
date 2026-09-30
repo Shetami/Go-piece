@@ -1,0 +1,128 @@
+---
+title: Фейковые часы с таймерами
+description: Часы для тестов — AfterFunc с функцией отмены, Advance, который вызывает созревшие таймеры по порядку, и колбэки, которые сами планируют и отменяют таймеры. Замыкание stop, куча и вызов без замка.
+kind: implement
+topic: closures
+level: hard
+order: 340
+related: [time-ticker, mutex, deadlock]
+lecture: concurrency/time
+---
+
+Код с `time.AfterFunc` — ретраи, таймауты сессий, отложенные задачи —
+неприятно тестировать на настоящем времени: тесты медленные и мигают.
+Решение — передавать в код интерфейс часов, а в тестах подставлять часы,
+которые идут только по команде `Advance`. Так устроены
+`k8s.io/utils/clock/testing` и `benbjohnson/clock`.
+
+Напишите `FakeClock` по контракту в заготовке. `AfterFunc` возвращает не
+объект таймера, а замыкание `stop`.
+
+Что проверяют скрытые тесты:
+
+- таймеры на 3 с, 1 с, 3 с, 2 с и 10 с после `Advance(5s)` срабатывают в
+  порядке времени, равные — в порядке планирования; внутри колбэка `Now()`
+  — момент его таймера; после `Advance` — ровно `+5s`;
+- `stop` возвращает `true` один раз, `false` повторно и после
+  срабатывания; отменённый таймер не срабатывает;
+- колбэк, который перепланирует себя через секунду, срабатывает в 1 с,
+  2 с и 3 с за один `Advance(3.5s)`; колбэк отменяет другой таймер на тот
+  же момент — тот не срабатывает; всё это без дедлока;
+- `AfterFunc` с нулевой или отрицательной задержкой срабатывает при
+  `Advance(0)`.
+
+<Reveal>
+
+```go
+type FakeClock struct {
+	mu     sync.Mutex
+	now    time.Time
+	seq    int
+	timers timerHeap
+}
+
+type fakeTimer struct {
+	at    time.Time
+	seq   int
+	f     func()
+	index int
+	done  bool
+}
+
+func NewFakeClock(start time.Time) *FakeClock {
+	return &FakeClock{now: start}
+}
+
+func (c *FakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *FakeClock) AfterFunc(d time.Duration, f func()) (stop func() bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	t := &fakeTimer{at: c.now.Add(max(d, 0)), seq: c.seq, f: f}
+	c.seq++
+	heap.Push(&c.timers, t)
+	return func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if t.done {
+			return false
+		}
+		t.done = true
+		if t.index >= 0 {
+			heap.Remove(&c.timers, t.index)
+		}
+		return true
+	}
+}
+
+func (c *FakeClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	target := c.now.Add(max(d, 0))
+	for len(c.timers) > 0 && !c.timers[0].at.After(target) {
+		t := heap.Pop(&c.timers).(*fakeTimer)
+		t.done = true
+		c.now = t.at
+		c.mu.Unlock()
+		t.f()
+		c.mu.Lock()
+	}
+	c.now = target
+	c.mu.Unlock()
+}
+
+// timerHeap — мин-куча по (at, seq), методы Len/Less/Swap/Push/Pop
+// поддерживают fakeTimer.index — см. solution.go.
+```
+
+**`stop` — замыкание над своим таймером.** Функции в Go нельзя сравнивать,
+поэтому «найти `f` в списке и удалить» не получится. Вместо этого `stop`
+захватывает указатель на свою запись. По нему видно, сработал ли таймер,
+и где он лежит в куче: индекс поддерживает `Swap`. Никаких
+идентификаторов и поиска — `heap.Remove` за O(log n).
+
+**Колбэк — без замка, и вызывается по одному.** Колбэк почти всегда трогает
+часы: смотрит `Now`, перепланирует себя, отменяет соседа. Под
+`sync.Mutex` это дедлок. Поэтому цикл в `Advance` каждый раз берёт замок
+заново и смотрит на вершину кучи. Таймер, запланированный колбэком на
+момент внутри текущего `Advance`, окажется в куче и сработает в том же
+вызове. Отменённый колбэком таймер из кучи уже удалён.
+
+**Сначала `done`, потом вызов.** Таймер помечается сработавшим до вызова
+`f`. Иначе `stop` из самого колбэка (или из параллельной горутины)
+вернул бы `true` для таймера, который уже выполняется.
+
+**Время прыгает по таймерам.** `c.now = t.at` перед каждым колбэком — чтобы
+код под тестом видел то же время, что увидел бы в проде. После цикла время
+ставится ровно в `target`, даже если таймеров не было.
+
+**Что спросят дальше:** как сделать `NewTicker` и `After` (канал плюс
+`AfterFunc`, который в него пишет), почему `Advance` в тестах часто
+дополняют ожиданием «все горутины заблокированы» (колбэк мог запустить
+горутину, которая ещё не успела запланировать следующий таймер), и что с
+этим делает `testing/synctest` в Go 1.24+.
+
+</Reveal>

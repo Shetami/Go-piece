@@ -1,0 +1,131 @@
+---
+title: "Новые, вернувшиеся и ушедшие пользователи"
+description: "Помесячная раскладка активной базы: первая активность за всю историю, возврат после паузы, отток и месяц без привычных пользователей."
+kind: implement
+topic: sql-interview
+level: hard
+order: 290
+ordered: true
+---
+
+Продуктовый аналитик строит отчёт «движение активной базы» (growth
+accounting) за **февраль — май 2024**.
+
+Пользователь **активен в месяце**, если у него есть хотя бы одно событие в
+этом месяце. Тестовые пользователи (`is_test`) не учитываются нигде.
+
+Каждый активный в месяце пользователь попадает ровно в одну группу:
+
+- `new` — это его **первый** активный месяц за всю историю (история
+  начинается раньше отчёта — январь в отчёт не входит, но учитывается);
+- `retained` — был активен и в **предыдущем** месяце;
+- `reactivated` — был активен когда-то раньше, но не в предыдущем месяце.
+
+Отдельно — `churned`: сколько пользователей были активны в предыдущем
+месяце, а в этом — нет.
+
+Для каждого из четырёх месяцев:
+
+- колонки: `month` (первое число, `date`), `active`, `new`, `retained`,
+  `reactivated`, `churned`; пустые значения — 0;
+- порядок: по `month`.
+
+Проверка себя: `active` = `new + retained + reactivated`, и
+`active` прошлого месяца = `retained + churned`.
+
+<Reveal>
+
+```sql
+WITH activity AS (
+  SELECT DISTINCT e.user_id, date_trunc('month', e.ts)::date AS month
+  FROM events e
+  JOIN users u ON u.id = e.user_id
+  WHERE NOT u.is_test
+),
+first_seen AS (
+  SELECT user_id, min(month) AS first_month
+  FROM activity
+  GROUP BY user_id
+),
+months AS (
+  SELECT m::date AS month
+  FROM generate_series(date '2024-02-01', date '2024-05-01', interval '1 month') AS m
+),
+classified AS (
+  -- активные в месяце
+  SELECT m.month, a.user_id,
+         CASE
+           WHEN f.first_month = m.month THEN 'new'
+           WHEN EXISTS (SELECT 1 FROM activity p
+                        WHERE p.user_id = a.user_id
+                          AND p.month = (m.month - interval '1 month')::date) THEN 'retained'
+           ELSE 'reactivated'
+         END AS kind
+  FROM months m
+  JOIN activity a   ON a.month = m.month
+  JOIN first_seen f ON f.user_id = a.user_id
+),
+churned AS (
+  SELECT m.month, count(*) AS churned
+  FROM months m
+  JOIN activity p ON p.month = (m.month - interval '1 month')::date
+  WHERE NOT EXISTS (SELECT 1 FROM activity a
+                    WHERE a.user_id = p.user_id AND a.month = m.month)
+  GROUP BY m.month
+)
+SELECT m.month,
+       count(c.user_id)                               AS active,
+       count(*) FILTER (WHERE c.kind = 'new')         AS new,
+       count(*) FILTER (WHERE c.kind = 'retained')    AS retained,
+       count(*) FILTER (WHERE c.kind = 'reactivated') AS reactivated,
+       coalesce(ch.churned, 0)                        AS churned
+FROM months m
+LEFT JOIN classified c ON c.month = m.month
+LEFT JOIN churned ch   ON ch.month = m.month
+GROUP BY m.month, ch.churned
+ORDER BY m.month;
+```
+
+Ответ:
+
+```
+2024-02-01 | 3 | 1 | 2 | 0 | 1
+2024-03-01 | 3 | 0 | 2 | 1 | 1
+2024-04-01 | 1 | 1 | 0 | 0 | 3
+2024-05-01 | 3 | 0 | 1 | 2 | 0
+```
+
+**Сначала — таблица «пользователь × активный месяц».** `DISTINCT` по
+паре превращает поток событий в факт «был активен». Всё остальное
+считается уже на ней: сотни событий пользователя за месяц — одна строка.
+Без этого `count(*)` в заготовке считает события, а `lag` по событиям
+сравнивает месяц с самим собой: у Ани в феврале два события, и второе
+получит `prev = февраль` — ни одна из групп.
+
+**Новый — по первому месяцу за всю историю, а не за окно отчёта.**
+`first_seen` строится по всей активности, включая январь. Если сначала
+обрезать данные по февралю, Аня и Боря окажутся «новыми» в феврале, а Вера
+в марте — новой вместо вернувшейся.
+
+**Отток — это «было в прошлом, нет в текущем».** Его нельзя посчитать
+от строк текущего месяца — их для ушедших нет. Поэтому `churned` —
+отдельный CTE: активные в предыдущем месяце, для которых `NOT EXISTS`
+активности в текущем. В апреле активна только новая Дина, а Аня, Вера и
+Гоша ушли — три `churned`. Для февраля «предыдущий месяц» — январь, он
+берётся из данных, хотя в отчёт не выводится.
+
+**Сетка месяцев.** Строки отчёта задаёт `generate_series`, а не данные:
+даже если бы в каком-то месяце не было ни одного активного, он появился бы с
+нулями и ненулевым оттоком.
+
+**Границы месяцев.** События 29 февраля в 23:59 и 31 марта в 23:59:59
+относятся к своим месяцам — `date_trunc('month', ts)` не требует
+угадывать число дней в месяце.
+
+**Что спросят дальше.** Как посчитать то же самое по неделям или по
+выручке, а не по активности (тогда получится разложение MRR на new /
+expansion / churn / reactivation), и как это масштабировать: хранить
+агрегат «пользователь × месяц» инкрементально, а не сканировать все
+события.
+
+</Reveal>

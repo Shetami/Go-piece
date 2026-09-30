@@ -1,0 +1,134 @@
+---
+title: Разбор query-строки с percent-decoding
+description: Свой url.ParseQuery. Плюс против %2B, кириллица байтами, повторяющиеся ключи в мапе слайсов, позиция кривого % и проверка UTF-8 после декодирования.
+kind: implement
+topic: strings
+level: hard
+order: 300
+---
+
+Нужно разобрать query-строку там, где `net/url` недоступен или слишком
+либерален: во встраиваемом парсере логов, в WAF-правилах, в собственном
+роутере. Напишите `ParseQuery` по правилам из комментария.
+
+Что проверяют скрытые тесты:
+
+- кириллица в процентах и в сыром виде, `+` как пробел, повторяющиеся
+  ключи, ключ без `=`, пустые пары, пустой ключ;
+- `%2B` — буквальный плюс, а не пробел; `%26` внутри значения не делит
+  пару; `a=b=c`; `;` — не разделитель;
+- hex-цифры в нижнем регистре;
+- обрезанная и некорректная `%`-последовательность — `*QueryError` с
+  **байтовой** позицией знака `%` в исходной строке, в том числе после
+  кириллицы;
+- `%D0` без второго байта — невалидный UTF-8, ошибка с позицией начала
+  ключа или значения;
+- при ошибке — `nil`.
+
+<Reveal>
+
+```go
+type QueryError struct {
+	Pos int
+	Msg string
+}
+
+func (e *QueryError) Error() string { return fmt.Sprintf("query, байт %d: %s", e.Pos, e.Msg) }
+
+func ParseQuery(q string) (map[string][]string, error) {
+	res := map[string][]string{}
+	pos := 0 // смещение текущей пары в q
+	for _, pair := range strings.Split(q, "&") {
+		start := pos
+		pos += len(pair) + 1
+		if pair == "" {
+			continue
+		}
+		rawKey, rawVal, _ := strings.Cut(pair, "=")
+		key, err := unescape(rawKey, start)
+		if err != nil {
+			return nil, err
+		}
+		valStart := start + len(rawKey) + 1
+		val, err := unescape(rawVal, valStart)
+		if err != nil {
+			return nil, err
+		}
+		res[key] = append(res[key], val)
+	}
+	return res, nil
+}
+
+func unescape(s string, base int) (string, error) {
+	if !strings.ContainsAny(s, "%+") {
+		if !utf8.ValidString(s) {
+			return "", &QueryError{Pos: base, Msg: "невалидный UTF-8"}
+		}
+		return s, nil
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; c {
+		case '+':
+			b.WriteByte(' ') // '+' смотрим в сыром виде: "%2B" пробелом не станет
+		case '%':
+			if i+2 >= len(s) {
+				return "", &QueryError{Pos: base + i, Msg: "обрезанная %-последовательность"}
+			}
+			hi, ok1 := unhex(s[i+1])
+			lo, ok2 := unhex(s[i+2])
+			if !ok1 || !ok2 {
+				return "", &QueryError{Pos: base + i, Msg: "некорректная %-последовательность"}
+			}
+			b.WriteByte(hi<<4 | lo)
+			i += 2
+		default:
+			b.WriteByte(c)
+		}
+	}
+	out := b.String()
+	// Кириллица приходит байтами по отдельности: "%D0" без пары — битый UTF-8.
+	if !utf8.ValidString(out) {
+		return "", &QueryError{Pos: base, Msg: "невалидный UTF-8 после декодирования"}
+	}
+	return out, nil
+}
+
+func unhex(c byte) (byte, bool) {
+	switch {
+	case c >= '0' && c <= '9':
+		return c - '0', true
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10, true
+	case c >= 'A' && c <= 'F':
+		return c - 'A' + 10, true
+	}
+	return 0, false
+}
+```
+
+**Порядок операций решает всё.** Сначала режем по `&` и `=`, потом
+декодируем каждую часть. Если сначала декодировать всю строку, `%26`
+превратится в `&` и разрежет значение, а `%3D` — в `=`. Внутри части
+`+` превращаем в пробел по сырому символу — поэтому `%2B` станет `+`, а
+не пробелом. Это ровно та ошибка, из-за которой телефоны `+7…` в формах
+приходят с пробелом.
+
+**`map[string][]string`, а не `map[string]string`.** `?tag=a&tag=b` —
+легальный и частый способ передать список. Мапа строк молча оставит
+последнее значение, и фильтр по двум тегам превратится в фильтр по
+одному.
+
+**Позиция — в байтах исходной строки.** Смещение пары копим по мере
+`Split` (`len(pair) + 1` за разделитель), смещение значения — ещё
+`len(rawKey) + 1`. Байты здесь честнее рун: в URL на проводе только
+байты, и лог-анализатор покажет ровно их.
+
+**UTF-8 проверяем после декодирования.** `%D0` — первый байт кириллической
+буквы без второго. Сам по себе он «правильно закодирован», но результат
+— мусор, который дальше пойдёт в базу и в логи. `net/url` такое
+пропускает; строгий парсер отклоняет. Дальше на собеседовании спросят
+про лимиты: максимальное число пар и длину значения — иначе запрос с
+миллионом `&a=` съест память.
+
+</Reveal>

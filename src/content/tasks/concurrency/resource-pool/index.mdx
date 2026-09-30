@@ -1,0 +1,132 @@
+---
+title: Пул соединений своими руками
+description: Get(ctx) и Put с лимитом ресурсов, переиспользованием свободных, ожиданием с отменой, медленной фабрикой, которая никого не блокирует, и Close, после которого ничего не течёт. Упрощённый database/sql.DB.
+kind: implement
+topic: concurrency
+level: hard
+order: 330
+related: [connection-pool, semaphore, context-cancellation, chan-close, mutex]
+lecture: concurrency/shared-state
+---
+
+`database/sql`, пулы gRPC-соединений и клиентов Redis устроены по одной
+схеме: не больше `max` ресурсов, свободные переиспользуются, при нехватке
+ждём. Реализуйте `Pool[R]` по контракту из заготовки.
+
+Что проверяют скрытые тесты:
+
+- после `Put` следующий `Get` получает тот же ресурс, новый не создаётся;
+- при исчерпанном лимите `Get` ждёт и уходит по таймауту, а ждущий
+  просыпается от `Put`; ресурсов не создаётся больше `max`;
+- ошибка фабрики не «съедает» место в пуле;
+- пока фабрика долго создаёт один ресурс, возврат и выдача другого идут
+  без ожидания;
+- сорок горутин гоняют ресурсы — лимит не превышен; `Close` будит ждущих
+  с `ErrPoolClosed`, закрывает возвращённые после него ресурсы, повторный
+  `Close` безопасен.
+
+<Reveal>
+
+```go
+type Pool[R any] struct {
+	factory  func(ctx context.Context) (R, error)
+	closeFn  func(R)
+	idle     chan R
+	slots    chan struct{}
+	closed   chan struct{}
+	mu       sync.Mutex
+	isClosed bool
+}
+
+func (p *Pool[R]) Get(ctx context.Context) (R, error) {
+	var zero R
+	select {
+	case <-p.closed:
+		return zero, ErrPoolClosed
+	default:
+	}
+	select {
+	case r := <-p.idle:
+		return r, nil
+	default:
+	}
+	select {
+	case r := <-p.idle:
+		return r, nil
+	case p.slots <- struct{}{}:
+		r, err := p.factory(ctx)
+		if err != nil {
+			<-p.slots
+			return zero, err
+		}
+		return r, nil
+	case <-ctx.Done():
+		return zero, ctx.Err()
+	case <-p.closed:
+		return zero, ErrPoolClosed
+	}
+}
+
+func (p *Pool[R]) Put(r R) {
+	p.mu.Lock()
+	if p.isClosed {
+		p.mu.Unlock()
+		p.closeFn(r)
+		<-p.slots
+		return
+	}
+	p.idle <- r
+	p.mu.Unlock()
+}
+
+func (p *Pool[R]) Close() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.isClosed {
+		return
+	}
+	p.isClosed = true
+	close(p.closed)
+	for {
+		select {
+		case r := <-p.idle:
+			p.closeFn(r)
+			<-p.slots
+		default:
+			return
+		}
+	}
+}
+```
+
+**Два канала вместо мьютекса со счётчиком.** `slots` — семафор на число
+существующих ресурсов: токен берётся перед созданием и возвращается, когда
+ресурс закрыт или фабрика упала. `idle` — стопка свободных ресурсов. Вся
+логика «взять свободный, или создать, или ждать» становится одним
+`select`, и в него естественно встают `ctx.Done()` и `closed`. С
+мьютексом и `sync.Cond` отмену по контексту пришлось бы прикручивать
+вручную.
+
+**Фабрика — вне любых блокировок.** Установка соединения может занимать
+секунды. Если создавать под мьютексом пула, все `Get` и `Put` встанут в
+очередь за ней. Здесь место резервируется токеном в `slots`, а создание идёт
+без блокировок. Ошибка фабрики возвращает токен — иначе после пары
+неудачных попыток пул «забит» ресурсами, которых не существует.
+
+**Свободный ресурс — первым, без ожидания.** В общем `select` ветки `idle`
+и `slots` равновероятны. Без предварительной неблокирующей попытки пул
+иногда создаёт новое соединение, хотя свободное лежит рядом, и быстро
+раздувается до `max`.
+
+**`Close` против `Put` — под мьютексом.** Иначе `Put` может положить ресурс
+в `idle` сразу после того, как `Close` его вычистил, и ресурс утечёт. `Put`
+в `idle` не блокируется: ресурсов не больше `max`, а ёмкость `idle` —
+`max`, поэтому держать мьютекс при отправке безопасно.
+
+**Что спросят дальше.** Проверка живости ресурса перед выдачей и
+`MaxIdleTime`/`MaxLifetime`, как в `sql.DB`. Метрика времени ожидания
+(`WaitDuration` — главный признак маленького пула). Почему выдача
+«последний вернули — первым выдали» (LIFO) лучше для кэшей и позволяет
+закрывать лишние соединения при спаде нагрузки.
+
+</Reveal>

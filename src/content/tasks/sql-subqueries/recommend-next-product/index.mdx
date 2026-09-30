@@ -1,0 +1,92 @@
+---
+title: "Что предложить купить следующим"
+description: "EXISTS и NOT EXISTS в условии соединения, популярность по уникальным покупателям и top-1 на клиента. NULL в строках заказа ломает NOT IN."
+kind: implement
+topic: sql-subqueries
+level: medium
+order: 180
+ordered: true
+---
+
+Блок «Вам может понравиться» на главной. Для каждого клиента нужен **один**
+товар:
+
+- из категории, в которой клиент уже что-то покупал;
+- который сам клиент ещё не покупал;
+- самый популярный: популярность — число **разных** клиентов, купивших
+  товар (товар без покупок тоже кандидат, с нулём);
+- при равной популярности — с меньшим названием.
+
+Если подходящих товаров нет, клиента в ответе нет. Если товар удалили из
+каталога, в `order_items` остаётся строка с пустым `product_id`.
+
+- колонки: `customer`, `product`, `buyers`;
+- порядок: по `customer`.
+
+Что проверяют скрытые данные: клиента, купившего один товар много раз;
+строки заказа без товара; ничьи по популярности; клиента, которому нечего
+предложить.
+
+<Reveal>
+
+```sql
+WITH popularity AS (
+  SELECT p.id, p.name, p.category,
+         count(DISTINCT oi.customer_id) AS buyers
+  FROM products p
+  LEFT JOIN order_items oi ON oi.product_id = p.id
+  GROUP BY p.id, p.name, p.category
+),
+candidates AS (
+  SELECT c.name AS customer, pop.name AS product, pop.buyers,
+         row_number() OVER (PARTITION BY c.id ORDER BY pop.buyers DESC, pop.name) AS rn
+  FROM customers c
+  JOIN popularity pop
+    ON EXISTS (
+         SELECT 1 FROM order_items oi
+         JOIN products p ON p.id = oi.product_id
+         WHERE oi.customer_id = c.id AND p.category = pop.category)
+   AND NOT EXISTS (
+         SELECT 1 FROM order_items oi
+         WHERE oi.customer_id = c.id AND oi.product_id = pop.id)
+)
+SELECT customer, product, buyers
+FROM candidates
+WHERE rn = 1
+ORDER BY customer;
+```
+
+Ответ:
+
+```
+Аня | Зерно Кения | 3
+Боря | Зерно Колумбия | 1
+Вера | Зерно Бразилия | 2
+Гоша | Зерно Бразилия | 2
+Даша | Зерно Кения | 3
+```
+
+**Популярность — по людям, а не по строкам.** Аня четыре раза брала
+«Бразилию», и `count(*)` делает её самым популярным кофе (5 строк против 3
+покупателей «Кении»). Даше тогда предложат не тот товар. `count(DISTINCT
+customer_id)` — и `LEFT JOIN`, чтобы товар без покупок остался кандидатом с
+нулём.
+
+**Полусоединение без размножения строк.** Условие «клиент покупал в этой
+категории» — `EXISTS`, а не `JOIN` к его покупкам: у клиента может быть
+много покупок в категории, и соединение размножит кандидатов. `JOIN … ON
+EXISTS (…) AND NOT EXISTS (…)` — вполне законная запись, условие соединения
+может быть любым булевым выражением.
+
+**`NOT IN` и удалённые товары.** У Бори и Гоши есть строки с пустым
+`product_id`. `pop.id NOT IN (SELECT product_id …)` для них не бывает
+истинным, и оба клиента молча пропадают из ответа. `NOT EXISTS` ведёт себя
+правильно.
+
+**Тай-брейкер.** Боре подходят «Зерно Колумбия» и «Френч-пресс» — оба с
+одним покупателем. Порядок `buyers DESC, name` делает выбор
+детерминированным. Спросят дальше: «как исключить то, что клиенту уже
+показывали?» — ещё один `NOT EXISTS` к таблице показов, и она почти всегда
+большая — нужен индекс `(customer_id, product_id)`.
+
+</Reveal>

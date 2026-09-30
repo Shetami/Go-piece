@@ -1,0 +1,110 @@
+---
+title: "Карточка клиента: счета, оплаты, тикеты"
+description: "Три независимых один-ко-многим в одной строке: предагрегация каждой ветки, основной контакт через условие в ON, авансы без счетов и клиенты без ничего."
+kind: implement
+topic: sql-joins
+level: hard
+order: 240
+ordered: true
+---
+
+B2B-биллинг. Аккаунт-менеджерам нужна сводка по **каждому активному**
+клиенту (`is_active`) за **2024 год**:
+
+- `primary_contact` — email основного контакта (`is_primary`); если
+  основного нет — `NULL`;
+- `invoiced` — сумма счетов, выставленных в 2024 году (`issued_on`);
+- `paid` — сумма платежей 2024 года (`paid_on`); платежи привязаны к
+  клиенту, а не к счёту, бывают авансы без счетов;
+- `balance` = `invoiced − paid` (отрицательный — переплата);
+- `open_tickets` — открытые тикеты поддержки (`status = 'open'`), за всё
+  время.
+
+Нет счетов, платежей или тикетов — `0`.
+
+- колонки: `account`, `primary_contact`, `invoiced`, `paid`, `balance`,
+  `open_tickets`;
+- порядок: `balance` по убыванию, затем по `account`.
+
+Что проверяют скрытые данные: клиент с несколькими счетами, платежами,
+тикетами и контактами одновременно, клиент без основного контакта, аванс
+без счёта, клиент без единой записи, документы прошлого года, неактивный
+клиент.
+
+<Reveal>
+
+```sql
+WITH inv AS (
+  SELECT account_id, sum(amount) AS amount
+  FROM invoices
+  WHERE issued_on >= '2024-01-01' AND issued_on < '2025-01-01'
+  GROUP BY account_id
+),
+pay AS (
+  SELECT account_id, sum(amount) AS amount
+  FROM payments
+  WHERE paid_on >= '2024-01-01' AND paid_on < '2025-01-01'
+  GROUP BY account_id
+),
+tix AS (
+  SELECT account_id, count(*) AS open_tickets
+  FROM tickets
+  WHERE status = 'open'
+  GROUP BY account_id
+)
+SELECT a.name AS account,
+       c.email AS primary_contact,
+       coalesce(i.amount, 0)                         AS invoiced,
+       coalesce(p.amount, 0)                         AS paid,
+       coalesce(i.amount, 0) - coalesce(p.amount, 0) AS balance,
+       coalesce(t.open_tickets, 0)                   AS open_tickets
+FROM accounts a
+LEFT JOIN contacts c ON c.account_id = a.id AND c.is_primary
+LEFT JOIN inv i ON i.account_id = a.id
+LEFT JOIN pay p ON p.account_id = a.id
+LEFT JOIN tix t ON t.account_id = a.id
+WHERE a.is_active
+ORDER BY balance DESC, a.name;
+```
+
+Ответ:
+
+```
+Альфа | ceo@alfa.example | 2000 | 1500 | 500 | 1
+Бета | NULL | 500 | 0 | 500 | 0
+Эпсилон | NULL | 0 | 0 | 0 | 0
+Гамма | it@gamma.example | 0 | 300 | -300 | 2
+```
+
+**Несколько один-ко-многим в одном `FROM` перемножаются.** У Альфы три
+счёта, четыре платежа, два тикета и два контакта. Соединив всё сырыми
+таблицами, получим 3 × 4 × 2 × 2 = 48 строк на клиента: каждый счёт
+посчитается 16 раз, каждый платёж — 12. `count(DISTINCT)` спасает счётчики,
+но не суммы: два одинаковых платежа по 500 `sum(DISTINCT)` склеит в один.
+
+**Лечение — предагрегация каждой ветки до зерна «клиент».** Три CTE
+сворачивают счета, платежи и тикеты по `account_id` — со своими фильтрами
+(год для денег, статус для тикетов). После этого каждый `LEFT JOIN`
+приносит не больше одной строки, и соединять можно сколько угодно веток.
+Альтернатива — коррелированные скалярные подзапросы в `SELECT`, по одному
+на колонку.
+
+**Основной контакт — условие в `ON`, а не в `WHERE`.** `LEFT JOIN contacts
+… AND c.is_primary` оставляет одну строку контакта (или ни одной). Тот же
+фильтр в `WHERE` выбросил бы Бету и Эпсилон — у них нет основного контакта,
+а `INNER JOIN contacts` из заготовки потерял бы и Эпсилон, и при двух
+контактах у Альфы удвоил бы её строку.
+
+**Все фильтры по дочерним таблицам живут внутри своей ветки.** Условие
+`t.status = 'open'` во внешнем `WHERE` оставило бы только клиентов с
+открытыми тикетами; годовой фильтр по счетам во внешнем `WHERE` убил бы
+Гамму, у которой в 2024-м только аванс.
+
+**Что спросят дальше.** «Как сделать это быстро для десятков тысяч
+клиентов?» — каждая ветка — один проход с hash aggregate, а соединение
+агрегатов по ключу — hash join; для карточки одного клиента те же CTE с
+условием по `account_id` пройдут по индексам. И «можно ли доверять
+`is_primary`?» — лучше частичный уникальный индекс `(account_id) WHERE
+is_primary`, иначе однажды основных станет два и строка снова задвоится.
+
+</Reveal>

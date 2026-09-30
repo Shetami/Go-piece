@@ -1,0 +1,96 @@
+---
+title: Кворумное чтение с ранним отказом
+description: Спросить все реплики параллельно, вернуть первые k ответов и отменить остальных. Если кворум уже не набрать — сдаться сразу, не дожидаясь зависших. На дженериках.
+kind: implement
+topic: context
+level: hard
+order: 310
+related: [scatter-gather, eventual-consistency]
+lecture: system-design/consistency
+---
+
+Хранилище с репликацией (как Cassandra или Dynamo) читает с кворумом:
+из пяти реплик нужно, чтобы ответили три. Ждать всех пять нельзя —
+медленная реплика определяет латентность. Но и обратное важно: если три
+уже упали, кворум недостижим, и ждать двух зависших бессмысленно.
+Напишите `Quorum`.
+
+Что проверяют скрытые тесты:
+
+- три быстрых ответа из пяти — возвращаются сразу, две зависшие
+  реплики получают отмену;
+- пять реплик по 100 мс опрашиваются параллельно;
+- три ошибки из пяти при k = 3 — отказ сразу, с `ErrNoQuorum` и всеми
+  ошибками, зависшие отменены;
+- `k = 0` или `k` больше числа реплик — `ErrNoQuorum` без вызовов;
+- отмена `ctx` — причина отмены, горутины не остаются.
+
+<Reveal>
+
+```go
+func Quorum[T any](ctx context.Context, k int, replicas []func(context.Context) (T, error)) ([]T, error) {
+	n := len(replicas)
+	if k < 1 || k > n {
+		return nil, fmt.Errorf("нужно %d из %d: %w", k, n, ErrNoQuorum)
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	type result struct {
+		v   T
+		err error
+	}
+	results := make(chan result, n)
+	for _, r := range replicas {
+		go func() {
+			v, err := r(ctx)
+			results <- result{v, err}
+		}()
+	}
+
+	var got []T
+	var errs []error
+	for range n {
+		select {
+		case r := <-results:
+			if r.err != nil {
+				errs = append(errs, r.err)
+				if len(errs) > n-k {
+					return nil, errors.Join(append([]error{ErrNoQuorum}, errs...)...)
+				}
+				continue
+			}
+			if got = append(got, r.v); len(got) == k {
+				return got, nil
+			}
+		case <-ctx.Done():
+			return nil, context.Cause(ctx)
+		}
+	}
+	return nil, errors.Join(append([]error{ErrNoQuorum}, errs...)...)
+}
+```
+
+**Два условия выхода, и оба ранние.** Успех — когда набралось `k`.
+Провал — когда ошибок больше `n − k`: даже если все оставшиеся ответят,
+кворума не будет. Наивное «собрать всё, потом посчитать» ждёт самую
+медленную реплику и в худшем случае висит до таймаута.
+
+**`defer cancel()` отменяет лишних.** Производный контекст — общий для
+всех вызовов. На любом выходе — успех, провал, отмена сверху — реплики,
+которые ещё работают, получают отмену и освобождают соединения.
+
+**Буфер канала на `n`.** Мы уходим, не прочитав все результаты, а
+горутины реплик должны куда-то их записать и завершиться. Без буфера
+каждая опоздавшая висела бы навсегда.
+
+**`ErrNoQuorum` первой в `errors.Join`** — вызывающему достаточно
+`errors.Is(err, ErrNoQuorum)`, чтобы понять класс проблемы, а детали по
+репликам остаются в той же ошибке для логов.
+
+**Что спросят дальше:** почему при `R + W > N` чтение видит последнюю
+запись, что делать, если k ответов расходятся по версии (read repair,
+выбор по timestamp/vector clock), и как это сочетается с hedging —
+можно опрашивать сначала k реплик, а остальных только при задержке.
+
+</Reveal>

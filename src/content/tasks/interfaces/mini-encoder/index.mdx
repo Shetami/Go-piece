@@ -1,0 +1,136 @@
+---
+title: Мини-кодировщик на type switch
+description: Encode печатает значение как JSON, спрашивая у него интерфейсы — Marshaler, error, Stringer — в нужном порядке. Тип, реализующий несколько интерфейсов, nil-указатель в интерфейсе и ошибки из глубины.
+kind: implement
+topic: interfaces
+level: hard
+order: 340
+---
+
+Так устроены `encoding/json`, `fmt` и логгеры: получили `any` — и спрашивают
+у значения, что оно умеет. Порядок вопросов — часть контракта: тип может
+быть и `Marshaler`, и `error`, и `Stringer` одновременно.
+
+Напишите `Encode` по контракту из заготовки.
+
+Что проверяют скрытые тесты:
+
+- скаляры, строки с экранированием, вложенные `[]any` и `map[string]any` с
+  сортировкой ключей, пустые `[]` и `{}`;
+- `Marshaler` главнее `error`, `error` главнее `Stringer`; обёрнутая ошибка
+  печатается полным текстом; указатель на тип со `String` на значении — тоже
+  `Stringer`;
+- `nil`-указатель на тип с методами на значении — `null`, а не паника;
+- ошибка `MarshalText` в глубине дерева выходит наружу; неподдерживаемый тип —
+  пустая строка и `ErrUnsupported` с именем типа; `[]int` — это не `[]any`.
+
+<Reveal>
+
+```go
+type Marshaler interface {
+	MarshalText() (string, error)
+}
+
+var ErrUnsupported = errors.New("unsupported type")
+
+func Encode(v any) (string, error) {
+	var b strings.Builder
+	if err := encode(&b, v); err != nil {
+		return "", err
+	}
+	return b.String(), nil
+}
+
+func encode(b *strings.Builder, v any) error {
+	if v == nil {
+		b.WriteString("null")
+		return nil
+	}
+	if rv := reflect.ValueOf(v); rv.Kind() == reflect.Pointer && rv.IsNil() {
+		b.WriteString("null")
+		return nil
+	}
+	switch x := v.(type) {
+	case Marshaler:
+		s, err := x.MarshalText()
+		if err != nil {
+			return fmt.Errorf("marshal %T: %w", v, err)
+		}
+		b.WriteString(s)
+	case error:
+		b.WriteString(strconv.Quote(x.Error()))
+	case fmt.Stringer:
+		b.WriteString(strconv.Quote(x.String()))
+	case bool:
+		b.WriteString(strconv.FormatBool(x))
+	case int:
+		b.WriteString(strconv.Itoa(x))
+	case int64:
+		b.WriteString(strconv.FormatInt(x, 10))
+	case float64:
+		b.WriteString(strconv.FormatFloat(x, 'g', -1, 64))
+	case string:
+		b.WriteString(strconv.Quote(x))
+	case []any:
+		b.WriteByte('[')
+		for i, e := range x {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			if err := encode(b, e); err != nil {
+				return err
+			}
+		}
+		b.WriteByte(']')
+	case map[string]any:
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		b.WriteByte('{')
+		for i, k := range keys {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			b.WriteString(strconv.Quote(k))
+			b.WriteByte(':')
+			if err := encode(b, x[k]); err != nil {
+				return err
+			}
+		}
+		b.WriteByte('}')
+	default:
+		return fmt.Errorf("%w: %T", ErrUnsupported, v)
+	}
+	return nil
+}
+```
+
+**Порядок `case` — это приоритет.** Type switch выбирает первую подходящую
+ветку сверху вниз. `chkLevel` реализует и `error`, и `Stringer` — если
+поставить `fmt.Stringer` первым, ошибка напечатается «не тем» текстом. Так же
+делает `fmt`: у `Formatter` приоритет выше `error`, у `error` — выше
+`Stringer`.
+
+**nil-указатель — не nil-интерфейс.** `var id *chkID` в `any` даёт
+интерфейс с типом `*chkID` и значением `nil`: `v == nil` — ложь. `*chkID`
+реализует `Marshaler`, потому что в набор методов указателя входят методы
+значения, — и вызов `x.MarshalText()` разыменует `nil` и упадёт. Проверить
+«указатель и он nil» без знания типа можно только через `reflect`.
+
+**Набор методов указателя шире.** `&chkColor{"blue"}` попадает в ветку
+`fmt.Stringer`, хотя `String` объявлен на значении. Обратное неверно: будь
+`String` на указателе, `chkColor{}` не был бы `Stringer`. Это и есть ловушка
+`MarshalJSON` на указателе у `encoding/json`.
+
+**`[]int` — это не `[]any`.** В type switch `case []any` не ловит `[]int`:
+это разные типы, а не «слайс чего угодно». Поддержать любые слайсы можно
+только через `reflect.Value.Len/Index` — так и делает настоящий
+`encoding/json`.
+
+**Ошибка — в строку не пишем.** При ошибке возвращается пустая строка, а не
+половина документа: частично закодированный JSON хуже, чем никакой. Поэтому
+результат копится в `strings.Builder` и отдаётся только в конце.
+
+</Reveal>

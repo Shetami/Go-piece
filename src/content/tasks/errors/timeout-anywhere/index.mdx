@@ -1,0 +1,92 @@
+---
+title: Таймаут где-то в глубине
+description: Проверка поведения Timeout() по всему дереву ошибки — errors.As останавливается на первом совпадении, а ответ может лежать глубже или в соседней ветке Join.
+kind: implement
+topic: errors
+level: medium
+order: 300
+related: [request-deadline, red-use-metrics]
+---
+
+Метрики запросов делят ошибки на «таймаут», «клиент ушёл» и «сбой».
+Таймауты приходят из разных мест: `context.DeadlineExceeded`, сетевые
+ошибки с `Timeout() bool`, обёртки драйверов. Стандартный приём — проверка
+поведения через `errors.As(err, &timeoutIface)` — здесь не срабатывает, и
+часть таймаутов попадает в «сбои».
+
+Напишите `IsTimeout` и `Classify`.
+
+Что проверяют скрытые тесты:
+
+- `nil` и обычные ошибки — не таймаут; обёрнутый таймаут и
+  `context.DeadlineExceeded` — таймаут;
+- внешнее звено с `Timeout() == false`, а внутри настоящий таймаут →
+  `true`;
+- таймаут во второй ветке вложенного `errors.Join` и во втором `%w`
+  находится;
+- `Classify` различает таймаут, отмену и сбой, а при наличии и таймаута,
+  и отмены выбирает таймаут.
+
+<Reveal>
+
+```go
+func IsTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	if t, ok := err.(interface{ Timeout() bool }); ok && t.Timeout() {
+		return true
+	}
+	switch u := err.(type) {
+	case interface{ Unwrap() error }:
+		return IsTimeout(u.Unwrap())
+	case interface{ Unwrap() []error }:
+		for _, e := range u.Unwrap() {
+			if IsTimeout(e) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func Classify(err error) Kind {
+	switch {
+	case err == nil:
+		return KindOK
+	case IsTimeout(err):
+		return KindTimeout
+	case errors.Is(err, context.Canceled):
+		return KindCanceled
+	}
+	return KindFailure
+}
+```
+
+**`errors.As` отвечает на вопрос «первое звено такого вида», а не «есть
+ли звено с таким свойством».** Как только он находит звено с методом
+`Timeout`, поиск заканчивается — и если это обёртка, которая про себя
+говорит `false`, ответ «не таймаут», хотя таймаут лежит строкой ниже.
+Нам нужно второе, поэтому обход ручной: утверждение типа на каждом звене
+и спуск по обоим видам `Unwrap`.
+
+**Так бывает в жизни.** Обёртки операций вроде `*net.OpError` или
+`*url.Error` реализуют `Timeout()`, делегируя причине, но свои обёртки в
+проекте часто пишут с «заглушкой» `false` или с проверкой только своего
+поля. Чем меньше мы полагаемся на то, что каждое звено честно делегирует,
+тем надёжнее классификация.
+
+**`context.DeadlineExceeded` — тоже поведение.** Его тип реализует
+`Timeout() bool`, так что отдельная ветка `errors.Is(err,
+context.DeadlineExceeded)` не нужна: обход находит его сам.
+
+**Порядок в `Classify` — это приоритет.** Когда запрос отменён *из-за*
+того, что соседняя операция не уложилась, в дереве оказываются оба
+признака. Для алертов важнее таймаут: это наша проблема, отмена
+клиентом — нет.
+
+**Что спросят дальше.** Почему `Temporary()` объявлен устаревшим в `net`
+(слишком размытое понятие), как защитить рекурсию от ошибки-цикла и где
+ставить классификатор — в middleware, один раз на запрос.
+
+</Reveal>

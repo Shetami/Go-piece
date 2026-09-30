@@ -1,0 +1,117 @@
+---
+title: Поля для лога внутри ошибки
+description: Прикрепить к ошибке ключи-значения для структурного лога так, чтобы текст и errors.Is не изменились, а поля собирались со всего дерева с понятным приоритетом.
+kind: implement
+topic: errors
+level: medium
+order: 350
+related: [structured-logging]
+lecture: observability/logs
+---
+
+Глубоко в репозитории известно, какой хост базы и какая таблица, а
+логирует ошибку HTTP-middleware, которое этого не знает. Вшивать
+подробности в текст — значит плодить уникальные строки и ломать
+группировку в системе логов. Лучше нести их рядом с ошибкой отдельными
+полями и отдать логгеру как `slog.Attr`.
+
+Напишите `WithFields`, `Fields` и `Attrs`. Тип обёртки придумайте сами.
+
+Что проверяют скрытые тесты:
+
+- `WithFields(nil)` — `nil`; текст ошибки не меняется; `errors.Is`
+  работает сквозь обёртку;
+- поля находятся сквозь `fmt.Errorf("%w")`; у ошибки без полей —
+  пустая, но не `nil` мапа;
+- при конфликте ключей побеждает более глубокое звено;
+- поля собираются из всех веток `errors.Join`, при конфликте — ранняя
+  ветка;
+- изменение слайса `kv` после вызова не меняет поля ошибки;
+- `Attrs` — атрибуты по алфавиту и в конце `err` с текстом.
+
+<Reveal>
+
+```go
+type fieldsError struct {
+	err error
+	kv  []any
+}
+
+func (e *fieldsError) Error() string { return e.err.Error() }
+func (e *fieldsError) Unwrap() error { return e.err }
+
+func WithFields(err error, kv ...any) error {
+	if err == nil {
+		return nil
+	}
+	return &fieldsError{err: err, kv: slices.Clone(kv)}
+}
+
+func Fields(err error) map[string]any {
+	out := make(map[string]any)
+	collect(err, out)
+	return out
+}
+
+func collect(err error, out map[string]any) {
+	if err == nil {
+		return
+	}
+	if fe, ok := err.(*fieldsError); ok {
+		for i := 0; i+1 < len(fe.kv); i += 2 {
+			if k, ok := fe.kv[i].(string); ok {
+				out[k] = fe.kv[i+1]
+			}
+		}
+	}
+	switch u := err.(type) {
+	case interface{ Unwrap() error }:
+		collect(u.Unwrap(), out)
+	case interface{ Unwrap() []error }:
+		errs := u.Unwrap()
+		for i := len(errs) - 1; i >= 0; i-- {
+			collect(errs[i], out)
+		}
+	}
+}
+
+func Attrs(err error) []slog.Attr {
+	if err == nil {
+		return nil
+	}
+	fs := Fields(err)
+	attrs := make([]slog.Attr, 0, len(fs)+1)
+	for _, k := range slices.Sorted(maps.Keys(fs)) {
+		attrs = append(attrs, slog.Any(k, fs[k]))
+	}
+	return append(attrs, slog.String("err", err.Error()))
+}
+```
+
+**Обёртка, которая ничего не добавляет к тексту.** `Error()` отдаёт
+текст исходной ошибки, `Unwrap()` — её саму. Для кода, который проверяет
+`errors.Is` и печатает `err`, обёртки как будто нет, а обход дерева её
+видит. Этот же приём годится для любых метаданных: кода, признака
+«повторяемая», ID запроса.
+
+**`errors.As` здесь не поможет.** Он вернёт только первую обёртку с
+полями, а их в цепочке может быть несколько — на каждом слое свои.
+Поэтому обход ручной, с обоими видами `Unwrap`.
+
+**Приоритет задаётся порядком записи в мапу.** Кто записан последним,
+тот и победил. Сначала пишем поля звена, потом рекурсивно — поля детей:
+глубокие перекрывают внешние. Ветки `Join` обходим с конца, чтобы ранняя
+ветка записалась последней. Правило можно выбрать и обратное — важно,
+чтобы оно было одно и детерминированное.
+
+**`slices.Clone(kv)`.** Вариадический параметр — это слайс вызывающего,
+если тот передал `kv...`. Сохранив его без копии, мы разделим с ним
+память, и поздняя правка «чужого» слайса тихо изменит поля уже
+возвращённой ошибки.
+
+**Что спросят дальше.** Как сделать ошибку `slog.LogValuer`, чтобы
+логгер сам раскрывал поля, почему поля не должны содержать персональные
+данные, и как не раздувать кардинальность, если лог превращается в
+метрики.
+
+</Reveal>

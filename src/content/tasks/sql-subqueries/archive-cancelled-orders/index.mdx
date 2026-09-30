@@ -1,0 +1,93 @@
+---
+title: "Перенос отменённых заказов в архив"
+description: "WITH … DELETE RETURNING → INSERT → итоговая выборка. Главная ловушка — основной запрос видит таблицы до изменений."
+kind: implement
+topic: sql-subqueries
+level: hard
+order: 170
+ordered: true
+---
+
+Таблица `orders` пухнет, и старые отмены решили переносить в
+`orders_archive`. Напишите **один запрос** (одну команду с CTE), который:
+
+1. удаляет из `orders` отменённые (`status = 'cancelled'`) заказы, созданные
+   **строго до** `2024-01-01 00:00`;
+2. вставляет их в `orders_archive` без изменений;
+3. возвращает отчёт по каждому клиенту, у которого что-то перенесли.
+
+- колонки: `name`, `moved` — сколько заказов перенесено, `moved_amount` — на
+  какую сумму, `left_in_orders` — сколько заказов клиента **осталось** в
+  `orders` после переноса, `in_archive` — сколько его заказов **стало** в
+  архиве с учётом старых;
+- порядок: по `name`.
+
+Что проверяют скрытые данные: заказ ровно в `2024-01-01 00:00` и в
+`2023-12-31 23:59:59`, заказ с пустым статусом, клиента, у которого в архиве
+уже что-то лежало, клиента без переносов.
+
+Каждый прогон откатывается, так что данные задачи не пострадают.
+
+<Reveal>
+
+```sql
+WITH moved AS (
+  DELETE FROM orders
+  WHERE status = 'cancelled'
+    AND created_at < timestamp '2024-01-01'
+  RETURNING *
+),
+archived AS (
+  INSERT INTO orders_archive
+  SELECT id, customer_id, amount, status, created_at
+  FROM moved
+  RETURNING customer_id, amount
+),
+per_customer AS (
+  SELECT customer_id, count(*) AS moved, sum(amount) AS moved_amount
+  FROM archived
+  GROUP BY customer_id
+)
+SELECT c.name,
+       m.moved,
+       m.moved_amount,
+       (SELECT count(*) FROM orders o         WHERE o.customer_id = c.id) - m.moved AS left_in_orders,
+       (SELECT count(*) FROM orders_archive a WHERE a.customer_id = c.id) + m.moved AS in_archive
+FROM per_customer m
+JOIN customers c ON c.id = m.customer_id
+ORDER BY c.name;
+```
+
+Ответ:
+
+```
+Аня | 2 | 350.00 | 2 | 2
+Боря | 1 | 400.00 | 0 | 3
+Гоша | 1 | 50.00 | 1 | 1
+```
+
+**Все части команды видят один снимок.** Это главное правило
+data-modifying CTE в Postgres: `DELETE`, `INSERT` и основной `SELECT`
+выполняются «одновременно» над состоянием данных *до* команды. Поэтому
+`SELECT count(*) FROM orders` в итоговом запросе всё ещё видит удалённые
+заказы, а `orders_archive` — ещё не видит вставленных. Заготовка ровно на
+этом и ошибается: у Ани «осталось 4», а в архиве «0».
+
+**Единственный канал между частями — `RETURNING`.** Что удалено, знает только
+`moved`; что вставлено — только `archived`. Отсюда арифметика: осталось = было
+− перенесено, в архиве = было + перенесено. Альтернатива — считать
+`left_in_orders` по `orders` с условием `id NOT IN (SELECT id FROM moved)`.
+Отдельными командами `DELETE; INSERT; SELECT` задача тоже решается, но тогда
+нужна явная транзакция и промежуточная таблица, а одна команда атомарна сама
+по себе.
+
+**Границы и `NULL`.** Заказ Ани в `2024-01-01 00:00` не переносится —
+условие строгое. Необработанный заказ Веры со статусом `NULL` не проходит
+`status = 'cancelled'`, поэтому Веры в отчёте нет — и это правильно.
+
+**Что спросят дальше.** «А если архивировать миллионы строк?» — пачками:
+`DELETE … WHERE id IN (SELECT id … LIMIT 10000 FOR UPDATE SKIP LOCKED)
+RETURNING *` в цикле, чтобы не держать огромную транзакцию, не раздувать WAL и
+не блокировать таблицу надолго.
+
+</Reveal>

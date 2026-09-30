@@ -38,14 +38,15 @@ func TestPipelineStepTimeout(t *testing.T) {
 
 func TestPipelineTotalTimeout(t *testing.T) {
 	var log []string
-	// Каждый шаг укладывается в perStep, но вместе — нет.
+	// Каждый шаг укладывается в perStep, но вместе — нет: общий бюджет
+	// должен оборвать шаг b посередине, а не только не пустить следующий.
 	err := RunPipeline(context.Background(), 150*time.Millisecond, 100*time.Millisecond, []Step{
-		chkWork("a", 80*time.Millisecond, &log), chkWork("b", 80*time.Millisecond, &log), chkWork("c", 80*time.Millisecond, &log)})
+		chkWork("a", 80*time.Millisecond, &log), chkWork("b", 80*time.Millisecond, &log)})
 	if !errors.Is(err, ErrTotalTimeout) || !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrStepTimeout) {
-		t.Fatalf("err = %v; ожидали ErrTotalTimeout — общий бюджет 150 мс, три шага по 80", err)
+		t.Fatalf("err = %v; ожидали ErrTotalTimeout — общий бюджет 150 мс, два шага по 80", err)
 	}
-	if slices.Contains(log, "c") {
-		t.Fatalf("шаг c запущен после истечения общего таймаута: %v", log)
+	if !strings.Contains(err.Error(), "b") {
+		t.Fatalf("err = %v; ожидали, что общий таймаут прервёт шаг b", err)
 	}
 }
 

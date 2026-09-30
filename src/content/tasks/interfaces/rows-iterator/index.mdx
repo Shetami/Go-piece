@@ -1,0 +1,129 @@
+---
+title: Адаптер итератора Rows к range-over-func
+description: Итератор в стиле sql.Rows превращается в iter.Seq2 — с закрытием при break, ошибкой последней парой и опциональным io.Closer. Плюс фильтр-обёртка, которая не теряет Close.
+kind: implement
+topic: interfaces
+level: hard
+order: 310
+---
+
+Многие библиотеки (драйверы баз, клиенты Kafka, парсеры) отдают данные
+итератором в стиле `sql.Rows`: `Next`, `Value`, `Err` и `Close`. Писать цикл
+с тремя проверками и `defer rows.Close()` каждый раз утомительно — и
+именно `Close` забывают, из-за чего утекают соединения. С Go 1.23 это можно
+завернуть в `iter.Seq2[T, error]` и обходить обычным `for range`.
+
+Напишите `All`, `Collect` и `Filter` по контракту из заготовки.
+
+Что проверяют скрытые тесты:
+
+- обход всех элементов — `Close` ровно один раз; тип без `io.Closer` (метод
+  `Close` с другой сигнатурой не считается) тоже работает;
+- `break` на втором элементе: `Close` вызван, лишний `Next` — нет;
+- ошибка чтения приходит последней парой `(0, err)`; если упал только
+  `Close` — ошибкой становится он;
+- `Collect` при ошибке возвращает `nil` и ошибку, исходный закрыт;
+- `Filter` пропускает только нужное, отдаёт ошибку исходного и закрывает его —
+  в том числе при `break`.
+
+<Reveal>
+
+```go
+type Rows[T any] interface {
+	Next() bool
+	Value() T
+	Err() error
+}
+
+func All[T any](rows Rows[T]) iter.Seq2[T, error] {
+	return func(yield func(T, error) bool) {
+		closed := false
+		closeRows := func() error {
+			if c, ok := rows.(io.Closer); ok && !closed {
+				closed = true
+				return c.Close()
+			}
+			return nil
+		}
+		defer closeRows()
+
+		for rows.Next() {
+			if !yield(rows.Value(), nil) {
+				return
+			}
+		}
+		var zero T
+		if err := rows.Err(); err != nil {
+			yield(zero, err)
+			return
+		}
+		if err := closeRows(); err != nil {
+			yield(zero, err)
+		}
+	}
+}
+
+func Collect[T any](rows Rows[T]) ([]T, error) {
+	var out []T
+	for v, err := range All(rows) {
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+type filtered[T any] struct {
+	Rows[T]
+	keep    func(T) bool
+}
+
+func (f *filtered[T]) Next() bool {
+	for f.Rows.Next() {
+		if f.keep(f.Rows.Value()) {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *filtered[T]) Close() error {
+	if c, ok := f.Rows.(io.Closer); ok {
+		return c.Close()
+	}
+	return nil
+}
+
+func Filter[T any](rows Rows[T], keep func(T) bool) Rows[T] {
+	return &filtered[T]{Rows: rows, keep: keep}
+}
+```
+
+**`defer` внутри функции-итератора — главный приём.** Когда потребитель
+делает `break`, `yield` возвращает `false`, наша функция выходит — и `defer`
+закрывает ресурс. Тот же `defer` сработает, если тело цикла запаникует. Без
+него ранний выход из `for range` оставлял бы соединение открытым.
+
+**После `false` — ни шагу.** Если продолжить вызывать `yield` после того,
+как он вернул `false`, рантайм паникует: «range function continued iteration
+after function for loop body returned false». Лишний `Next` тоже вреден: у
+сетевого итератора он может прочитать следующую пачку данных.
+
+**Опциональный `io.Closer`.** `Rows` не требует `Close` — у итератора по
+слайсу закрывать нечего. `All` проверяет `rows.(io.Closer)`. Метод с тем же
+именем, но другой сигнатурой, интерфейс не реализует — проверка идёт по
+полной сигнатуре.
+
+**Обёртка обязана пробросить опциональный интерфейс.** `filtered` встраивает
+`Rows[T]`, но встраивание интерфейса продвигает только методы `Rows` —
+`Close` исходного типа наружу не выходит. Без явного метода `Close` у
+`filtered` `All` решил бы, что закрывать нечего, и соединение утекло бы.
+Это та же проблема, что с `http.Flusher` у обёрток `ResponseWriter`.
+
+**Какая ошибка важнее.** Ошибка чтения — причина; ошибка `Close` после неё
+чаще всего следствие. Поэтому отдаём её только когда чтение прошло чисто.
+Что спросят дальше: чем `iter.Pull` отличается от push-итератора и почему
+ему нужен свой `stop`.
+
+</Reveal>

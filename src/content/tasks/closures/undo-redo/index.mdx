@@ -1,0 +1,154 @@
+---
+title: Undo и Redo на замыканиях
+description: Каждое изменение кладёт в историю замыкание, которое умеет его отменить и вернуть свою противоположность. Отсутствующий ключ, пачки изменений, очистка redo и паника внутри пачки.
+kind: implement
+topic: closures
+level: hard
+order: 290
+---
+
+Редактор настроек, конструктор форм, админка с кнопкой «отменить» —
+везде нужна история изменений. Хранить снимки всего состояния дорого.
+Удобнее на каждое изменение класть в стек маленькое замыкание, которое
+знает, как его отменить.
+
+Напишите `Store` по контракту в заготовке: поля структуры и все методы.
+
+Что проверяют скрытые тесты:
+
+- `Set a=1`, `Set a=2`, `Delete a` и три `Undo` — `a=2`, `a=1`, и ключа
+  `a` снова нет (не пустая строка); удаление отсутствующего ключа в истории
+  не значится;
+- `Redo` повторяет отменённое, а новое изменение после `Undo` очищает
+  redo;
+- `Batch` с вложенным `Batch` отменяется одним `Undo` и повторяется одним
+  `Redo` в правильном порядке; пустой `Batch` истории не добавляет;
+- `fn` в `Batch` паникует — после этого `Store` снова работает в обычном
+  режиме.
+
+<Reveal>
+
+```go
+type change func() change
+
+type Store struct {
+	data  map[string]string
+	undo  []change
+	redo  []change
+	batch *[]change
+}
+
+func NewStore() *Store {
+	return &Store{data: make(map[string]string)}
+}
+
+func (s *Store) Get(k string) (string, bool) {
+	v, ok := s.data[k]
+	return v, ok
+}
+
+func (s *Store) Set(k, v string) {
+	s.record(s.put(k, v, true))
+}
+
+func (s *Store) Delete(k string) {
+	if _, ok := s.data[k]; !ok {
+		return
+	}
+	s.record(s.put(k, "", false))
+}
+
+func (s *Store) Batch(fn func()) {
+	if s.batch != nil {
+		fn()
+		return
+	}
+	var cs []change
+	s.batch = &cs
+	defer func() {
+		s.batch = nil
+		if len(cs) > 0 {
+			s.record(group(cs))
+		}
+	}()
+	fn()
+}
+
+func (s *Store) Undo() bool {
+	if len(s.undo) == 0 {
+		return false
+	}
+	c := s.undo[len(s.undo)-1]
+	s.undo = s.undo[:len(s.undo)-1]
+	s.redo = append(s.redo, c())
+	return true
+}
+
+func (s *Store) Redo() bool {
+	if len(s.redo) == 0 {
+		return false
+	}
+	c := s.redo[len(s.redo)-1]
+	s.redo = s.redo[:len(s.redo)-1]
+	s.undo = append(s.undo, c())
+	return true
+}
+
+func (s *Store) put(k, v string, present bool) change {
+	old, had := s.data[k]
+	if present {
+		s.data[k] = v
+	} else {
+		delete(s.data, k)
+	}
+	return func() change { return s.put(k, old, had) }
+}
+
+func (s *Store) record(c change) {
+	if s.batch != nil {
+		*s.batch = append(*s.batch, c)
+		return
+	}
+	s.undo = append(s.undo, c)
+	s.redo = nil
+}
+
+func group(cs []change) change {
+	return func() change {
+		inv := make([]change, 0, len(cs))
+		for i := len(cs) - 1; i >= 0; i-- {
+			inv = append(inv, cs[i]())
+		}
+		return group(inv)
+	}
+}
+```
+
+**Замыкание захватывает прошлое.** `put` запоминает прежнее значение
+*и факт наличия ключа* и возвращает функцию, которая всё это вернёт.
+Наивное «запомнить старое значение» на новом ключе запомнит `""`, и отмена
+оставит ключ с пустой строкой. Для конфигов это не то же самое, что «не
+задано».
+
+**Отмена отмены — повтор.** Тип `change func() change`: применение
+изменения возвращает обратное к нему. Поэтому `Undo` и `Redo` — одинаковые
+три строки, отличаются только стеками. Не нужно отдельно писать «как
+повторить» — отменённое изменение само возвращает свой повтор.
+
+**Пачка — тоже `change`.** `group` отменяет элементы в обратном порядке и
+собирает их обратные в новую пачку. Её обратный порядок снова правильный
+— для повтора. Вложенный `Batch` просто пишет в ту же пачку. Порядок
+критичен: `a=1`, `a=2` внутри пачки, отменённые в прямом порядке, оставили
+бы `a=1` вместо «нет ключа».
+
+**`defer` в `Batch`.** Без него паника в `fn` оставит `s.batch` не `nil`,
+и все последующие изменения молча утекут в пачку, которая никогда не
+попадёт в историю. Тот же приём, что с `Unlock` в `defer`: состояние
+восстанавливается на любом выходе.
+
+**Что спросят дальше:** ограничение глубины истории (кольцевой буфер
+вместо слайса), слияние мелких правок подряд в одну (как набор символов в
+текстовом редакторе) и почему замыкания здесь удобнее паттерна Command с
+интерфейсом — меньше типов, а поведение то же.
+
+</Reveal>

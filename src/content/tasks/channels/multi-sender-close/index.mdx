@@ -1,0 +1,93 @@
+---
+title: Много отправителей и один, кто закрывает
+description: Канал, в который пишут десятки горутин, а закрывает сторонний код. Send после Close без паники, пробуждение ждущих, ни одного потерянного значения — RWMutex и сигнальный канал.
+kind: implement
+topic: channels
+level: hard
+order: 300
+related: [chan-close, rwmutex, graceful-shutdown]
+lecture: concurrency/ownership
+---
+
+Напишите `Sink[T]`. Правило «закрывает тот, кто пишет» хорошо, пока
+писатель один. А если в канал событий пишут обработчики запросов, а
+закрыть его должен код остановки сервиса? Наивный `close(ch)` — и первый
+же опоздавший обработчик роняет процесс паникой `send on closed channel`.
+
+Что проверяют скрытые тесты:
+
+- пятьдесят горутин пишут без остановки, в середине — `Close`: никто не
+  паникует, `Out` закрывается, и каждое значение, для которого `Send`
+  вернул `nil`, дошло до читателя;
+- `Send` ждёт читателя, которого нет, — `Close` не зависает, а `Send`
+  возвращает `ErrClosed`;
+- пять одновременных `Close`, потом `Send` — `ErrClosed` без паники;
+- `Send` без читателя по дедлайну — `DeadlineExceeded`.
+
+<Reveal>
+
+```go
+type Sink[T any] struct {
+	out    chan T
+	done   chan struct{}
+	mu     sync.RWMutex
+	closed bool
+	once   sync.Once
+}
+
+func NewSink[T any]() *Sink[T] {
+	return &Sink[T]{out: make(chan T), done: make(chan struct{})}
+}
+
+func (s *Sink[T]) Out() <-chan T { return s.out }
+
+func (s *Sink[T]) Send(ctx context.Context, v T) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return ErrClosed
+	}
+	select {
+	case s.out <- v:
+		return nil
+	case <-s.done:
+		return ErrClosed
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *Sink[T]) Close() {
+	s.once.Do(func() {
+		close(s.done)
+		s.mu.Lock()
+		s.closed = true
+		close(s.out)
+		s.mu.Unlock()
+	})
+}
+```
+
+**Закрывать `out` можно, только когда в него никто не пишет.** Поэтому
+каждый `Send` держит `RLock` на всё время отправки, а `Close` берёт
+`Lock` перед `close(out)`. Читающих замков может быть сколько угодно —
+отправители друг другу не мешают, а `Lock` ждёт, пока выйдут все.
+
+**Два канала: `done` — сигнал, `out` — данные.** Если `Close` сразу
+возьмёт `Lock`, он будет ждать отправителя, который ждёт читателя, —
+а читателя нет. Закрытый `done` будит всех ждущих в их `select`, они
+отпускают `RLock`, и `Close` проходит. Закрыть `done` безопасно: в него
+никто не пишет.
+
+**Флаг `closed` под замком.** После `close(out)` новый `Send` не должен
+даже пытаться писать — `select` с закрытым `out` паникует, хотя рядом
+готова ветка `done`. Флаг проверяется под `RLock`, а меняется под `Lock`.
+
+**`recover` — не решение.** «Поймать панику при записи в закрытый канал»
+работает, но скрывает гонку: значение могло «уйти» в никуда, и нарушается
+гарантия «`nil` — значит доставлено». Что спросят дальше: почему нельзя
+проверить «закрыт ли канал» перед записью (между проверкой и записью его
+закроют) и как то же сделать без мьютекса — счётчик отправителей и
+отдельная горутина, которая закрывает `out` после `wg.Wait()`.
+
+</Reveal>

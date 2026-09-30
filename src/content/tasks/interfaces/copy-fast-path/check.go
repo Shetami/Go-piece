@@ -24,7 +24,9 @@ func (w *chkPlainW) Write(p []byte) (int, error) { return w.buf.Write(p) }
 
 type chkFastSrc struct{ used bool }
 
-func (s *chkFastSrc) Read(p []byte) (int, error) { panic("есть WriteTo — Read звать не нужно") }
+func (s *chkFastSrc) Read(p []byte) (int, error) {
+	panic("есть WriteTo — Read звать не нужно")
+}
 func (s *chkFastSrc) WriteTo(w io.Writer) (int64, error) {
 	s.used = true
 	n, err := io.WriteString(w, "fast")

@@ -1,0 +1,94 @@
+---
+title: Супервизор, который перезапускает упавший воркер
+description: Фоновый воркер перезапускается после паники с паузой, но не бесконечно. Ошибку не перезапускают, пауза прерывается отменой context, в отчёте — стек места паники.
+kind: implement
+topic: defer-panic
+level: hard
+order: 280
+related: [context-cancellation, retry-backoff, crashloopbackoff]
+lecture: production/go-service
+---
+
+Консьюмер очереди иногда паникует на кривом сообщении. Ронять весь под
+ради этого не хочется, перезапускать бесконечно в горячем цикле — тоже:
+получится CrashLoopBackOff внутри процесса. Реализуйте `Supervise` в духе
+супервизоров Erlang.
+
+Что проверяют скрытые тесты:
+
+- две паники, потом успех — `nil`, `onPanic` вызван с номерами `1, 2`;
+- обычная ошибка — возвращается сразу, без перезапуска;
+- перезапуски кончились — ровно `maxRestarts + 1` запусков, в ошибке
+  `*PanicError` последней паники, а в его `Stack` — функция, **где**
+  паниковали;
+- пауза `backoff` длиной в час прерывается отменой `ctx` —
+  `context.Canceled` сразу, без ожидания;
+- `ctx` отменён до старта — воркер не запускается.
+
+<Reveal>
+
+```go
+func Supervise(ctx context.Context, maxRestarts int, backoff func(n int) time.Duration,
+	onPanic func(n int, pe *PanicError), worker func(ctx context.Context) error) error {
+	for n := 1; ; n++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err, pe := runWorker(ctx, worker)
+		if pe == nil {
+			return err
+		}
+		onPanic(n, pe)
+		if n > maxRestarts {
+			return fmt.Errorf("воркер упал %d раз, перезапуски кончились: %w", n, pe)
+		}
+		if err := sleepCtx(ctx, backoff(n)); err != nil {
+			return err
+		}
+	}
+}
+
+func runWorker(ctx context.Context, worker func(context.Context) error) (err error, pe *PanicError) {
+	defer func() {
+		if r := recover(); r != nil {
+			pe = &PanicError{Value: r, Stack: debug.Stack()}
+		}
+	}()
+	return worker(ctx), nil
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+```
+
+**Один запуск — одна функция с `recover`.** `defer` в цикле самого
+`Supervise` сработал бы только на выходе из него: первая же паника
+закончила бы супервизор. `runWorker` изолирует каждый запуск и возвращает
+панику отдельным результатом — так её не спутать с обычной ошибкой.
+
+**Паника — повод перезапустить, ошибка — нет.** Ошибку воркер вернул
+осознанно (например, конфиг невалиден) — перезапуск её не исправит.
+Паника на случайном сообщении — может пройти на следующем.
+
+**`time.Sleep` не слышит `ctx`.** С часовым backoff сервис при остановке
+висел бы час. `select` по таймеру и `ctx.Done()` — стандартный
+отменяемый сон; `defer t.Stop()` освобождает таймер, если проснулись по
+отмене.
+
+**Стек снимается в том же `defer`.** Позже кадров паникующей функции уже
+не будет, и в `onPanic` попал бы бесполезный стек супервизора.
+
+**Что спросят следом.** Сброс счётчика паник после долгой успешной работы
+(иначе редкие сбои за неделю исчерпают лимит), экспоненциальный backoff с
+потолком и почему иногда правильнее всё-таки упасть и дать перезапустить
+под оркестратору.
+
+</Reveal>

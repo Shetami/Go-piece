@@ -1,0 +1,138 @@
+---
+title: Graceful shutdown очереди заданий
+description: Очередь с воркерами, которая при остановке перестаёт принимать, дорабатывает принятое и при истечении срока отменяет зависшее. Без паники «send on closed channel» и без потерянных заданий.
+kind: implement
+topic: context
+level: hard
+order: 250
+related: [graceful-shutdown, worker-pool]
+lecture: production/go-service
+---
+
+Сервис принимает задания в очередь в памяти, их разбирают воркеры. При
+деплое Kubernetes присылает SIGTERM и даёт 30 секунд. За это время нужно
+перестать принимать новое, доделать уже принятое, а если не успели —
+отменить то, что висит, и выйти. Реализуйте `Server`.
+
+Что проверяют скрытые тесты:
+
+- `Shutdown` дорабатывает все принятые задания, после него `Submit` —
+  `ErrClosed`, повторный `Shutdown` не паникует и не висит;
+- `Submit` в полную очередь ждёт места, пока жив его `ctx`;
+- `Submit`, который ждал места без таймаута, просыпается при `Shutdown`
+  с `ErrClosed`;
+- `Shutdown` с истёкшим сроком — `DeadlineExceeded`, зависшее задание
+  получает отмену своего `ctx`, оставшиеся в очереди не выполняются;
+- двадцать горутин засыпают `Submit`, в середине — `Shutdown`: ни
+  паники, ни потерянных заданий — каждое принятое выполнено.
+
+<Reveal>
+
+```go
+type Server struct {
+	jobs chan Job
+	quit chan struct{}
+
+	mu     sync.RWMutex
+	closed bool
+
+	base       context.Context
+	cancelBase context.CancelFunc
+	wg         sync.WaitGroup
+	done       chan struct{}
+	once       sync.Once
+}
+
+func NewServer(workers, capacity int) *Server {
+	s := &Server{
+		jobs: make(chan Job, capacity),
+		quit: make(chan struct{}),
+		done: make(chan struct{}),
+	}
+	s.base, s.cancelBase = context.WithCancel(context.Background())
+	for range workers {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			for job := range s.jobs {
+				if s.base.Err() != nil {
+					continue
+				}
+				job(s.base)
+			}
+		}()
+	}
+	go func() {
+		s.wg.Wait()
+		close(s.done)
+	}()
+	return s
+}
+
+func (s *Server) Submit(ctx context.Context, job Job) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return ErrClosed
+	}
+	select {
+	case <-s.quit:
+		return ErrClosed
+	default:
+	}
+	select {
+	case s.jobs <- job:
+		return nil
+	case <-s.quit:
+		return ErrClosed
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *Server) Shutdown(ctx context.Context) error {
+	s.once.Do(func() {
+		close(s.quit)
+		s.mu.Lock()
+		s.closed = true
+		close(s.jobs)
+		s.mu.Unlock()
+	})
+	select {
+	case <-s.done:
+		return nil
+	case <-ctx.Done():
+		s.cancelBase()
+		<-s.done
+		return ctx.Err()
+	}
+}
+```
+
+**Закрывать канал заданий можно только когда в него точно никто не
+пишет.** Наивный `Shutdown` делает `close(jobs)` сразу — и первый же
+параллельный `Submit` падает с `send on closed channel`. Здесь каждый
+`Submit` пишет, держа `RLock`, а `Shutdown` закрывает канал под `Lock`:
+пока хоть один `Submit` в отправке, закрытия не будет.
+
+**Но `Lock` сам по себе дал бы дедлок.** `Submit`, который ждёт места в
+полной очереди, держит `RLock` бесконечно, и `Lock` его не дождётся.
+Поэтому сначала закрывается отдельный канал `quit`: он будит всех
+ждущих, они возвращают `ErrClosed` и отпускают блокировку.
+
+**Два уровня остановки — два механизма.** Мягкая: закрыть вход, воркеры
+дочитают канал `range` до конца — принятые задания не теряются.
+Жёсткая, по истечении `ctx` у `Shutdown`: отменить общий контекст
+заданий, чтобы зависшее отпустило, а остаток очереди пропустить. Даже
+тогда `Shutdown` дожидается выхода воркеров — иначе процесс завершится
+посреди записи.
+
+**`sync.Once` делает повторный `Shutdown` безопасным**, а ожидание
+`done` вынесено из него, чтобы второй вызов тоже честно ждал.
+
+**Что спросят дальше:** как быть с заданиями, которые выброшены при
+жёсткой остановке (персистентная очередь, outbox), и в каком порядке
+останавливать HTTP-сервер и такую очередь: сначала вход, потом
+обработчики, потом хранилища.
+
+</Reveal>

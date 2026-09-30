@@ -1,0 +1,141 @@
+---
+title: "Сверка выписки банка с платежами"
+description: "Двухэтапное сопоставление: по референсу, затем один-к-одному по сумме и дате через row_number, и FULL JOIN для хвостов с обеих сторон."
+kind: implement
+topic: sql-interview
+level: hard
+order: 240
+ordered: true
+---
+
+Финансы каждое утро сверяют выписку банка (`bank_statement`) с платежами
+в системе (`payments`). Нужно разложить все строки по статусам.
+
+В сверке участвуют только успешные платежи системы (`status =
+'captured'`); неуспешные как будто не существуют. Выписка берётся целиком.
+
+**Этап 1 — по референсу.** Строка банка и платёж сопоставляются, если их
+референсы совпадают **без учёта регистра и пробелов по краям**. Пустой
+референс (`NULL`) ни с чем не совпадает. Референсы уникальны с каждой
+стороны.
+
+**Этап 2 — по сумме и дате**, только для строк, не сопоставленных на
+первом этапе. Строки банка и платежи с **одинаковой суммой** выстраиваются
+каждые в свою очередь — банк по `(tx_date, id)`, платежи по `(paid_at,
+id)`; k-я строка банка сопоставляется с k-м платежом той же суммы, если их
+даты (`tx_date` и дата `paid_at`) различаются **не больше чем на 1 день**.
+Иначе пара не образуется. Каждая строка участвует максимум в одной паре.
+
+**Статусы:**
+
+- `matched` — пара с равными суммами;
+- `amount_mismatch` — пара (возможна только по референсу) с разными суммами;
+- `missing_in_bank` — платёж без пары;
+- `missing_in_system` — строка банка без пары.
+
+Одна пара или одна непарная строка — одна строка результата:
+
+- колонки: `status`, `bank_id`, `payment_id`, `bank_amount`,
+  `system_amount` (у непарных строк отсутствующая сторона — `NULL`);
+- порядок: `status`, `bank_id` (`NULL` в конце), `payment_id`.
+
+<Reveal>
+
+```sql
+WITH pay AS (
+  SELECT * FROM payments WHERE status = 'captured'
+),
+by_ref AS (
+  SELECT b.id AS bank_id, p.id AS payment_id
+  FROM bank_statement b
+  JOIN pay p ON upper(trim(b.reference)) = upper(trim(p.reference))
+),
+rest_bank AS (
+  SELECT b.*, row_number() OVER (PARTITION BY amount ORDER BY tx_date, id) AS rn
+  FROM bank_statement b
+  WHERE b.id NOT IN (SELECT bank_id FROM by_ref)
+),
+rest_pay AS (
+  SELECT p.*, row_number() OVER (PARTITION BY amount ORDER BY paid_at, id) AS rn
+  FROM pay p
+  WHERE p.id NOT IN (SELECT payment_id FROM by_ref)
+),
+by_amount AS (
+  SELECT b.id AS bank_id, p.id AS payment_id
+  FROM rest_bank b
+  JOIN rest_pay p ON p.amount = b.amount
+                 AND p.rn = b.rn
+                 AND abs(b.tx_date - p.paid_at::date) <= 1
+),
+pairs AS (
+  SELECT * FROM by_ref
+  UNION ALL
+  SELECT * FROM by_amount
+)
+SELECT CASE
+         WHEN b.id IS NULL THEN 'missing_in_bank'
+         WHEN p.id IS NULL THEN 'missing_in_system'
+         WHEN b.amount <> p.amount THEN 'amount_mismatch'
+         ELSE 'matched'
+       END AS status,
+       b.id AS bank_id,
+       p.id AS payment_id,
+       b.amount AS bank_amount,
+       p.amount AS system_amount
+FROM pairs x
+FULL JOIN bank_statement b ON b.id = x.bank_id
+FULL JOIN pay p            ON p.id = x.payment_id
+ORDER BY status, bank_id NULLS LAST, payment_id;
+```
+
+Ответ:
+
+```
+amount_mismatch   | 2    | 2    | 245.00 | 250.00
+matched           | 1    | 1    | 100.00 | 100.00
+matched           | 3    | 3    | 500.00 | 500.00
+matched           | 4    | 4    | 500.00 | 500.00
+matched           | 7    | 8    | 120.00 | 120.00
+missing_in_bank   | NULL | 6    | NULL   | 300.00
+missing_in_bank   | NULL | 7    | NULL   | 42.00
+missing_in_system | 5    | NULL | 75.00  | NULL
+missing_in_system | 6    | NULL | 300.00 | NULL
+missing_in_system | 8    | NULL | 120.00 | NULL
+```
+
+**Сверка — это сначала пары, потом хвосты.** CTE `pairs` собирает
+сопоставленные пары обоих этапов, а два `FULL JOIN` — от пар к банку и к
+платежам — добавляют всё, что в пары не попало, с `NULL` на другой
+стороне. Статус определяется тем, какая сторона `NULL`, и сравнением сумм.
+
+**Один-к-одному через `row_number`.** Наивное соединение «сумма равна, даты
+рядом» — это многие-ко-многим: две банковские строки по 500 и два платежа по
+500 дадут четыре пары, а две строки банка по 120 (банк задублировал
+операцию) склеятся с единственным платежом дважды. Нумерация внутри суммы
+превращает соединение в попарное: первая с первой, вторая со второй.
+Лишняя строка банка №8 остаётся `missing_in_system` — именно это финансам и
+нужно увидеть.
+
+**Этап 2 — только по остаткам.** Строки, сопоставленные по референсу,
+исключаются до нумерации (`NOT IN (SELECT … FROM by_ref)`), иначе они
+займут место в очереди и собьют пары. Безопасно ли здесь `NOT IN`? Да:
+`bank_id` и `payment_id` в `by_ref` не бывают `NULL`. Будь там `NULL`,
+`NOT IN` вернул бы пустоту — классическая ловушка.
+
+**Разбор остального:**
+
+- банк №1 с референсом `' inv-1 '` — совпадает с `INV-1` только после
+  `upper(trim(…))`;
+- №2 сопоставлен по референсу, но банк списал 245 вместо 250 —
+  `amount_mismatch`, а не две «потерянные» строки;
+- №5 ссылается на неуспешный платёж — для сверки его нет, строка банка
+  повисает;
+- 300 рублей: платёж 3-го, в банке 6-го — разница больше дня, пары нет, обе
+  стороны в хвостах.
+
+**Что спросят дальше.** Почему сопоставление по сумме опасно (одинаковые
+суммы у разных клиентов) и как сделать так, чтобы сверка не зависела от
+удачи: передавать в банк собственный идемпотентный идентификатор платежа и
+матчить только по нему, а эвристику по сумме оставить для ручного разбора.
+
+</Reveal>

@@ -1,0 +1,89 @@
+---
+title: Типизированное чтение переменных окружения
+description: Lookup[T] с разбором по типу — переключатель по any(&v), time.Duration, который нельзя разбирать как int64, encoding.TextUnmarshaler для своих типов, ошибки с именем переменной и отказ без паники.
+kind: implement
+topic: generics
+level: medium
+order: 330
+---
+
+Допишите `Lookup`. Конфиг сервиса собирается из переменных окружения:
+`PORT`, `TIMEOUT=1m30s`, `LOG_LEVEL=error`, `LISTEN_ADDR=10.0.0.7`. Хочется
+писать `timeout, err := Lookup(env, "TIMEOUT", 5*time.Second)` — тип
+выводится из значения по умолчанию.
+
+Что проверяют скрытые тесты:
+
+- числа, дробные, `bool`, большой `int64`; пустая строка для `string` —
+  значение, а не отсутствие; нет ключа — значение по умолчанию;
+- `TIMEOUT=1m30s` для `time.Duration`;
+- свой тип уровня логирования, `netip.Addr` и `time.Time` — через
+  `UnmarshalText`;
+- ошибка разбора: значение по умолчанию, текст начинается с имени
+  переменной, `*strconv.NumError` достаётся `errors.As`; пустая строка
+  для `int` и `yes` для `bool` — ошибки;
+- `[]int` и `type Port int` — `ErrUnsupported`, без паники; но если
+  ключа нет, значение по умолчанию возвращается для любого типа.
+
+<Reveal>
+
+```go
+func Lookup[T any](env map[string]string, key string, def T) (T, error) {
+	s, ok := env[key]
+	if !ok {
+		return def, nil
+	}
+	var v T
+	var err error
+	switch p := any(&v).(type) {
+	case *string:
+		*p = s
+	case *int:
+		*p, err = strconv.Atoi(s)
+	case *int64:
+		*p, err = strconv.ParseInt(s, 10, 64)
+	case *float64:
+		*p, err = strconv.ParseFloat(s, 64)
+	case *bool:
+		*p, err = strconv.ParseBool(s)
+	case *time.Duration:
+		*p, err = time.ParseDuration(s)
+	case encoding.TextUnmarshaler:
+		err = p.UnmarshalText([]byte(s))
+	default:
+		return def, fmt.Errorf("%s: %T: %w", key, v, ErrUnsupported)
+	}
+	if err != nil {
+		return def, fmt.Errorf("%s: %w", key, err)
+	}
+	return v, nil
+}
+```
+
+**Переключатель по типу на `any(&v)`.** Прямо `switch v.(type)` для
+параметра типа не пишется: `v` — не интерфейс. Приводим к `any`, а берём
+указатель, чтобы в каждой ветке сразу писать в `v` нужного типа
+(`*p, err = strconv.Atoi(s)`), без обратного `any(n).(T)`.
+
+**`time.Duration` — отдельный тип.** В его основе `int64`, и решение
+через `reflect.Kind` или ограничение `~int64` разобрало бы `1m30s` через
+`ParseInt` и упало. В переключателе `*time.Duration` и `*int64` — разные
+типы. По той же причине `type Port int` не попадает в ветку `*int`: это
+цена точного переключателя, и она записана в контракте.
+
+**`encoding.TextUnmarshaler` — расширение без правки `Lookup`.** Метод
+объявлен на указателе, поэтому проверять надо именно `&v`: `time.Time`,
+`netip.Addr` и свои типы разбирают себя сами. Порядок веток важен
+только если бы тип подходил под несколько — здесь базовые типы методов не
+имеют.
+
+**Ошибки для людей и для кода.** Имя переменной в начале — чтобы в логе
+старта было видно, что именно не так; `%w` — чтобы код мог проверить
+причину. При любой ошибке возвращаем `def`, а не частично разобранное `v`.
+
+**Что спросят дальше:** почему не ограничение `int | string | …` (тогда
+`TextUnmarshaler`-типы не пройдут, а переключатель всё равно нужен), как
+собрать все ошибки конфига разом через `errors.Join` и как сделать то же
+для полей структуры по тегам `env:"PORT"` через `reflect`.
+
+</Reveal>

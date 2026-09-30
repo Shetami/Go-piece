@@ -1,4 +1,90 @@
 ---
+title: "Движение товара по складу"
+description: "Три таблицы фактов к одному справочнику: предагрегация против размножения строк в JOIN."
 kind: implement
+topic: sql-grouping
+level: hard
+order: 100
 ordered: true
 ---
+
+Кладовщику нужен отчёт по каждому товару: сколько пришло, сколько продано,
+сколько вернули и сколько должно лежать на полке.
+
+- `received` — сумма `receipts.qty`;
+- `sold` — сумма `order_items.qty` **только по оплаченным заказам**
+  (`orders.status = 'paid'`);
+- `returned` — сумма `returns.qty`;
+- `on_hand` — `received - sold + returned`.
+
+У каждого товара может быть сколько угодно строк в каждой из трёх таблиц —
+или ни одной. Товары без движения тоже нужны, с нулями.
+
+Колонки: `sku`, `received`, `sold`, `returned`, `on_hand`. Порядок: по `sku`.
+
+Что проверяют скрытые тесты: несколько поступлений, продаж и возвратов у
+одного товара одновременно, отменённый заказ, товар без поступлений, товар
+без движения вовсе.
+
+<Reveal>
+
+```sql
+WITH rec AS (
+  SELECT product_id, sum(qty) AS qty FROM receipts GROUP BY product_id
+),
+sold AS (
+  SELECT i.product_id, sum(i.qty) AS qty
+  FROM order_items i
+  JOIN orders o ON o.id = i.order_id
+  WHERE o.status = 'paid'
+  GROUP BY i.product_id
+),
+ret AS (
+  SELECT product_id, sum(qty) AS qty FROM returns GROUP BY product_id
+)
+SELECT p.sku,
+       coalesce(rec.qty, 0)  AS received,
+       coalesce(sold.qty, 0) AS sold,
+       coalesce(ret.qty, 0)  AS returned,
+       coalesce(rec.qty, 0) - coalesce(sold.qty, 0) + coalesce(ret.qty, 0) AS on_hand
+FROM products p
+LEFT JOIN rec  ON rec.product_id  = p.id
+LEFT JOIN sold ON sold.product_id = p.id
+LEFT JOIN ret  ON ret.product_id  = p.id
+ORDER BY p.sku;
+```
+
+Ответ:
+
+```
+A-100 | 80 | 15 | 3 | 68
+B-200 | 10 | 7 | 1 | 4
+C-300 | 5 | 6 | 0 | -1
+D-400 | 0 | 0 | 0 | 0
+```
+
+**Fan-out.** Если соединить товар сразу с поступлениями, позициями
+заказов и возвратами, каждая строка одной таблицы умножится на строки
+двух других. У `A-100` 2 поступления × 3 позиции × 2 возврата = 12 строк, и
+`sum(r.qty)` насчитает поступлений в шесть раз больше, чем было.
+`sum(DISTINCT …)` не спасает: две поставки по 50 штук схлопнутся в одну.
+
+**Лечение — агрегировать до соединения.** Каждая CTE сводит свою таблицу
+к одной строке на товар, и соединение становится «один к одному». Фильтр по
+статусу заказа живёт внутри своей CTE и больше ни на что не влияет.
+
+**`LEFT JOIN` + `coalesce`.** `D-400` ни разу не двигался, у `C-300` нет
+возвратов. Внутреннее соединение потеряло бы их, а `NULL` в арифметике
+превратил бы `on_hand` в `NULL`. Отрицательный остаток у `C-300` — не ошибка
+запроса, а находка отчёта: продали больше, чем приняли.
+
+**Альтернатива — `UNION ALL` движений со знаком** и одна группировка:
+`SELECT product_id, qty, 0, 0 FROM receipts UNION ALL …`. На больших
+таблицах это часто быстрее трёх хеш-агрегаций, и так же устроены складские
+журналы в проде: одна таблица движений вместо трёх.
+
+**Что спросят дальше.** Почему этот отчёт в проде обычно не считают на
+лету, а держат остаток в отдельной таблице и меняют в той же транзакции,
+что и движение, — и как тогда сверять остаток с журналом.
+
+</Reveal>

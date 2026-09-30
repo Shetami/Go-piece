@@ -1,0 +1,109 @@
+---
+title: Остановка без потерь
+description: Сервер с очередью и воркерами — Submit с отказом при перегрузке и Shutdown, который дочитывает очередь, уважает дедлайн и не роняет конкурентный Submit паникой.
+kind: implement
+topic: channels
+level: hard
+order: 350
+related: [graceful-shutdown, load-shedding, chan-close]
+lecture: production/go-service
+---
+
+Напишите `Server`. Под Kubernetes сервис получает SIGTERM и у него есть
+секунд тридцать: перестать брать новую работу, доделать принятую и
+выйти. Если выйти раньше — задачи, которым клиент уже получил «принято»,
+пропадут. Если не уложиться — придёт SIGKILL, и пропадёт всё.
+
+Что проверяют скрытые тесты:
+
+- десять принятых задач — после `Shutdown` обработаны все десять;
+- очередь на 2 полна, воркер занят — `Submit` сразу возвращает
+  `ErrOverloaded`, не блокируясь;
+- задача зависла — `Shutdown` с дедлайном возвращает `DeadlineExceeded`,
+  новые `Submit` — `ErrShuttingDown`; когда задача отвисла, повторный
+  `Shutdown` возвращает `nil`, и все принятые задачи обработаны;
+- двадцать горутин засыпают `Submit`-ами, в это время — `Shutdown`: никто
+  не паникует, и каждая задача, для которой `Submit` вернул `nil`,
+  обработана.
+
+<Reveal>
+
+```go
+type Server struct {
+	queue  chan int
+	done   chan struct{}
+	mu     sync.RWMutex
+	closed bool
+}
+
+func NewServer(workers, queueSize int, handle func(job int)) *Server {
+	s := &Server{queue: make(chan int, queueSize), done: make(chan struct{})}
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range s.queue {
+				handle(job)
+			}
+		}()
+	}
+	go func() {
+		wg.Wait()
+		close(s.done)
+	}()
+	return s
+}
+
+func (s *Server) Submit(job int) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.closed {
+		return ErrShuttingDown
+	}
+	select {
+	case s.queue <- job:
+		return nil
+	default:
+		return ErrOverloaded
+	}
+}
+
+func (s *Server) Shutdown(ctx context.Context) error {
+	s.mu.Lock()
+	if !s.closed {
+		s.closed = true
+		close(s.queue)
+	}
+	s.mu.Unlock()
+	select {
+	case <-s.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+```
+
+**Закрытие очереди и есть сигнал «доделайте и выходите».** `range` по
+закрытому буферизованному каналу сначала отдаёт всё, что в буфере, и
+только потом заканчивается. Отдельный канал `stop`, по которому воркеры
+выходят сразу, потерял бы принятые задачи — первый тест это ловит.
+
+**Закрывать канал, в который пишут многие, — только под замком.**
+`Submit` проверяет флаг и отправляет под `RLock`, `Shutdown` ставит флаг и
+закрывает под `Lock`. Без этого `Submit`, проверивший флаг до `Shutdown`,
+отправил бы в уже закрытый канал — паника. Держать `RLock` на отправке
+можно, потому что она неблокирующая: `Shutdown` не будет ждать вечно.
+
+**Дедлайн ограничивает ожидание, а не работу.** По `ctx.Done()` `Shutdown`
+возвращается, но воркеры продолжают — прерывать их на середине задачи
+хуже. Канал `done`, закрытый после `wg.Wait()`, позволяет ждать и
+повторно, и из нескольких мест.
+
+**Что спросят дальше:** как совместить это с `http.Server.Shutdown` (сначала
+перестать принимать HTTP, потом останавливать фоновые очереди) и что делать
+с задачами, которые не успели, — сохранять в outbox или отдавать брокеру
+обратно, а не надеяться, что SIGKILL не придёт.
+
+</Reveal>

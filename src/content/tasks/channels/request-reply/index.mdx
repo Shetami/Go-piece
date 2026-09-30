@@ -1,0 +1,132 @@
+---
+title: Хранилище, которым владеет одна горутина
+description: Данные живут в одной горутине, остальные шлют ей запросы с каналом для ответа. Ушедший вызывающий, который вешает всех, копия вместо внутренней мапы и аккуратный Close.
+kind: implement
+topic: channels
+level: hard
+order: 250
+related: [confinement, context-cancellation, goroutine-leak]
+lecture: concurrency/ownership
+---
+
+Напишите `Store`. Это приём «не общайтесь через общую память — делитесь
+памятью через общение»: мапой владеет одна горутина, а все остальные
+отправляют ей запросы. Так пишут акторы, менеджеры соединений, состояние
+игровой комнаты — везде, где операции над состоянием сложнее одного
+`Lock`/`Unlock`.
+
+Вся хитрость — в канале ответа. Кто-то всегда может не дождаться ответа.
+
+Что проверяют скрытые тесты:
+
+- двадцать горутин по 50 инкрементов в четыре ключа — по 250 в каждом,
+  `Update` возвращает новое значение;
+- изменение мапы из `Snapshot` не меняет хранилище;
+- вызывающий отменяет контекст, пока его запрос ещё обрабатывается, и
+  уходит — следующий запрос проходит без задержек, а первое изменение
+  при этом успело примениться;
+- двойной `Close` не паникует и дожидается остановки владельца, после
+  него `Update` и `Snapshot` возвращают `ErrClosed`.
+
+<Reveal>
+
+```go
+type Store struct {
+	reqs chan func(map[string]int)
+	quit chan struct{}
+	done chan struct{}
+	once sync.Once
+}
+
+func NewStore() *Store {
+	s := &Store{
+		reqs: make(chan func(map[string]int)),
+		quit: make(chan struct{}),
+		done: make(chan struct{}),
+	}
+	go func() {
+		defer close(s.done)
+		data := make(map[string]int)
+		for {
+			select {
+			case req := <-s.reqs:
+				req(data)
+			case <-s.quit:
+				return
+			}
+		}
+	}()
+	return s
+}
+
+func (s *Store) do(ctx context.Context, req func(map[string]int)) error {
+	select {
+	case s.reqs <- req:
+		return nil
+	case <-s.quit:
+		return ErrClosed
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *Store) Update(ctx context.Context, key string, fn func(old int) int) (int, error) {
+	reply := make(chan int, 1)
+	err := s.do(ctx, func(m map[string]int) {
+		m[key] = fn(m[key])
+		reply <- m[key]
+	})
+	if err != nil {
+		return 0, err
+	}
+	select {
+	case v := <-reply:
+		return v, nil
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+}
+
+func (s *Store) Snapshot(ctx context.Context) (map[string]int, error) {
+	reply := make(chan map[string]int, 1)
+	err := s.do(ctx, func(m map[string]int) { reply <- maps.Clone(m) })
+	if err != nil {
+		return nil, err
+	}
+	select {
+	case m := <-reply:
+		return m, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (s *Store) Close() {
+	s.once.Do(func() { close(s.quit) })
+	<-s.done
+}
+```
+
+**Канал ответа — с буфером на один.** Это главная ловушка. Если ответ
+отправляется в небуферизованный канал, а вызывающий ушёл по отмене,
+горутина-владелец навсегда застревает на отправке — и вместе с ней
+встаёт всё хранилище, для всех. С буфером владелец кладёт ответ и идёт
+дальше, а невостребованный канал соберёт GC.
+
+**Запрос — это замыкание.** Вместо `type request struct{ op, key, delta,
+reply }` и `switch` по операциям в канал уходит функция, которую владелец
+просто вызывает. Новые операции добавляются без правки цикла, а тип
+ответа у каждой свой.
+
+**Копия — в горутине-владельце.** Отдать наружу `data` — значит открыть её
+для гонок: вызывающий будет читать, пока владелец пишет. `maps.Clone`
+внутри запроса делает копию, пока мапу никто не трогает.
+
+**Закрытие через отдельный канал `quit`, а не `close(reqs)`.** Писателей в
+`reqs` много, и закрыть его безопасно нельзя — `Update`, пришедший после,
+запаникует. `quit` закрывается один раз и видим всем: и владельцу, и
+отправителям в их `select`. Что спросят дальше: чем это лучше мьютекса
+(сложные инварианты и долгие операции без блокировок у читателей) и чем
+хуже (один поток обработки — узкое место, запрос стоит дороже `Lock`).
+
+</Reveal>
