@@ -70,7 +70,7 @@ const topics = TASK_TOPICS.filter((t) => usedTopics.has(t.id))
     </div>
   </div>
 
-  <ul class="grid gap-4 max-w-4xl" id="pr-list">
+  <ul class="grid gap-4 max-w-4xl scroll-mt-24" id="pr-list">
     {
       tasks.map((task) => (
         <li data-kind={task.data.kind} data-topic={task.data.topic} data-lang={taskLang(task.data.topic)}>
@@ -91,55 +91,163 @@ const topics = TASK_TOPICS.filter((t) => usedTopics.has(t.id))
     }
   </ul>
 
+  <nav
+    class="flex flex-wrap items-center gap-2 mt-8 max-w-4xl text-sm"
+    id="pr-pager"
+    aria-label="Страницы списка задач"
+    data-pagefind-ignore
+    hidden
+  >
+  </nav>
+
   <p class="text-muted mt-10 text-sm max-w-2xl" id="pr-empty" hidden>
     По такому сочетанию фильтров задач пока нет. Снимите один из фильтров или загляните позже — список пополняется.
   </p>
 </BaseLayout>
 
+<style is:global>
+  /* Кнопки пейджера создаёт скрипт, поэтому стили глобальные: у созданных
+     на лету элементов нет атрибута, по которому Astro привязывает scoped-стили. */
+  .pr-page {
+    min-width: 2.25rem;
+    justify-content: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .pr-page:disabled {
+    opacity: 0.4;
+    cursor: default;
+    pointer-events: none;
+  }
+</style>
+
 <script>
   /*
-   * Фильтры и отметки «решено». Оба состояния живут в браузере и нарочно
-   * не ломают страницу без JS: без скриптов виден полный список, а это
+   * Фильтры, страницы и отметки «решено». Всё это живёт в браузере и нарочно
+   * не ломает страницу без JS: без скриптов виден полный список, а это
    * ровно то, что нужно и читателю, и поисковому индексу.
+   *
+   * Страницы режут уже отфильтрованный список: «страница 2» при фильтре
+   * «Мапы» — это задачи про мапы с 21-й по 40-ю, а не вторая двадцатка
+   * всех задач, из которой фильтр оставил две.
    */
+  const PAGE_SIZE = 20
+  const GROUPS = ['lang', 'kind', 'topic']
+
   const list = document.getElementById('pr-list')
+  const pager = document.getElementById('pr-pager')
   const empty = document.getElementById('pr-empty')
   const picked: Record<string, string> = { lang: '', kind: '', topic: '' }
+  let page = 1
 
   function apply() {
-    let shown = 0
+    const matched: HTMLElement[] = []
     for (const li of list?.querySelectorAll<HTMLElement>('li') ?? []) {
       const ok =
         (picked.lang === '' || li.dataset.lang === picked.lang) &&
         (picked.kind === '' || li.dataset.kind === picked.kind) &&
         (picked.topic === '' || li.dataset.topic === picked.topic)
-      li.hidden = !ok
-      if (ok) shown++
+      li.hidden = true
+      if (ok) matched.push(li)
     }
-    if (empty) empty.hidden = shown > 0
+
+    const pages = Math.max(1, Math.ceil(matched.length / PAGE_SIZE))
+    page = Math.min(Math.max(1, page), pages)
+    const from = (page - 1) * PAGE_SIZE
+    for (const li of matched.slice(from, from + PAGE_SIZE)) li.hidden = false
+
+    if (empty) empty.hidden = matched.length > 0
+    renderPager(pages, from, matched.length)
+    syncUrl()
   }
 
-  for (const btn of document.querySelectorAll<HTMLButtonElement>('.pr-filter')) {
+  /** Номера вокруг текущей страницы плюс первая и последняя; разрывы — многоточием. */
+  function pageNumbers(pages: number): (number | null)[] {
+    const out: (number | null)[] = []
+    for (let n = 1; n <= pages; n++) {
+      if (n === 1 || n === pages || Math.abs(n - page) <= 1) out.push(n)
+      else if (out[out.length - 1] !== null) out.push(null)
+    }
+    return out
+  }
+
+  function pagerButton(label: string, target: number, opts: { on?: boolean; disabled?: boolean; aria?: string } = {}) {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'pr-filter pr-page' + (opts.on ? ' is-on' : '')
+    btn.textContent = label
+    btn.disabled = opts.disabled ?? false
+    if (opts.on) btn.setAttribute('aria-current', 'page')
+    if (opts.aria) btn.setAttribute('aria-label', opts.aria)
+    btn.addEventListener('click', () => {
+      page = target
+      apply()
+      list?.scrollIntoView({ block: 'start' })
+    })
+    return btn
+  }
+
+  function renderPager(pages: number, from: number, total: number) {
+    if (!pager) return
+    pager.replaceChildren()
+    pager.hidden = pages <= 1
+    if (pages <= 1) return
+
+    pager.append(pagerButton('←', page - 1, { disabled: page === 1, aria: 'Предыдущая страница' }))
+    for (const n of pageNumbers(pages)) {
+      if (n === null) {
+        const gap = document.createElement('span')
+        gap.className = 'text-muted px-1'
+        gap.textContent = '…'
+        pager.append(gap)
+      } else {
+        pager.append(pagerButton(String(n), n, { on: n === page }))
+      }
+    }
+    pager.append(pagerButton('→', page + 1, { disabled: page === pages, aria: 'Следующая страница' }))
+
+    const range = document.createElement('span')
+    range.className = 'text-muted ml-2'
+    range.textContent = `${from + 1}–${Math.min(from + PAGE_SIZE, total)} из ${total}`
+    pager.append(range)
+  }
+
+  function syncUrl() {
+    const url = new URL(location.href)
+    for (const group of GROUPS) {
+      picked[group] ? url.searchParams.set(group, picked[group]) : url.searchParams.delete(group)
+    }
+    page > 1 ? url.searchParams.set('page', String(page)) : url.searchParams.delete('page')
+    history.replaceState(null, '', url)
+  }
+
+  function markFilter(group: string) {
+    for (const btn of document.querySelectorAll<HTMLElement>(`.pr-filter[data-filter="${group}"]`)) {
+      btn.classList.toggle('is-on', (btn.dataset.value ?? '') === picked[group])
+    }
+  }
+
+  for (const btn of document.querySelectorAll<HTMLButtonElement>('.pr-filter[data-filter]')) {
     btn.addEventListener('click', () => {
       const group = btn.dataset.filter ?? ''
       picked[group] = btn.dataset.value ?? ''
-      for (const other of document.querySelectorAll<HTMLElement>(`.pr-filter[data-filter="${group}"]`)) {
-        other.classList.toggle('is-on', other === btn)
-      }
+      markFilter(group)
+      // Сменился набор задач — прежний номер страницы к нему уже не относится.
+      page = 1
       apply()
-      const url = new URL(location.href)
-      picked[group] ? url.searchParams.set(group, picked[group]) : url.searchParams.delete(group)
-      history.replaceState(null, '', url)
     })
   }
 
-  // Ссылка с фильтром (её ставит страница задачи) должна открываться уже отфильтрованной.
+  // Ссылка с фильтром (её ставит страница задачи) должна открываться уже
+  // отфильтрованной, а «назад» из задачи — возвращать на ту же страницу списка.
   const params = new URLSearchParams(location.search)
-  for (const group of ['lang', 'kind', 'topic']) {
-    const value = params.get(group)
-    if (!value) continue
-    document.querySelector<HTMLButtonElement>(`.pr-filter[data-filter="${group}"][data-value="${value}"]`)?.click()
+  for (const group of GROUPS) {
+    const value = params.get(group) ?? ''
+    if (!document.querySelector(`.pr-filter[data-filter="${group}"][data-value="${value}"]`)) continue
+    picked[group] = value
+    markFilter(group)
   }
+  page = Number.parseInt(params.get('page') ?? '1', 10) || 1
+  apply()
 
   for (const dot of document.querySelectorAll<HTMLElement>('.pr-solved-dot')) {
     try {
