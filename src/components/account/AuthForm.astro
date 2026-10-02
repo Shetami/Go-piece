@@ -1,0 +1,100 @@
+---
+/**
+ * Форма входа или регистрации. Страницы статические, отправка — скриптом:
+ * после ответа сервера нужно ещё слить прогресс браузера с аккаунтом
+ * (см. src/lib/account.ts), и только потом уходить со страницы.
+ */
+import { MIN_PASSWORD } from '../../lib/server/auth.ts'
+
+interface Props {
+  mode: 'login' | 'register'
+}
+
+const { mode } = Astro.props
+const isLogin = mode === 'login'
+---
+
+<div class="auth">
+  <h1 class="text-3xl font-bold tracking-tight mb-2">{isLogin ? 'Вход' : 'Регистрация'}</h1>
+  <p class="text-muted mb-6">
+    {
+      isLogin
+        ? 'Войдите, чтобы решённые задачи, тесты и достижения сохранялись в аккаунте и были доступны с любого устройства.'
+        : 'Аккаунт хранит решённые задачи, результаты тестов и достижения. Прогресс, набранный в этом браузере до регистрации, перейдёт в аккаунт.'
+    }
+  </p>
+
+  <form id="auth-form" class="auth-form" data-mode={mode} novalidate>
+    <label class="auth-field">
+      Почта
+      <input name="email" type="email" autocomplete="email" required maxlength="254" />
+    </label>
+    <label class="auth-field">
+      Пароль
+      <input
+        name="password"
+        type="password"
+        autocomplete={isLogin ? 'current-password' : 'new-password'}
+        required
+        minlength={isLogin ? undefined : MIN_PASSWORD}
+        maxlength="200"
+      />
+      {!isLogin && <span class="auth-hint">Не короче {MIN_PASSWORD} символов.</span>}
+    </label>
+    <p id="auth-error" class="auth-error" role="alert" hidden></p>
+    <button type="submit" class="btn btn-primary">{isLogin ? 'Войти' : 'Зарегистрироваться'}</button>
+  </form>
+
+  <p class="text-sm text-muted mt-4 text-center">
+    {
+      isLogin ? (
+        <>
+          Нет аккаунта? <a id="auth-switch" class="text-accent" href="/register/">Зарегистрироваться</a>
+        </>
+      ) : (
+        <>
+          Уже есть аккаунт? <a id="auth-switch" class="text-accent" href="/login/">Войти</a>
+        </>
+      )
+    }
+  </p>
+</div>
+
+<script>
+  import { login, refreshAccount, register } from '../../lib/account.ts'
+
+  const form = document.getElementById('auth-form') as HTMLFormElement
+  const error = document.getElementById('auth-error') as HTMLElement
+  const submit = form.querySelector<HTMLButtonElement>('button[type=submit]')!
+  const mode = form.dataset.mode
+
+  /** Куда вернуться после входа: только свои страницы, без «//чужой-сайт». */
+  const params = new URLSearchParams(location.search)
+  const nextParam = params.get('next') ?? ''
+  const next = nextParam.startsWith('/') && !nextParam.startsWith('//') ? nextParam : '/achievements/'
+
+  const switchLink = document.getElementById('auth-switch') as HTMLAnchorElement | null
+  if (switchLink && nextParam) switchLink.search = `?next=${encodeURIComponent(next)}`
+
+  // Уже вошли — здесь делать нечего.
+  void refreshAccount().then((user) => {
+    if (user) location.replace(next)
+  })
+
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault()
+    const data = new FormData(form)
+    const email = String(data.get('email') ?? '')
+    const password = String(data.get('password') ?? '')
+    error.hidden = true
+    submit.disabled = true
+    try {
+      await (mode === 'login' ? login : register)(email, password)
+      location.href = next
+    } catch (err) {
+      error.textContent = err instanceof Error ? err.message : 'не получилось'
+      error.hidden = false
+      submit.disabled = false
+    }
+  })
+</script>

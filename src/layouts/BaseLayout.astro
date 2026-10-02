@@ -76,15 +76,35 @@ const nav = [
             ))
           }
         </nav>
-        <button
-          id="theme-toggle"
-          type="button"
-          class="ml-auto btn-ghost"
-          aria-label="Переключить тему"
-          title="Светлая / тёмная тема"
-        >
-          <span class="dark:hidden">☾</span><span class="hidden dark:inline">☀</span>
-        </button>
+        <div class="ml-auto flex items-center gap-1 shrink-0">
+          <div id="account" class="flex items-center gap-1 text-sm" data-state="guest">
+            <a href="/login/" class="btn-ghost account-guest">Войти</a>
+            <span class="account-user items-center gap-1">
+              <span id="account-email" class="text-muted max-w-48 truncate hidden sm:inline"></span>
+              <button id="account-logout" type="button" class="btn-ghost">Выйти</button>
+            </span>
+          </div>
+          <script is:inline>
+            // Сразу показать, кто вошёл, — до загрузки модулей, чтобы шапка не мигала «Войти».
+            ;(() => {
+              try {
+                const a = JSON.parse(localStorage.getItem('go-piece:owner') || 'null')
+                if (!a) return
+                document.getElementById('account').dataset.state = 'user'
+                document.getElementById('account-email').textContent = a.email
+              } catch {}
+            })()
+          </script>
+          <button
+            id="theme-toggle"
+            type="button"
+            class="btn-ghost"
+            aria-label="Переключить тему"
+            title="Светлая / тёмная тема"
+          >
+            <span class="dark:hidden">☾</span><span class="hidden dark:inline">☀</span>
+          </button>
+        </div>
       </div>
     </header>
 
@@ -103,6 +123,23 @@ const nav = [
 
     <script>
       import '../components/achievements/tracker.ts'
+      import { ACCOUNT_EVENT, cachedAccount, logout, startSync } from '../lib/account.ts'
+
+      const account = document.getElementById('account')
+      const showAccount = () => {
+        const a = cachedAccount()
+        if (!account) return
+        account.dataset.state = a ? 'user' : 'guest'
+        const email = document.getElementById('account-email')
+        if (email) email.textContent = a?.email ?? ''
+      }
+      window.addEventListener(ACCOUNT_EVENT, showAccount)
+      showAccount()
+      document.getElementById('account-logout')?.addEventListener('click', async () => {
+        await logout()
+        location.href = '/'
+      })
+      startSync()
 
       document.getElementById('theme-toggle')?.addEventListener('click', () => {
         const dark = document.documentElement.classList.toggle('dark')

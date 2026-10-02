@@ -19,9 +19,12 @@ RUN pnpm build:node
 
 FROM node:24-alpine AS runtime
 WORKDIR /app
-ENV NODE_ENV=production HOST=0.0.0.0 PORT=4321
+ENV NODE_ENV=production HOST=0.0.0.0 PORT=4321 DATABASE_PATH=/app/data/go-piece.db
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+# База аккаунтов (SQLite). Каталог — volume, см. docker-compose.yml: иначе пересборка сотрёт пользователей.
+RUN mkdir -p /app/data && chown node:node /app/data
+VOLUME /app/data
 USER node
 EXPOSE 4321
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

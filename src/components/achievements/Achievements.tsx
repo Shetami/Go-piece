@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'react'
 import { GROUPS, evaluate, formatBerry, rankFor, type Catalog, type Evaluated } from '../../lib/achievements.ts'
 import { EARNED_EVENT, PROGRESS_EVENT, loadEarned, loadProgress } from '../../lib/progress.ts'
+import { ACCOUNT_EVENT, cachedAccount, type Account } from '../../lib/account.ts'
 
 interface Props {
   catalog: Catalog
@@ -64,11 +65,15 @@ function Card({ e }: { e: Evaluated }) {
 
 export default function Achievements({ catalog }: Props) {
   const [results, setResults] = useState<Evaluated[]>(() => evaluate(EMPTY, catalog))
+  const [account, setAccount] = useState<Account | null>(null)
 
   useEffect(() => {
-    const refresh = () => setResults(evaluate(loadProgress(catalog), catalog, loadEarned()))
+    const refresh = () => {
+      setResults(evaluate(loadProgress(catalog), catalog, loadEarned()))
+      setAccount(cachedAccount())
+    }
     refresh()
-    const events = [PROGRESS_EVENT, EARNED_EVENT, 'storage']
+    const events = [PROGRESS_EVENT, EARNED_EVENT, ACCOUNT_EVENT, 'storage']
     for (const ev of events) window.addEventListener(ev, refresh)
     return () => {
       for (const ev of events) window.removeEventListener(ev, refresh)
@@ -107,10 +112,21 @@ export default function Achievements({ catalog }: Props) {
             </span>
           </div>
         )}
-        <p className="text-sm text-muted">
-          Прогресс хранится только в этом браузере: в другом браузере или после очистки данных сайта награда начнётся
-          с нуля.
-        </p>
+        {account ? (
+          <p className="text-sm text-muted">Прогресс сохраняется в аккаунте {account.email} и доступен с любого устройства.</p>
+        ) : (
+          <p className="text-sm text-muted">
+            Прогресс хранится только в этом браузере.{' '}
+            <a className="text-accent" href="/register/">
+              Зарегистрируйтесь
+            </a>{' '}
+            или{' '}
+            <a className="text-accent" href="/login/?next=/achievements/">
+              войдите
+            </a>
+            , чтобы он сохранился в аккаунте и не потерялся.
+          </p>
+        )}
       </div>
 
       {GROUPS.map((g) => {
