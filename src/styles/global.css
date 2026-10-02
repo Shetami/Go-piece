@@ -4951,9 +4951,11 @@ body {
   gap: 1rem;
   align-items: start;
 }
-@media (min-width: 1280px) {
+/* Вывод сбоку — только когда редактору и так хватает места на длинные строки;
+   иначе он уходит под редактор, а код получает всю ширину. */
+@media (min-width: 1800px) {
   .pr-split {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 24rem);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 22rem);
   }
 }
 

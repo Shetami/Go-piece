@@ -7,9 +7,11 @@ interface Props {
   description?: string
   /** Широкая страница (лаборатория) — без ограничения ширины колонки. */
   wide?: boolean
+  /** Почти во всю ширину экрана — страница задачи: длинным строкам кода нужно место. */
+  full?: boolean
 }
 
-const { title, description = SITE.tagline, wide = false } = Astro.props
+const { title, description = SITE.tagline, wide = false, full = false } = Astro.props
 const fullTitle = title === SITE.name ? title : `${title} — ${SITE.name}`
 const path = Astro.url.pathname
 
@@ -86,7 +88,7 @@ const nav = [
       </div>
     </header>
 
-    <main class:list={['flex-1 w-full mx-auto px-4 py-10', wide ? 'max-w-7xl' : 'max-w-6xl']}>
+    <main class:list={['flex-1 w-full mx-auto px-4 py-10', full ? 'max-w-[120rem]' : wide ? 'max-w-7xl' : 'max-w-6xl']}>
       <slot />
     </main>
 

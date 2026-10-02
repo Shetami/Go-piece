@@ -41,7 +41,7 @@ const idx = siblings.findIndex((t) => t.id === entry.id)
 const next = idx >= 0 ? siblings[idx + 1] : undefined
 ---
 
-<BaseLayout title={title} description={description} wide>
+<BaseLayout title={title} description={description} full>
   <article data-pagefind-body>
     <nav class="text-sm text-muted mb-4" data-pagefind-ignore>
       <a href="/practice/" class="hover:text-ink">Практика</a> / <a
@@ -59,7 +59,7 @@ const next = idx >= 0 ? siblings[idx + 1] : undefined
     <h1 class="text-3xl md:text-4xl font-bold tracking-tight leading-tight mb-3">{title}</h1>
     <p class="text-lg text-muted max-w-[70ch] mb-8">{description}</p>
 
-    <div class="grid lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] gap-8 items-start">
+    <div class="grid lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] gap-8 items-start">
       <div class="prose dark:prose-invert lg:sticky lg:top-20">
         <Content components={{ Term, Callout, Reveal }} />
       </div>
