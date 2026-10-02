@@ -21,6 +21,7 @@ import type { CheckResult, RunResult, Verdict } from '../protocol.ts'
 import Console from './Console.tsx'
 import Editor, { type EditorHandle } from './Editor.tsx'
 import { goDiagnostics } from './editor.ts'
+import { recordSolve } from '../../../lib/progress.ts'
 import { Text } from '@codemirror/state'
 
 interface Props {
@@ -94,6 +95,7 @@ export default function TaskRunner({ taskId, kind, prompt, starter, solution }: 
   const markSolved = useCallback(() => {
     setSolved(true)
     save(storageKey(taskId, 'solved'), '1')
+    recordSolve(taskId)
     document.querySelector<HTMLDetailsElement>('.reveal')?.setAttribute('open', '')
   }, [taskId])
 

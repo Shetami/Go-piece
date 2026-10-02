@@ -1,0 +1,23 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro'
+import Achievements from '../../components/achievements/Achievements.tsx'
+import { buildCatalog } from '../../lib/catalog.ts'
+
+/*
+ * Достижения. Условия — про сайт (лекции, тесты, задачи, стенды), названия —
+ * из One Piece. Сами правила — в src/lib/achievements.ts, прогресс — в localStorage.
+ */
+const catalog = await buildCatalog()
+---
+
+<BaseLayout
+  title="Достижения"
+  description="Достижения за лекции, тесты, задачи и стенды — и награда за вашу голову, как на плакатах One Piece."
+>
+  <h1 class="text-3xl font-bold tracking-tight mb-2">Достижения</h1>
+  <p class="text-muted mb-8 max-w-2xl">
+    Каждое достижение — за реальный шаг: дочитанную лекцию, пройденный тест, решённую задачу, покрученный стенд. За
+    каждое назначается награда в белли, и по сумме растёт ранг — от юнги до Короля пиратов.
+  </p>
+  <Achievements client:load catalog={catalog} />
+</BaseLayout>

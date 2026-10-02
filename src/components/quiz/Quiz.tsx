@@ -13,6 +13,7 @@
 
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { Question } from './types.ts'
+import { notifyProgress } from '../../lib/progress.ts'
 
 interface Props {
   lectureId: string
@@ -296,6 +297,7 @@ export default function Quiz({ lectureId, questions, storageKey }: Props) {
     const next = { best: Math.max(prev?.best ?? 0, score), total: questions.length }
     saveStored(storageKey, next)
     setStored(next)
+    notifyProgress()
   }, [done, score, storageKey, questions.length])
 
   const reset = () => {

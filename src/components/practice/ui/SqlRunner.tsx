@@ -20,6 +20,7 @@ import { compareTables, formatRows, parseAnswer, type SqlOutcome, type SqlTable 
 import { SqlSession } from '../sql/session.ts'
 import Editor, { type EditorHandle } from './Editor.tsx'
 import { sqlDiagnostic } from './editor.ts'
+import { recordSolve } from '../../../lib/progress.ts'
 
 interface Props {
   taskId: string
@@ -100,6 +101,7 @@ export default function SqlRunner({ taskId, kind, prompt, starter, solution, sch
   const markSolved = useCallback(() => {
     setSolved(true)
     save(storageKey(taskId, 'solved'), '1')
+    recordSolve(taskId)
     document.querySelector<HTMLDetailsElement>('.reveal')?.setAttribute('open', '')
   }, [taskId])
 

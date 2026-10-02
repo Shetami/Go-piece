@@ -59,6 +59,12 @@
   --cm-error: #e03131;
   --cm-pick: #7048e8;
 
+  /* Достижения: плакат «WANTED» — бумага и типографская краска. */
+  --ach-paper: #efe2c2;
+  --ach-paper-edge: #c9b384;
+  --ach-paper-ink: #3b2a17;
+  --ach-gold: #b07d12;
+
   color-scheme: light;
 }
 
@@ -114,6 +120,11 @@
   --cm-punct: #a39e93;
   --cm-error: #ff6b6b;
   --cm-pick: #b197fc;
+
+  --ach-paper: #3a3122;
+  --ach-paper-edge: #5c4b2e;
+  --ach-paper-ink: #f1e3c0;
+  --ach-gold: #f2c14e;
 
   color-scheme: dark;
 }
@@ -5405,4 +5416,257 @@ body {
 }
 .quiz-score b {
   font-size: 1.15em;
+}
+
+/* ---------- Достижения ---------- */
+
+.ach-poster {
+  max-width: 280px;
+  margin: 0 auto 2rem;
+  padding: 1.1rem 1.25rem 1rem;
+  background: var(--ach-paper);
+  color: var(--ach-paper-ink);
+  border: 1px solid var(--ach-paper-edge);
+  border-radius: 4px;
+  box-shadow:
+    inset 0 0 40px color-mix(in srgb, var(--ach-paper-edge) 55%, transparent),
+    0 6px 18px rgb(0 0 0 / 0.12);
+  text-align: center;
+  font-family: Georgia, 'Times New Roman', serif;
+}
+.ach-poster-wanted {
+  font-size: 2.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1;
+}
+.ach-poster-img {
+  display: block;
+  margin: 0.75rem auto;
+  width: 140px;
+  height: 140px;
+  padding: 0.5rem;
+  border: 3px solid var(--ach-paper-ink);
+  background: color-mix(in srgb, var(--ach-paper) 70%, white);
+}
+.ach-poster-rank {
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+.ach-poster-dead {
+  font-size: 0.8rem;
+  letter-spacing: 0.25em;
+  margin: 0.35rem 0;
+}
+.ach-poster-bounty {
+  font-size: 1.45rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ach-poster-dash {
+  margin-left: 0.15em;
+}
+.ach-poster-marine {
+  margin-top: 0.4rem;
+  text-align: right;
+  font-size: 0.7rem;
+  letter-spacing: 0.3em;
+  opacity: 0.7;
+}
+
+.ach-summary {
+  max-width: 36rem;
+  margin: 0 auto 3rem;
+  text-align: center;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.ach-group {
+  margin-bottom: 2.5rem;
+}
+.ach-group-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+.ach-group-count {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+.ach-group-blurb {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0.15rem 0 1rem;
+}
+.ach-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 0.75rem;
+}
+
+.ach-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  scroll-margin-top: 5rem;
+}
+.ach-card.is-unlocked {
+  border-color: color-mix(in srgb, var(--ach-gold) 55%, var(--line));
+  background: color-mix(in srgb, var(--ach-paper) 35%, var(--surface));
+}
+.ach-card.is-locked .ach-title,
+.ach-card.is-locked .ach-quote {
+  color: var(--muted);
+}
+.ach-card:target {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.ach-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.ach-seal {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 1.1rem;
+}
+.ach-card.is-unlocked .ach-seal {
+  background: var(--ach-gold);
+  border-color: var(--ach-gold);
+  color: var(--bg);
+}
+.ach-bounty {
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.ach-card.is-unlocked .ach-bounty {
+  color: var(--ach-gold);
+}
+.ach-title {
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--ink);
+}
+.ach-quote {
+  font-size: 0.85rem;
+  font-style: italic;
+  color: var(--muted);
+}
+.ach-task {
+  font-size: 0.875rem;
+  color: var(--ink);
+}
+.ach-done {
+  margin-top: auto;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--run);
+}
+.ach-progress {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.ach-progress-rank {
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.ach-progress-rank .ach-bar {
+  flex: 0 1 14rem;
+  min-width: 8rem;
+}
+.ach-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.ach-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ach-gold);
+}
+.ach-count {
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ach-toasts {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 60;
+  display: grid;
+  gap: 0.5rem;
+  width: min(22rem, calc(100vw - 2rem));
+}
+.ach-toast {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.75rem 0.95rem;
+  border: 1px solid var(--ach-paper-edge);
+  border-left: 4px solid var(--ach-gold);
+  border-radius: 10px;
+  background: var(--ach-paper);
+  color: var(--ach-paper-ink);
+  text-decoration: none;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+  animation: ach-in 0.35s ease-out;
+  transition:
+    opacity 0.5s,
+    transform 0.5s;
+}
+.ach-toast.is-leaving {
+  opacity: 0;
+  transform: translateY(0.5rem);
+}
+.ach-toast-kicker {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+.ach-toast-title {
+  font-weight: 700;
+}
+.ach-toast-sub {
+  font-size: 0.8rem;
+  opacity: 0.85;
+}
+@keyframes ach-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.75rem);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ach-toast {
+    animation: none;
+    transition: none;
+  }
 }

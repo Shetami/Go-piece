@@ -52,6 +52,8 @@ const toc = headings.filter((h) => h.depth === 2)
       <div class="prose prose-lg dark:prose-invert">
         <slot />
       </div>
+      {/* Доскроллили сюда — лекция прочитана (для достижений, см. achievements/tracker.ts). */}
+      <div data-lecture-end={entry.id} aria-hidden="true"></div>
 
       {
         quiz && (
