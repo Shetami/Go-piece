@@ -1,0 +1,53 @@
+---
+title: Частота слов
+description: Посчитать слова в субтитрах. Вся сложность — понять, где кончается слово, если апостроф бывает и частью слова, и кавычкой.
+kind: implement
+topic: algorithms
+level: easy
+order: 60
+---
+
+Напишите `WordCount`: для строки вернуть, сколько раз встречается каждое слово.
+
+- слово — подряд идущие буквы и цифры: `100` — тоже слово;
+- регистр не важен, ключи в ответе — в нижнем регистре: `Go go GO` → `go: 3`;
+- слова разделяет любая пунктуация и любые пробельные символы: `one,two\nthree`
+  — три слова;
+- апостроф *внутри* слова — часть слова: `don't`, `you're`;
+- но апостроф по краям — это кавычка: в `'large'` слово `large`.
+
+Пример: `"That's the password: 'PASSWORD 123'!", cried the Special Agent.`
+даёт `that's: 1, the: 2, password: 2, 123: 1, cried: 1, special: 1, agent: 1`.
+
+Тесты — из открытого набора [Exercism](https://github.com/exercism/problem-specifications) (MIT).
+
+<Reveal>
+
+```go
+func WordCount(sentence string) map[string]int {
+	words := strings.FieldsFunc(strings.ToLower(sentence), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '\''
+	})
+	counts := make(map[string]int)
+	for _, w := range words {
+		if w = strings.Trim(w, "'"); w != "" {
+			counts[w]++
+		}
+	}
+	return counts
+}
+```
+
+**Два шага вместо одного умного.** Сначала режем по всему, что точно не
+слово, — апостроф при этом оставляем. Потом снимаем апострофы с краёв каждого
+куска. Так `'can't'` превращается в `can't`, а одиночный `'` — в пустую
+строку, которую пропускаем.
+
+**`strings.FieldsFunc`** склеивает подряд идущие разделители: на `" a,,  b "`
+пустых слов не будет. С `strings.Split` их пришлось бы отфильтровывать руками —
+это ровно тесты «multiple spaces» и «alternating word separators».
+
+**Нулевое значение мапы работает на нас:** `counts[w]++` для отсутствующего
+ключа начинает с нуля, проверка `ok` не нужна.
+
+</Reveal>

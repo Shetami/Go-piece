@@ -90,6 +90,12 @@ export const TASK_TOPICS = [
   { lang: 'go', id: 'context', title: 'context', blurb: 'Отмена по дереву, дедлайн, передача значений и что происходит с горутинами после Done.' },
   { lang: 'go', id: 'generics', title: 'Дженерики', blurb: 'Параметры типа, ограничения, вывод типа и во что это обходится.' },
   { lang: 'go', id: 'runtime', title: 'Рантайм', blurb: 'Планировщик, сборщик мусора, escape-анализ — то, что разобрано в лекциях курса о рантайме.' },
+  {
+    lang: 'go',
+    id: 'algorithms',
+    title: 'Алгоритмы',
+    blurb: 'Классика алгоритмических секций: строки, матрицы, простые числа, динамика, перебор. Тесты взяты из открытого набора Exercism.',
+  },
   { lang: 'sql', id: 'sql-basics', title: 'SQL: выборка и NULL', blurb: 'WHERE и трёхзначная логика, сравнение с NULL, приоритет AND и OR, сортировка, деление целых.' },
   { lang: 'sql', id: 'sql-joins', title: 'SQL: соединения', blurb: 'INNER и LEFT JOIN, условие в ON против WHERE, размножение строк, анти-соединение, самосоединение.' },
   { lang: 'sql', id: 'sql-grouping', title: 'SQL: группировка', blurb: 'GROUP BY и HAVING, агрегаты и NULL, условная агрегация, дыры в рядах по датам.' },

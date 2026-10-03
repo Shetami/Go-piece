@@ -42,6 +42,18 @@ PORT=3000 docker compose up -d # другой порт на хосте
 
 Аккаунты лежат в SQLite-файле `/app/data/go-piece.db` в volume `data` — пересборка образа их не трогает. Локально (`pnpm dev`) база создаётся в `./data/`, путь меняется переменной `DATABASE_PATH`.
 
+### Задачи «Алгоритмы» из Exercism
+
+Тесты задач темы `algorithms` взяты из [exercism/problem-specifications](https://github.com/exercism/problem-specifications) (MIT, текст лицензии — `src/content/tasks/algorithms/LICENSE-exercism.txt`). Условия, заготовки и разборы написаны здесь, по-русски; из репозитория приходят только кейсы.
+
+```sh
+pnpm tasks:exercism             # пересобрать check.go из canonical-data.json
+pnpm tasks:exercism knapsack    # только одну задачу
+pnpm tasks:verify algorithms    # прогнать эталоны против тестов локальным go test
+```
+
+Какие упражнения берутся и как их аргументы ложатся на типы Go — в `scripts/exercism/exercises.ts`. Новое упражнение: дописать туда, запустить генератор — он положит черновик с `draft: true` — и написать условие, заготовку и решение. Коммит репозитория закреплён в `SPECS_REF`, поэтому повторный запуск даёт тот же check.go. `pnpm tasks:verify` без аргумента проверяет все задачи «реализуй» на Go, не только эти; нужен установленный Go.
+
 ## Устройство
 
 ```

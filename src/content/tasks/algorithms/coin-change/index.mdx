@@ -1,0 +1,77 @@
+---
+title: Размен монет
+description: Набрать сумму наименьшим числом монет. Жадность ошибается, динамика — нет, и ответ нужно ещё восстановить.
+kind: implement
+topic: algorithms
+level: medium
+order: 160
+---
+
+Есть номиналы монет `coins`, каждого — сколько угодно. Напишите
+`FewestCoins`: вернуть самый короткий набор монет, который в сумме даёт
+`target`, — по возрастанию.
+
+- `FewestCoins([1 5 10 25 100], 15)` → `[5 10]`;
+- `FewestCoins([1 10 11], 20)` → `[10 10]`, хотя жадный выбор начал бы с 11
+  и набрал `[11 1 1 1 1 1 1 1 1 1]`;
+- `target = 0` — пустой набор.
+
+Вернуть ошибку, если `target` отрицательный или его нельзя собрать:
+`FewestCoins([5 10], 3)`. Текст ошибки тесты не проверяют.
+
+Самый большой тест — сумма 999.
+
+Тесты — из открытого набора [Exercism](https://github.com/exercism/problem-specifications) (MIT).
+
+<Reveal>
+
+```go
+func FewestCoins(coins []int, target int) ([]int, error) {
+	if target < 0 {
+		return nil, errors.New("target can't be negative")
+	}
+	fewest := make([]int, target+1)
+	last := make([]int, target+1)
+	for s := 1; s <= target; s++ {
+		fewest[s] = -1
+		for _, c := range coins {
+			if c > s || fewest[s-c] < 0 {
+				continue
+			}
+			if n := fewest[s-c] + 1; fewest[s] < 0 || n < fewest[s] {
+				fewest[s], last[s] = n, c
+			}
+		}
+	}
+	if fewest[target] < 0 {
+		return nil, errors.New("can't make target with given coins")
+	}
+
+	out := make([]int, 0, fewest[target])
+	for s := target; s > 0; s -= last[s] {
+		out = append(out, last[s])
+	}
+	slices.Sort(out)
+	return out, nil
+}
+```
+
+**Почему не жадность.** «Бери самую большую монету, что влезает» верно для
+рублей и евро, но не для произвольных номиналов — тест `[1 10 11]` на 20
+и тест `[4 5]` на 27 сделаны ровно против неё.
+
+**Динамика по сумме.** Лучший набор на сумму `s` — это лучший набор на
+`s − c` плюс монета `c` для какой-то `c`. Считаем `fewest[s]` от 1 до
+`target`: к моменту `s` все меньшие суммы уже посчитаны. O(target · |coins|)
+по времени, O(target) памяти.
+
+**Сам набор, а не только число.** LeetCode-версия (322) спрашивает только
+количество монет. Здесь нужны монеты, и для этого рядом хранится `last[s]` —
+последняя монета лучшего набора. Откат `s -= last[s]` проходит по цепочке
+до нуля. Отдельно хранить слайс на каждую сумму не нужно — это O(target²)
+памяти.
+
+**-1 как «нельзя»** — а не огромное число вроде `math.MaxInt`, к которому
+потом прибавят единицу и получат переполнение.
+
+</Reveal>

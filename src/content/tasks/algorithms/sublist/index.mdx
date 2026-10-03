@@ -1,0 +1,67 @@
+---
+title: Подсписок
+description: Равны ли два списка или один — непрерывный кусок другого. Окна, пустые списки и порядок проверок.
+kind: implement
+topic: algorithms
+level: medium
+order: 150
+---
+
+Напишите `Compare`: сравнить два списка и вернуть одно из четырёх слов.
+
+- `"equal"` — списки совпадают;
+- `"sublist"` — первый список целиком, подряд и в том же порядке встречается
+  во втором: `[2 3]` в `[1 2 3 4]`;
+- `"superlist"` — наоборот, второй содержится в первом;
+- `"unequal"` — всё остальное.
+
+«Подряд» важно: `[1 3]` — не подсписок `[1 2 3]`. Пустой список — подсписок
+любого непустого.
+
+Тесты — из открытого набора [Exercism](https://github.com/exercism/problem-specifications) (MIT).
+
+<Reveal>
+
+```go
+func Compare(listOne, listTwo []int) string {
+	switch {
+	case slices.Equal(listOne, listTwo):
+		return "equal"
+	case contains(listTwo, listOne):
+		return "sublist"
+	case contains(listOne, listTwo):
+		return "superlist"
+	}
+	return "unequal"
+}
+
+func contains(whole, part []int) bool {
+	for i := 0; i+len(part) <= len(whole); i++ {
+		if slices.Equal(whole[i:i+len(part)], part) {
+			return true
+		}
+	}
+	return false
+}
+```
+
+**Порядок проверок важен.** Равные списки содержатся друг в друге, поэтому
+`equal` проверяется первым. А два пустых списка — равны, и `contains` здесь
+вызова не дождётся.
+
+**Окно длины `len(part)`.** `i + len(part) <= len(whole)` — последнее окно,
+которое ещё помещается. Для пустого `part` окно пустое и совпадает сразу:
+пустой список — подсписок чего угодно.
+
+**Тест «false start»** — `[1 2 5]` в `[0 1 2 3 1 2 5 6]` — ловит наивный
+однопроходный вариант, который при несовпадении продолжает с того же места
+в `whole`, а не возвращается к следующему началу.
+
+**Сложность** — O(n·m). Линейно это делает алгоритм Кнута — Морриса — Пратта:
+та же задача, что поиск подстроки в строке.
+
+**Почему не через строки.** Склеить в `"1,2,3"` и вызвать `strings.Contains`
+соблазнительно, но `[1 2]` найдётся в `[1 22]`. Для этого в наборе и есть
+тест «missing additional digits».
+
+</Reveal>

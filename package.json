@@ -13,6 +13,8 @@
     "preview": "node scripts/preview.mjs",
     "check": "astro check",
     "test": "node --test \"src/**/*.test.ts\"",
+    "tasks:exercism": "node scripts/exercism/generate.ts",
+    "tasks:verify": "node scripts/verify-tasks.ts",
     "demo": "node src/components/stands/gmp/engine/demo.ts",
     "demo:gc": "node src/components/stands/gc/engine/demo.ts",
     "demo:mem": "node src/components/stands/mem/engine/demo.ts",

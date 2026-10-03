@@ -1,0 +1,72 @@
+---
+title: Кодирование длин серий
+description: Сжать AAABCC в 3AB2C и развернуть обратно. Две функции, и обе ошибаются на многозначных числах.
+kind: implement
+topic: algorithms
+level: easy
+order: 50
+---
+
+*Кодирование длин серий* (RLE) заменяет серию одинаковых символов числом
+и символом: `WWWWWWWWWWWWBWWWWWWWWWWWWBBB` → `12WB12W3B`. Одиночный символ
+пишется без единицы: `B`, а не `1B`.
+
+Напишите две функции:
+
+- `Encode` — сжать строку;
+- `Decode` — развернуть сжатую обратно.
+
+Цифр в исходной строке не бывает — иначе сжатую нельзя было бы разобрать.
+Пробел — обычный символ, его серии тоже сжимаются: `"  hsqq qww  "` →
+`"2 hs2q q2w2 "`. Для любой строки `Decode(Encode(s)) == s`.
+
+Тесты — из открытого набора [Exercism](https://github.com/exercism/problem-specifications) (MIT).
+
+<Reveal>
+
+```go
+func Encode(s string) string {
+	runes := []rune(s)
+	var b strings.Builder
+	for i := 0; i < len(runes); {
+		j := i + 1
+		for j < len(runes) && runes[j] == runes[i] {
+			j++
+		}
+		if n := j - i; n > 1 {
+			b.WriteString(strconv.Itoa(n))
+		}
+		b.WriteRune(runes[i])
+		i = j
+	}
+	return b.String()
+}
+
+func Decode(s string) string {
+	var b strings.Builder
+	n := 0
+	for _, r := range s {
+		if unicode.IsDigit(r) {
+			n = n*10 + int(r-'0')
+			continue
+		}
+		b.WriteString(strings.Repeat(string(r), max(n, 1)))
+		n = 0
+	}
+	return b.String()
+}
+```
+
+**Encode — два указателя.** `i` стоит на начале серии, `j` бежит до её конца.
+Длина серии — `j - i`, и следующая серия начинается ровно с `j`. Так не нужен
+отдельный «хвостовой» сброс после цикла, о котором часто забывают в варианте
+со счётчиком.
+
+**Decode — число может быть многозначным.** `12W` — это двенадцать `W`,
+а не одна `2` после `1`. Поэтому цифры накапливаются в `n`, пока не
+встретится символ. Ноль в `n` значит «числа не было» — символ один.
+
+**strings.Builder,** а не `+=`: строки в Go неизменяемы, и склейка в цикле
+каждый раз копирует всё накопленное — O(n²) на длинном входе.
+
+</Reveal>
