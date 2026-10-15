@@ -1,0 +1,75 @@
+---
+/**
+ * Страница сгенерированной задачи. В отличие от задач из src/content/tasks,
+ * она не собирается заранее: задача лежит в базе и появилась после сборки.
+ * Устроена так же, как обычная страница задачи, и тем же островом проверяется.
+ */
+import BaseLayout from '../../../layouts/BaseLayout.astro'
+import Reveal from '../../../components/content/Reveal.astro'
+import TaskRunner from '../../../components/practice/ui/TaskRunner.tsx'
+import { generatedView } from '../../../lib/server/generated.ts'
+import { renderMarkdown } from '../../../lib/server/markdown.ts'
+import { taskKind, taskLevel, taskTopic } from '../../../data/practice.ts'
+
+export const prerender = false
+
+const task = generatedView(Astro.params.id ?? '')
+if (!task) return new Response('Нет такой задачи', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } })
+
+const kindInfo = taskKind(task.kind)
+const topicInfo = taskTopic(task.topic)
+const levelInfo = taskLevel(task.level)
+const statement = renderMarkdown(task.statement)
+const explanation = renderMarkdown(task.explanation)
+---
+
+<BaseLayout title={task.title} description={task.description} full>
+  <article>
+    <nav class="text-sm text-muted mb-4">
+      <a href="/practice/" class="hover:text-ink">Практика</a> / <a href="/practice/generate/" class="hover:text-ink"
+        >Сгенерированные</a
+      >
+    </nav>
+
+    <div class="flex flex-wrap items-center gap-2 mb-3">
+      <span class="pr-badge pr-badge-kind">{kindInfo.title}</span>
+      <span class="pr-badge">{topicInfo.title}</span>
+      <span class="pr-badge">{levelInfo.title}</span>
+      <span class="pr-badge" title="Задачу написал Claude, сайт проверил её в песочнице go.dev">сгенерирована</span>
+    </div>
+
+    <h1 class="text-3xl md:text-4xl font-bold tracking-tight leading-tight mb-3">{task.title}</h1>
+    <p class="text-lg text-muted max-w-[70ch] mb-8">{task.description}</p>
+
+    <div class="grid lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] gap-8 items-start">
+      <div class="prose dark:prose-invert lg:sticky lg:top-20">
+        <Fragment set:html={statement} />
+        <Reveal>
+          <Fragment set:html={explanation} />
+        </Reveal>
+      </div>
+
+      <div>
+        <TaskRunner
+          client:load
+          taskId={task.id}
+          kind={task.kind}
+          prompt={kindInfo.prompt}
+          starter={task.starter}
+          solution={task.solution}
+        />
+        <p class="text-xs text-muted mt-3">
+          Задачу написал Claude, а сайт перед публикацией прогнал её в песочнице <a
+            href="https://go.dev/play/"
+            class="text-accent">go.dev</a
+          >: эталон решается, заготовка — нет, вывод не зависит от случая. Проверка ловит неработающие задачи, но не
+          опечатки в тексте — если что-то не так, сгенерируйте другую.
+        </p>
+      </div>
+    </div>
+
+    <nav class="mt-12">
+      <a href="/practice/generate/" class="text-sm text-accent">← сгенерировать ещё</a>
+    </nav>
+  </article>
+</BaseLayout>

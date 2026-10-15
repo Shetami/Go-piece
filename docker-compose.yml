@@ -6,6 +6,10 @@ services:
       - "${PORT:-8080}:4321"
     volumes:
       - data:/app/data
+    environment:
+      # Генерация задач (/practice/generate/). Без ключа страница скажет, что она не настроена.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GENERATE_DAILY_LIMIT: ${GENERATE_DAILY_LIMIT:-10}
     restart: unless-stopped
 
 volumes:

@@ -1,0 +1,24 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro'
+import MapStand from '../../components/stands/map/MapStand.astro'
+---
+
+<BaseLayout
+  title="Стенд: карта Go"
+  description="Пошаговая модель map в Go: Swiss table с группами и контрольными байтами, пробы и надгробия, рост и деление таблиц, каталог, итератор при росте — и старая карта на корзинах с постепенной эвакуацией."
+  wide
+>
+  <nav class="text-sm text-muted mb-4">
+    <a href="/lab/" class="hover:text-ink">Лаборатория</a> / Карта
+  </nav>
+  <div class="flex flex-wrap items-baseline justify-between gap-4 mb-2">
+    <h1 class="text-3xl font-bold tracking-tight">Карта Go</h1>
+    <a href="/lectures/go-runtime/maps/" class="text-sm text-accent">читать лекцию →</a>
+  </div>
+  <p class="text-muted max-w-3xl">
+    Пробел — пуск и пауза, стрелки — шаг, Shift+стрелки — 10 шагов. Одна операция с картой — один шаг. Команды из
+    консоли выполняются в конце прогона: кладите ключи, удаляйте, подбирайте коллизии, обходите карту и смотрите, что
+    происходит внутри. Клик по событию открывает разбор.
+  </p>
+  <MapStand scenario="small" mode="lab" />
+</BaseLayout>

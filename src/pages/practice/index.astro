@@ -41,6 +41,15 @@ const topics = TASK_TOPICS.filter((t) => usedTopics.has(t.id))
     PostgreSQL прямо в браузере.
   </p>
 
+  <a
+    href="/practice/generate/"
+    class="mb-8 block max-w-4xl rounded-lg border border-accent/40 bg-surface px-4 py-3 hover:border-accent"
+    data-pagefind-ignore
+  >
+    <span class="font-semibold text-accent">Сгенерировать задачу →</span>
+    <span class="text-muted text-sm"> новая задача по выбранной теме и сложности: её пишет Claude, сайт проверяет в песочнице go.dev.</span>
+  </a>
+
   <div class="mb-8 grid gap-4 max-w-4xl" data-pagefind-ignore>
     {
       kinds.map((k) => (

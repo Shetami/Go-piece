@@ -33,6 +33,35 @@ const SCHEMA = `
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (user_id, key)
   );
+
+  -- Задачи, сгенерированные на сайте, см. src/lib/server/generated.ts. Скрытые
+  -- части (тесты, эталонный вывод, строка с багом) лежат здесь же и наружу
+  -- отдаются только маршрутом /api/check.
+  CREATE TABLE IF NOT EXISTS generated_tasks (
+    id          TEXT    PRIMARY KEY,
+    user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    topic       TEXT    NOT NULL,
+    kind        TEXT    NOT NULL,
+    level       TEXT    NOT NULL,
+    title       TEXT    NOT NULL,
+    description TEXT    NOT NULL,
+    statement   TEXT    NOT NULL,
+    explanation TEXT    NOT NULL,
+    starter     TEXT    NOT NULL,
+    solution    TEXT    NOT NULL,
+    tests       TEXT,
+    expect      TEXT,
+    bug_line    INTEGER,
+    created_at  INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS generated_tasks_user ON generated_tasks(user_id, created_at);
+
+  -- Каждая попытка генерации, удачная или нет: по ним считается суточный лимит.
+  CREATE TABLE IF NOT EXISTS generation_attempts (
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS generation_attempts_user ON generation_attempts(user_id, created_at);
 `
 
 let db: DatabaseSync | null = null

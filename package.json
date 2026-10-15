@@ -19,6 +19,7 @@
     "demo:gc": "node src/components/stands/gc/engine/demo.ts",
     "demo:mem": "node src/components/stands/mem/engine/demo.ts",
     "demo:chan": "node src/components/stands/chan/engine/demo.ts",
+    "demo:map": "node src/components/stands/map/engine/demo.ts",
     "demo:kafka": "node src/components/stands/kafka/engine/demo.ts",
     "demo:txn": "node src/components/stands/txn/engine/demo.ts",
     "demo:repl": "node src/components/stands/repl/engine/demo.ts",
@@ -30,6 +31,7 @@
     "demo:saga": "node src/components/stands/saga/engine/demo.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
     "@astrojs/mdx": "^8.0.1",
     "@astrojs/node": "^11.1.6",
     "@astrojs/react": "^6.0.6",
@@ -47,9 +49,11 @@
     "@tailwindcss/vite": "^4.3.3",
     "astro": "^7.3.3",
     "codemirror": "^6.0.2",
+    "marked": "^18.0.14",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "tailwindcss": "^4.3.3"
+    "tailwindcss": "^4.3.3",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.10",

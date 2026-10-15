@@ -1,0 +1,20 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro'
+import GenerateForm from '../../components/practice/ui/GenerateForm.tsx'
+---
+
+<BaseLayout
+  title="Сгенерировать задачу"
+  description="Новая задача по Go в формате собеседования по выбранной теме и сложности: её пишет Claude, а сайт проверяет в песочнице go.dev."
+>
+  <nav class="text-sm text-muted mb-4">
+    <a href="/practice/" class="hover:text-ink">Практика</a> / Сгенерировать
+  </nav>
+  <h1 class="text-3xl font-bold tracking-tight mb-2">Сгенерировать задачу</h1>
+  <p class="text-muted mb-8 max-w-2xl">
+    Выберите тему, формат и сложность — Claude напишет новую задачу, а сайт до того, как её показать, прогонит её в
+    песочнице go.dev: заготовка компилируется, эталон решает задачу, вывод не зависит от случая, а в «найди баг» баг
+    действительно в той строке. Если проверка находит ошибку, задача уходит на доработку.
+  </p>
+  <GenerateForm client:load />
+</BaseLayout>
