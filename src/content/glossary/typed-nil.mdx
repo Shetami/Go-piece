@@ -1,0 +1,26 @@
+---
+title: nil с типом
+short: 'Интерфейс, в котором лежит nil-указатель конкретного типа. Данных нет, но тип известен, поэтому интерфейс != nil.'
+aliases: [typed nil, nil interface, nil-интерфейс, nil error is not nil, ненулевой nil]
+category: состояние
+related: [iface, itab]
+---
+
+Интерфейс равен `nil`, только если оба его слова пусты. Стоит положить в него `(*T)(nil)` — первое слово заполнится типом, и сравнение с `nil` даст ложь.
+
+```go
+func find() error {
+    var e *NotFoundError // nil
+    return e             // error{tab: itab(*NotFoundError), data: nil} — не nil
+}
+
+if err := find(); err != nil { // true — «ошибка» есть
+    log.Println(err)           // вызовет (*NotFoundError).Error с nil-получателем
+}
+```
+
+Правила, которые закрывают проблему:
+
+- **из функции, возвращающей интерфейс, возвращайте литерал `nil`**, а не переменную конкретного типа, которая «может быть nil»;
+- **не объявляйте результат как конкретный тип ошибки**, если вызывающий будет присваивать его в `error`: `func f() *MyErr` → `var err error = f()` даёт ту же ловушку;
+- в отладке помогает `fmt.Printf("%T %v", err, err)` — покажет `*main.NotFoundError <nil>`.

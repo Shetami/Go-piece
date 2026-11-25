@@ -1,0 +1,76 @@
+---
+/**
+ * Значение интерфейса изнутри: iface = (itab, data), eface = (_type, data).
+ * itab связывает пару «интерфейс + конкретный тип» и хранит таблицу методов.
+ */
+const IX = 300
+const RW = 230
+const rows = [
+  { k: 'inter', v: '→ Shape' },
+  { k: '_type', v: '→ Rect' },
+  { k: 'hash', v: '0x9c1f…' },
+  { k: 'fun[0]', v: '→ Rect.Area', acc: true },
+  { k: 'fun[1]', v: '→ Rect.Perimeter', acc: true },
+]
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 330" role="img" aria-labelledby="gif-t">
+      <title id="gif-t">Непустой интерфейс — два слова: указатель на itab и указатель на данные. Пустой интерфейс any — указатель на тип и указатель на данные</title>
+      <defs>
+        <marker id="gif-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head"></path>
+        </marker>
+        <marker id="gif-b" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L8,4 L0,8 z" class="head-accent"></path>
+        </marker>
+      </defs>
+
+      <text x="20" y="30" class="t-bold t-mono">{'var sh Shape = Rect{3, 4}'}</text>
+      <text x="20" y="50" class="t-muted t-small">iface — 16 байт</text>
+      <rect x="20" y="58" width="80" height="40" class="cell-on"></rect>
+      <text x="60" y="83" text-anchor="middle" class="t-mono">tab</text>
+      <rect x="100" y="58" width="80" height="40" class="cell-on"></rect>
+      <text x="140" y="83" text-anchor="middle" class="t-mono">data</text>
+
+      <text x={IX} y="30" class="t-muted t-small">itab для пары (Shape, Rect) — одна на программу</text>
+      <rect x={IX} y="38" width={RW} height={rows.length * 26 + 10} rx="6" class="box-2"></rect>
+      {
+        rows.map((r, i) => (
+          <g>
+            <text x={IX + 14} y={60 + i * 26} class="t-mono t-small">{r.k}</text>
+            <text x={IX + 84} y={60 + i * 26} class={r.acc ? 't-mono t-small t-accent' : 't-mono t-small'}>{r.v}</text>
+          </g>
+        ))
+      }
+      <path d={`M60 64 C60 20, 240 20, ${IX - 4} 56`} class="ln" marker-end="url(#gif-a)"></path>
+
+      <rect x="590" y="150" width="150" height="40" rx="6" class="box"></rect>
+      <text x="665" y="175" text-anchor="middle" class="t-mono t-small">{'Rect{W:3, H:4}'}</text>
+      <text x="665" y="206" text-anchor="middle" class="t-muted t-small">копия значения</text>
+      <path d="M140 98 C140 175, 400 172, 586 170" class="ln-accent" marker-end="url(#gif-b)"></path>
+
+      <text x="20" y="246" class="t-bold t-mono">{'var x any = Rect{3, 4}'}</text>
+      <text x="20" y="266" class="t-muted t-small">eface — 16 байт</text>
+      <rect x="20" y="274" width="80" height="40" class="cell-on"></rect>
+      <text x="60" y="299" text-anchor="middle" class="t-mono">_type</text>
+      <rect x="100" y="274" width="80" height="40" class="cell-on"></rect>
+      <text x="140" y="299" text-anchor="middle" class="t-mono">data</text>
+
+      <rect x={IX} y="274" width="150" height="40" rx="6" class="box-2"></rect>
+      <text x={IX + 75} y="299" text-anchor="middle" class="t-mono t-small">тип Rect</text>
+      <path d={`M60 314 C60 326, 250 326, ${IX - 4} 300`} class="ln" marker-end="url(#gif-a)"></path>
+
+      <rect x="590" y="274" width="150" height="40" rx="6" class="box"></rect>
+      <text x="665" y="299" text-anchor="middle" class="t-mono t-small">{'Rect{W:3, H:4}'}</text>
+      <path d="M180 286 C230 250, 540 250, 586 288" class="ln-accent" marker-end="url(#gif-b)"></path>
+    </svg>
+  </div>
+  <figcaption>
+    Интерфейс с методами (<code>iface</code>) хранит указатель на <code>itab</code> — таблицу, где записано, какой
+    интерфейс, какой конкретный тип и по каким адресам лежат его методы. Пустой интерфейс (<code>eface</code>) методов
+    не обещает, поэтому таблица ему не нужна: хватает указателя на описание типа. В обоих случаях второе слово
+    указывает на копию значения, сделанную при присваивании.
+  </figcaption>
+</figure>

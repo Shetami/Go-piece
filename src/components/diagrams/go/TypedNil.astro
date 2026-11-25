@@ -1,0 +1,41 @@
+---
+/**
+ * Три состояния переменной типа error: настоящий nil, «nil с типом» и обычное значение.
+ * Интерфейс равен nil, только когда пусты оба слова.
+ */
+const cols = [
+  { code: 'var err error', tab: 'nil', data: 'nil', res: 'err == nil → true', ok: true },
+  { code: 'var p *MyErr; err = p', tab: 'itab(*MyErr)', data: 'nil', res: 'err == nil → false', ok: false },
+  { code: 'err = &MyErr{}', tab: 'itab(*MyErr)', data: '0xc000…', res: 'err == nil → false', ok: false },
+]
+const CW = 245
+---
+
+<figure class="dg not-prose">
+  <div class="dg-scroll">
+    <svg viewBox="0 0 760 170" role="img" aria-labelledby="gtn-t">
+      <title id="gtn-t">Интерфейс равен nil, только если и тип, и данные пусты. Nil-указатель внутри интерфейса делает интерфейс не-nil</title>
+      {
+        cols.map((c, i) => {
+          const x = 15 + i * CW
+          return (
+            <g>
+              <text x={x} y="30" class="t-bold t-mono t-small">{c.code}</text>
+              <rect x={x} y="46" width="115" height="44" class={c.tab === 'nil' ? 'cell-pending' : 'cell-on'}></rect>
+              <text x={x + 57} y="73" text-anchor="middle" class="t-mono t-small">{c.tab}</text>
+              <rect x={x + 115} y="46" width="105" height="44" class={c.data === 'nil' ? 'cell-pending' : 'cell-on'}></rect>
+              <text x={x + 167} y="73" text-anchor="middle" class="t-mono t-small">{c.data}</text>
+              <text x={x + 57} y="108" text-anchor="middle" class="t-muted t-small">tab</text>
+              <text x={x + 167} y="108" text-anchor="middle" class="t-muted t-small">data</text>
+              <text x={x} y="140" class={c.ok ? 't-mono t-ok' : 't-mono t-bad'}>{c.res}</text>
+            </g>
+          )
+        })
+      }
+    </svg>
+  </div>
+  <figcaption>
+    Сравнение <code>err == nil</code> проверяет оба слова. Во втором случае данных нет, но тип известен — и интерфейс
+    уже не пуст. Именно так функция, которая «ничего не нашла», возвращает ошибку, не равную <code>nil</code>.
+  </figcaption>
+</figure>
