@@ -1,6 +1,6 @@
 import type { Ctx } from './ctx.ts'
 import { emit, recordProbe } from './ctx.ts'
-import { hashKey, isNaNKey, keyEqual, tophash } from './hash.ts'
+import { hashKey, hex8, isNaNKey, keyEqual, lowBits, tophash } from './hash.ts'
 import type { Bucket, LegacyIter, LegacyMap, LSlot, Probe, Yield } from './types.ts'
 import {
   GROUP_SLOTS,
@@ -20,7 +20,7 @@ import {
  * по одной-две корзины на каждую запись (growWork → evacuate).
  */
 
-const emptyLSlot = (): LSlot => ({ top: TOP_EMPTY_REST, key: null, val: null, hash: 0 })
+const emptyLSlot = (): LSlot => ({ top: TOP_EMPTY_REST, key: null, val: null, hash: 0n })
 const newPage = (): LSlot[] => Array.from({ length: GROUP_SLOTS }, emptyLSlot)
 const newBucket = (): Bucket => ({ pages: [newPage()], evacuated: false })
 
@@ -49,7 +49,7 @@ export function createLegacy(ctx: Ctx, hint: number): LegacyMap {
   const h: LegacyMap = {
     count: 0,
     B,
-    hash0: ctx.rng.u32(),
+    hash0: BigInt(ctx.rng.u32()),
     buckets: null,
     oldbuckets: null,
     arrays: {},
@@ -63,17 +63,17 @@ export function createLegacy(ctx: Ctx, hint: number): LegacyMap {
   return h
 }
 
-export function legacyHash(ctx: Ctx, h: LegacyMap, key: string): number {
-  return isNaNKey(key) ? ctx.rng.u32() : hashKey(key, h.hash0)
+export function legacyHash(ctx: Ctx, h: LegacyMap, key: string): bigint {
+  return isNaNKey(key) ? ctx.rng.u64() : hashKey(key, h.hash0)
 }
 
 /** Где искать ключ: в старой корзине, если её ещё не эвакуировали, иначе в новой. */
-function lookupBucket(h: LegacyMap, hash: number): { arr: number; bucket: number } {
+function lookupBucket(h: LegacyMap, hash: bigint): { arr: number; bucket: number } {
   if (growing(h)) {
-    const ob = hash & oldMask(h)
+    const ob = lowBits(hash, oldMask(h))
     if (!h.arrays[h.oldbuckets!]![ob]!.evacuated) return { arr: h.oldbuckets!, bucket: ob }
   }
-  return { arr: h.buckets!, bucket: hash & mask(h) }
+  return { arr: h.buckets!, bucket: lowBits(hash, mask(h)) }
 }
 
 export interface LLoc {
@@ -90,7 +90,7 @@ function scan(
   arr: number,
   bucket: number,
   key: string,
-  hash: number,
+  hash: bigint,
   onFree?: (loc: LLoc) => void,
 ): LLoc | null {
   const top = tophash(hash)
@@ -125,7 +125,7 @@ function scan(
   return null
 }
 
-export function legacyFind(ctx: Ctx, h: LegacyMap, key: string, hash: number): LLoc | null {
+export function legacyFind(ctx: Ctx, h: LegacyMap, key: string, hash: bigint): LLoc | null {
   if (h.buckets === null || h.count === 0) return null
   const { arr, bucket } = lookupBucket(h, hash)
   return scan(ctx, h, arr, bucket, key, hash)
@@ -154,7 +154,7 @@ export function legacyPut(ctx: Ctx, h: LegacyMap, key: string, val: number): boo
 
   for (let attempt = 0; attempt < 4; attempt++) {
     ctx.trace.probes = []
-    const bucket = hash & mask(h)
+    const bucket = lowBits(hash, mask(h))
     if (growing(h)) growWork(ctx, h, bucket)
 
     let free: LLoc | null = null
@@ -253,7 +253,7 @@ function evacuate(ctx: Ctx, h: LegacyMap, oldb: number) {
           s.top = TOP_EVAC_EMPTY
           continue
         }
-        const useY = !h.sameSizeGrow && (s.hash & newbit) !== 0
+        const useY = !h.sameSizeGrow && (s.hash & BigInt(newbit)) !== 0n
         const d = useY ? y : x
         const db = dst[d.bucket]!
         if (d.slot === GROUP_SLOTS) {
@@ -303,7 +303,7 @@ export function legacyDelete(ctx: Ctx, h: LegacyMap, key: string): boolean {
     emit(ctx, 'del.miss', { key, legacy: true, probes: 0 })
     return false
   }
-  const bucket = hash & mask(h)
+  const bucket = lowBits(hash, mask(h))
   if (growing(h)) growWork(ctx, h, bucket)
   const loc = scan(ctx, h, h.buckets, bucket, key, hash)
   if (!loc) {
@@ -312,7 +312,7 @@ export function legacyDelete(ctx: Ctx, h: LegacyMap, key: string): boolean {
     return false
   }
   const s = slotAt(h, loc)
-  Object.assign(s, { top: TOP_EMPTY_ONE, key: null, val: null, hash: 0 })
+  Object.assign(s, { top: TOP_EMPTY_ONE, key: null, val: null, hash: 0n })
   const rest = markEmptyRest(h.arrays[h.buckets]![bucket]!, loc.page, loc.slot)
   h.count--
   ctx.trace.hit = loc
@@ -320,8 +320,8 @@ export function legacyDelete(ctx: Ctx, h: LegacyMap, key: string): boolean {
   emit(ctx, 'del.hit', { key, legacy: true, bucket, page: loc.page, slot: loc.slot, rest, count: h.count })
   if (h.count === 0) {
     const old = h.hash0
-    h.hash0 = ctx.rng.u32()
-    emit(ctx, 'seed.reset', { old, seed: h.hash0, why: 'delete', legacy: true })
+    h.hash0 = BigInt(ctx.rng.u32())
+    emit(ctx, 'seed.reset', { old: hex8(old), seed: hex8(h.hash0), why: 'delete', legacy: true })
   }
   return true
 }
@@ -362,10 +362,10 @@ export function legacyClear(ctx: Ctx, h: LegacyMap) {
   h.noverflow = 0
   h.count = 0
   const old = h.hash0
-  h.hash0 = ctx.rng.u32()
+  h.hash0 = BigInt(ctx.rng.u32())
   ctx.trace.outcome = `карта пуста, ${1 << h.B} корзин(ы) остались, цепочки переполнения отброшены`
   emit(ctx, 'clear', { was, buckets: 1 << h.B, overflow, impl: 'legacy' })
-  emit(ctx, 'seed.reset', { old, seed: h.hash0, why: 'clear', legacy: true })
+  emit(ctx, 'seed.reset', { old: hex8(old), seed: hex8(h.hash0), why: 'clear', legacy: true })
 }
 
 /** Массивы корзин, на которые не ссылаются ни карта, ни итератор, — мусор. */
@@ -439,7 +439,7 @@ export function legacyIterNext(h: LegacyMap, it: LegacyIter & { visited: number 
         const s = page[off]!
         if (isEmptyTop(s.top) || s.top === TOP_EVAC_EMPTY) continue
         // Из старой корзины берём только ключи, которые уедут в текущую новую.
-        if (it.src.check !== null && (s.hash & ((1 << it.B) - 1)) !== it.src.check) continue
+        if (it.src.check !== null && lowBits(s.hash, (1 << it.B) - 1) !== it.src.check) continue
         const at = { arr: it.src.arr, bucket: it.src.bucket, page: it.page, slot: off }
         if ((s.top !== TOP_EVAC_X && s.top !== TOP_EVAC_Y) || isNaNKey(s.key!)) {
           return { kind: 'yield', y: { key: s.key!, val: s.val!, reread: false }, ...at, visited }

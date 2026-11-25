@@ -24,4 +24,10 @@ export class Rng {
   u32(): number {
     return Math.floor(this.next() * 4294967296) >>> 0
   }
+
+  /** Случайные 64 бита: соль хэша и хэш NaN. */
+  u64(): bigint {
+    const hi = BigInt(this.u32())
+    return (hi << 32n) | BigInt(this.u32())
+  }
 }

@@ -1,6 +1,6 @@
 import type { Ctx } from './ctx.ts'
 import { emit } from './ctx.ts'
-import { h1, hashKey } from './hash.ts'
+import { h1, hashKey, lowBits } from './hash.ts'
 import {
   createLegacy,
   legacyCapacity,
@@ -124,7 +124,7 @@ function expand(ctx: Ctx, op: LocatedOp): LocatedOp[] | null {
  * Так злоумышленник строил бы hash flooding, если бы знал соль.
  */
 function collideKeys(w: MapWorld, count: number, target?: number): string[] {
-  let where: ((hash: number) => string) | null = null
+  let where: ((hash: bigint) => string) | null = null
   if (w.swiss) {
     const m = w.swiss
     where =
@@ -132,11 +132,11 @@ function collideKeys(w: MapWorld, count: number, target?: number): string[] {
         ? () => 'small'
         : (hash) => {
             const t = tableFor(m, hash)
-            return `${t.id}:${h1(hash) & (t.groups.length - 1)}`
+            return `${t.id}:${lowBits(h1(hash), t.groups.length - 1)}`
           }
   } else if (w.legacy) {
     const h = w.legacy
-    where = (hash) => String(hash & ((1 << h.B) - 1))
+    where = (hash) => String(lowBits(hash, (1 << h.B) - 1))
   }
   if (!where) return Array.from({ length: count }, () => `c${w.collideNext++}`)
   const seed = w.swiss?.seed ?? w.legacy!.hash0

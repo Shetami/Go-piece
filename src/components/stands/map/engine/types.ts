@@ -6,7 +6,6 @@
  * и итератор взяты из internal/runtime/maps почти без изменений; старая карта
  * на корзинах — из runtime/map.go Go 1.23. Упрощено вот что:
  *
- * - хэш 32-битный, а не 64-битный: H2 — те же младшие 7 бит, H1 — остальные 25;
  * - потолок таблицы по умолчанию 32 слота вместо 1024 — иначе деление и каталог
  *   пришлось бы ждать тысячу вставок;
  * - ключи — строки, значения — числа; время — один тик на одну операцию с картой.
@@ -51,7 +50,7 @@ export interface Slot {
   key: string | null
   val: number | null
   /** Хэш ключа — хранится ради отрисовки; рантайм его не хранит, а пересчитывает. */
-  hash: number
+  hash: bigint
 }
 
 export interface Group {
@@ -76,7 +75,7 @@ export interface Table {
 
 export interface SwissMap {
   used: number
-  seed: number
+  seed: bigint
   /**
    * Маленькая карта: одна группа без таблицы и каталога (dirLen == 0).
    * null — группа ещё не выделена: make без подсказки или с подсказкой ≤ 8.
@@ -105,7 +104,7 @@ export interface LSlot {
   top: number
   key: string | null
   val: number | null
-  hash: number
+  hash: bigint
 }
 
 /** Корзина: первая страница — сама корзина, остальные — цепочка корзин переполнения. */
@@ -119,7 +118,8 @@ export interface LegacyMap {
   count: number
   /** Корзин 2^B. */
   B: number
-  hash0: number
+  /** Соль: в hmap это uint32, хотя сам хэш — 64 бита. */
+  hash0: bigint
   /** id массива корзин в `arrays`; null — корзины ещё не выделены (make без подсказки). */
   buckets: number | null
   /** Массив, из которого идёт эвакуация; null — рост не идёт. */
@@ -308,7 +308,7 @@ export interface OpTrace {
   /** Команда так, как она выглядит в Go. */
   code: string
   key?: string
-  hash?: number
+  hash?: bigint
   probes: Probe[]
   /** Куда в итоге пришла операция. */
   hit?: { table?: number | null; group?: number; arr?: number; bucket?: number; page?: number; slot: number }

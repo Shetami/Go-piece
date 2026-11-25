@@ -1,4 +1,4 @@
-import { bin, dirIndex, h1, h2, hex2, hex8, tophash } from '../engine/hash.ts'
+import { HASH_BITS, bin, dirIndex, h1, h2, hex16, hex2, hex8, lowBits, tophash } from '../engine/hash.ts'
 import { maxGrowth, tombstones } from '../engine/swiss.ts'
 import type { Bucket, Group, Iter, LegacyMap, LSlot, MapWorld, OpTrace, Probe, Slot, SwissMap, Table } from '../engine/types.ts'
 import {
@@ -31,11 +31,11 @@ function probeIndex(trace: OpTrace | null, pred: (p: Probe) => boolean): { n: nu
 
 /* ───────────────────────── Операция и хэш ───────────────────────── */
 
-function HashBits({ hash, segments }: { hash: number; segments: { from: number; to: number; cls: string; label: string }[] }) {
-  const bits = bin(hash, 32)
+function HashBits({ hash, segments }: { hash: bigint; segments: { from: number; to: number; cls: string; label: string }[] }) {
+  const bits = bin(hash, HASH_BITS)
   const cls = (i: number) => segments.find((s) => i >= s.from && i < s.to)?.cls ?? ''
   return (
-    <span className="map-bits" aria-label={`хэш ${hex8(hash)}`}>
+    <span className="map-bits" aria-label={`хэш ${hex16(hash)}`}>
       {bits.split('').map((b, i) => (
         <span key={i} className={cls(i)}>
           {b}
@@ -64,8 +64,8 @@ function OpCard({ w, trace }: { w: MapWorld; trace: OpTrace | null }) {
     const gbits = t ? Math.log2(t.groups.length) : 0
     segments = [
       { from: 0, to: gd, cls: 'bit-dir', label: 'каталог' },
-      { from: 25 - gbits, to: 25, cls: 'bit-h1', label: 'группа' },
-      { from: 25, to: 32, cls: 'bit-h2', label: 'H2' },
+      { from: HASH_BITS - 7 - gbits, to: HASH_BITS - 7, cls: 'bit-h1', label: 'группа' },
+      { from: HASH_BITS - 7, to: HASH_BITS, cls: 'bit-h2', label: 'H2' },
     ]
     legend = (
       <span className="map-legend">
@@ -76,7 +76,7 @@ function OpCard({ w, trace }: { w: MapWorld; trace: OpTrace | null }) {
         )}
         {t && (
           <span className="bit-h1" title="H1 — всё, кроме 7 младших бит. Его младшие биты выбирают стартовую группу">
-            H1 → группа <b>{h1(hash) & (t.groups.length - 1)}</b>
+            H1 → группа <b>{lowBits(h1(hash), t.groups.length - 1)}</b>
           </span>
         )}
         <span className="bit-h2" title="H2 — 7 младших бит: они лежат в контрольном байте слота">
@@ -88,7 +88,7 @@ function OpCard({ w, trace }: { w: MapWorld; trace: OpTrace | null }) {
     const B = w.legacy.B
     segments = [
       { from: 0, to: 8, cls: 'bit-h2', label: 'tophash' },
-      { from: 32 - B, to: 32, cls: 'bit-h1', label: 'корзина' },
+      { from: HASH_BITS - B, to: HASH_BITS, cls: 'bit-h1', label: 'корзина' },
     ]
     legend = (
       <span className="map-legend">
@@ -96,7 +96,7 @@ function OpCard({ w, trace }: { w: MapWorld; trace: OpTrace | null }) {
           tophash <b>0x{hex2(tophash(hash))}</b>
         </span>
         <span className="bit-h1" title="Младшие B бит выбирают корзину">
-          корзина <b>{hash & ((1 << B) - 1)}</b>
+          корзина <b>{lowBits(hash, (1 << B) - 1)}</b>
         </span>
       </span>
     )
@@ -109,7 +109,7 @@ function OpCard({ w, trace }: { w: MapWorld; trace: OpTrace | null }) {
       {hash !== undefined && trace.key !== undefined && (
         <span className="map-hash">
           <span className="map-hash-key">
-            hash({trace.key === 'NaN' ? 'NaN' : `"${trace.key}"`}) = {hex8(hash)}
+            hash({trace.key === 'NaN' ? 'NaN' : `"${trace.key}"`}) = {hex16(hash)}
           </span>
           <HashBits hash={hash} segments={segments} />
           {legend}
@@ -152,7 +152,7 @@ function SwissCell({ s, i, probes, hit, iterAt }: {
       ? `слот ${i}: empty (0x80)`
       : state === 'deleted'
         ? `слот ${i}: надгробие deleted (0xfe) — поиск идёт через него дальше`
-        : `слот ${i}: ${s.key} = ${s.val}\nконтрольный байт = H2 = 0x${hex2(s.ctrl)}\nхэш ${hex8(s.hash)}` +
+        : `слот ${i}: ${s.key} = ${s.val}\nконтрольный байт = H2 = 0x${hex2(s.ctrl)}\nхэш ${hex16(s.hash)}` +
           (matched ? '\nH2 совпал с искомым' : '') +
           (cmp ? (cmp.eq ? '\nключ совпал' : '\nложное совпадение: ключ другой') : '')
   return (
@@ -530,7 +530,7 @@ function Header({ w }: { w: MapWorld }) {
           used <b>{m.used}</b>
         </span>
         <span title="Соль хэша — своя у каждой карты, меняется, когда карта опустела">
-          seed <b>{hex8(m.seed)}</b>
+          seed <b>{hex16(m.seed)}</b>
         </span>
         <span title="Длина каталога; 0 — маленькая карта">
           dirLen <b>{m.dir.length}</b>

@@ -205,7 +205,8 @@ describe('фаззинг против эталона', () => {
             if (e.type === 'del.hit') everDeleted.add(String(e.payload.key))
             if (e.type !== 'iter.next' && e.type !== 'iter.reread') continue
             const key = String(e.payload.key)
-            assert.ok(!yielded.has(key), `seed ${seed}: ${key} отдан дважды`)
+            // Удалённый и вставленный заново ключ — новая запись: спецификация разрешает отдать её ещё раз.
+            assert.ok(!yielded.has(key) || everDeleted.has(key), `seed ${seed}: ${key} отдан дважды`)
             yielded.set(key, Number(e.payload.val))
             // Отдано текущее значение — то, что лежит в карте на этом тике.
             assert.equal(contents(snap.world).get(key), Number(e.payload.val), `seed ${seed}: ${key} отдан со старым значением`)
@@ -339,8 +340,8 @@ describe('Swiss table: правила рантайма', () => {
     const groups = new Set(
       sim.world.lastKeys.map((k) => {
         const h = hashKey(k, m.seed)
-        const t = m.tables[m.dir[m.globalDepth === 0 ? 0 : h >>> (32 - m.globalDepth)]!]!
-        return `${t.id}:${(h >>> 7) & (t.groups.length - 1)}`
+        const t = m.tables[m.dir[m.globalDepth === 0 ? 0 : Number(h >> BigInt(64 - m.globalDepth))]!]!
+        return `${t.id}:${Number((h >> 7n) & BigInt(t.groups.length - 1))}`
       }),
     )
     assert.equal(groups.size, 1)

@@ -1,6 +1,6 @@
 import type { Ctx } from './ctx.ts'
 import { emit, pow2ceil, recordProbe } from './ctx.ts'
-import { dirIndex, h2, hashKey, isNaNKey, keyEqual, probeSeq, splitBit } from './hash.ts'
+import { HASH_BITS, dirIndex, h2, hashKey, hex16, isNaNKey, keyEqual, probeSeq, splitBit } from './hash.ts'
 import type { Group, Probe, Slot, SwissIter, SwissMap, Table, Yield } from './types.ts'
 import { CTRL_DELETED, CTRL_EMPTY, GROUP_SLOTS } from './types.ts'
 
@@ -12,7 +12,7 @@ import { CTRL_DELETED, CTRL_EMPTY, GROUP_SLOTS } from './types.ts'
  * split, installTableSplit, Iter.Next. Где модель отступает — сказано рядом.
  */
 
-const emptySlot = (): Slot => ({ ctrl: CTRL_EMPTY, key: null, val: null, hash: 0 })
+const emptySlot = (): Slot => ({ ctrl: CTRL_EMPTY, key: null, val: null, hash: 0n })
 export const newGroup = (): Group => ({ slots: Array.from({ length: GROUP_SLOTS }, emptySlot) })
 
 export const isFull = (ctrl: number) => ctrl < 0x80
@@ -34,7 +34,7 @@ export const tombstones = (t: Table) => maxGrowth(t.capacity) - t.used - t.growt
 export function createSwiss(ctx: Ctx, hint: number): SwissMap {
   const m: SwissMap = {
     used: 0,
-    seed: ctx.rng.u32(),
+    seed: ctx.rng.u64(),
     small: null,
     dir: [],
     globalDepth: 0,
@@ -72,15 +72,15 @@ function newTable(ctx: Ctx, capacity: number, index: number, localDepth: number)
   }
 }
 
-export function swissHash(ctx: Ctx, m: SwissMap, key: string): number {
+export function swissHash(ctx: Ctx, m: SwissMap, key: string): bigint {
   // NaN хэшируется случайно: иначе все NaN-ключи сваливались бы в одну группу.
-  return isNaNKey(key) ? ctx.rng.u32() : hashKey(key, m.seed)
+  return isNaNKey(key) ? ctx.rng.u64() : hashKey(key, m.seed)
 }
 
-export const tableFor = (m: SwissMap, hash: number): Table => m.tables[m.dir[dirIndex(hash, m.globalDepth)]!]!
+export const tableFor = (m: SwissMap, hash: bigint): Table => m.tables[m.dir[dirIndex(hash, m.globalDepth)]!]!
 
 /** Сравнить ключи у кандидатов matchH2 — с записью в след и счётчики. */
-function compareCandidates(ctx: Ctx, g: Group, probe: Probe, key: string, hash: number): number | null {
+function compareCandidates(ctx: Ctx, g: Group, probe: Probe, key: string, hash: bigint): number | null {
   for (const i of probe.match) {
     const eq = keyEqual(g.slots[i]!.key, key)
     probe.compared.push({ slot: i, eq })
@@ -106,7 +106,7 @@ export interface Loc {
 }
 
 /** Поиск ключа: matchH2 по группам последовательности проб до группы с empty. */
-export function swissFind(ctx: Ctx, m: SwissMap, key: string, hash: number): Loc | null {
+export function swissFind(ctx: Ctx, m: SwissMap, key: string, hash: bigint): Loc | null {
   if (m.dir.length === 0) {
     if (!m.small) return null
     const p = recordProbe(ctx, { table: null, group: 0, match: matchH2(m.small, h2(hash)), compared: [], stop: true })
@@ -146,7 +146,7 @@ export function swissHas(m: SwissMap, key: string): boolean {
   return findQuiet(m, key) !== null
 }
 
-function place(slot: Slot, key: string, val: number, hash: number) {
+function place(slot: Slot, key: string, val: number, hash: bigint) {
   slot.ctrl = h2(hash)
   slot.key = key
   slot.val = val
@@ -168,7 +168,7 @@ export function swissPut(ctx: Ctx, m: SwissMap, key: string, val: number): boole
   return putTable(ctx, m, key, val, hash, 0)
 }
 
-function putSmall(ctx: Ctx, m: SwissMap, key: string, val: number, hash: number): boolean {
+function putSmall(ctx: Ctx, m: SwissMap, key: string, val: number, hash: bigint): boolean {
   if (!m.small) {
     m.small = newGroup()
     emit(ctx, 'small.alloc', { impl: 'swiss' })
@@ -223,7 +223,7 @@ function uncheckedPut(t: Table, s: Slot) {
   throw new Error('uncheckedPut: в таблице нет места')
 }
 
-function putTable(ctx: Ctx, m: SwissMap, key: string, val: number, hash: number, attempt: number): boolean {
+function putTable(ctx: Ctx, m: SwissMap, key: string, val: number, hash: bigint, attempt: number): boolean {
   if (attempt > 8) throw new Error('putTable: таблица не растёт')
   ctx.trace.probes = []
   const t = tableFor(m, hash)
@@ -366,7 +366,7 @@ function split(ctx: Ctx, m: SwissMap, t: Table) {
   const right = newTable(ctx, t.capacity, -1, depth)
   const bit = splitBit(depth)
   for (const g of t.groups) {
-    for (const s of g.slots) if (isFull(s.ctrl)) uncheckedPut((s.hash & bit) === 0 ? left : right, s)
+    for (const s of g.slots) if (isFull(s.ctrl)) uncheckedPut((s.hash & bit) === 0n ? left : right, s)
   }
 
   // installTableSplit: если строк каталога на две половины не хватает — каталог удваивается.
@@ -394,7 +394,7 @@ function split(ctx: Ctx, m: SwissMap, t: Table) {
     capacity: t.capacity,
     depth,
     globalDepth: m.globalDepth,
-    bit: 32 - depth,
+    bit: HASH_BITS - depth,
   })
 }
 
@@ -445,8 +445,8 @@ export function swissDelete(ctx: Ctx, m: SwissMap, key: string): boolean {
 
   if (m.used === 0) {
     const old = m.seed
-    m.seed = ctx.rng.u32()
-    emit(ctx, 'seed.reset', { old, seed: m.seed, why: 'delete' })
+    m.seed = ctx.rng.u64()
+    emit(ctx, 'seed.reset', { old: hex16(old), seed: hex16(m.seed), why: 'delete' })
   }
   return true
 }
@@ -465,10 +465,10 @@ export function swissClear(ctx: Ctx, m: SwissMap) {
   m.clearSeq++
   m.tombstonePossible = false
   const old = m.seed
-  m.seed = ctx.rng.u32()
+  m.seed = ctx.rng.u64()
   ctx.trace.outcome = `карта пуста, но ${tables.length || (m.small ? 1 : 0)} ${tables.length ? 'таблиц(ы) остались' : 'группа осталась'} на месте`
   emit(ctx, 'clear', { was, capacity, tables: tables.length, small: m.dir.length === 0, impl: 'swiss' })
-  emit(ctx, 'seed.reset', { old, seed: m.seed, why: 'clear' })
+  emit(ctx, 'seed.reset', { old: hex16(old), seed: hex16(m.seed), why: 'clear' })
 }
 
 /** Таблицы, которые заменили, — мусор, если их не держит итератор. */
